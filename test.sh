@@ -21,3 +21,6 @@ function check() {
 
 check 0 0
 check 42 42
+check 1 '1+0'
+check 42 '11+22+9'
+check 42 '11  +  22 +    9'
