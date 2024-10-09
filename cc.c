@@ -31,74 +31,214 @@ typedef enum TokenKind {
   TK_INVALID = 0,
   /* 6.4.4 Constants */
   TK_CONSTANT,
-  /* 6.4.6 Punctuators */
-  TK_LBRACKET,       /* '[' */
-  TK_RBRACKET,       /* ']' */
-  TK_LPAREN,         /* '(' */
-  TK_RPAREN,         /* ')' */
-  TK_LBRACE,         /* '{' */
-  TK_RBRACE,         /* '}' */
-  TK_DOT,            /* '.' */
-  TK_ARROW,          /* '->' */
-  TK_INCR,           /* '++' */
-  TK_DECR,           /* '--' */
-  TK_AMPERSAND,      /* '&' */
-  TK_ASTERISK,       /* '*' */
-  TK_PLUS,           /* '+' */
-  TK_MINUS,          /* '-' */
-  TK_BITNOT,         /* '~' */
-  TK_NOT,            /* '!' */
-  TK_DIVIDE,         /* '/' */
-  TK_MOD,            /* '%' */
-  TK_LSHIFT,         /* '<<' */
-  TK_RSHIFT,         /* '>>' */
-  TK_LT,             /* '<' */
-  TK_GT,             /* '>' */
-  TK_LE,             /* '<=' */
-  TK_GE,             /* '>=' */
-  TK_EQ,             /* '==' */
-  TK_NE,             /* '!=' */
-  TK_XOR,            /* '^' */
-  TK_BITOR,          /* '|' */
-  TK_AND,            /* '&&' */
-  TK_OR,             /* '||' */
-  TK_QUESTION,       /* '?' */
-  TK_COLON,          /* ':' */
-  TK_SEMICOLON,      /* ';' */
-  TK_ELIPSIS,        /* '...' */
-  TK_ASSIGN,         /* '=' */
-  TK_TIMESEQ,        /* '*=' */
-  TK_DIVIDEEQ,       /* '/=' */
-  TK_MODEQ,          /* '%=' */
-  TK_PLUSEQ,         /* '+=' */
-  TK_MINUSEQ,        /* '-=' */
-  TK_LSHIFTEQ,       /* '<<=' */
-  TK_RSHIFTEQ,       /* '>>=' */
-  TK_ANDEQ,          /* '&=' */
-  TK_XOREQ,          /* '^=' */
-  TK_OREQ,           /* '|=' */
-  TK_COMMA,          /* ',' */
-  TK_HASH,           /* '#' */
-  TK_HASH2,          /* '##' */
-  TK_LBRACKET_ALIAS, /* '<:' */
-  TK_RBRACKET_ALIAS, /* ':>' */
-  TK_LBRACE_ALIAS,   /* '<%' */
-  TK_RBRACE_ALIAS,   /* '%>' */
-  TK_HASH_ALIAS,     /* '%:' */
-  TK_HASH2_ALIAS,    /* '%:%:' */
-  TK_EOF,
+
+/* 6.4.6 Punctuators */
+#define PUNCTUATORS(X)                                                         \
+  X(LBRACKET, "[")                                                             \
+  X(RBRACKET, "]")                                                             \
+  X(LPAREN, "(")                                                               \
+  X(RPAREN, ")")                                                               \
+  X(LBRACE, "{")                                                               \
+  X(RBRACE, "}")                                                               \
+  X(DOT, ".")                                                                  \
+  X(ARROW, "->")                                                               \
+  X(INCR, "++")                                                                \
+  X(DECR, "--")                                                                \
+  X(AMPERSAND, "&")                                                            \
+  X(ASTERISK, "*")                                                             \
+  X(PLUS, "+")                                                                 \
+  X(MINUS, "-")                                                                \
+  X(BITNOT, "~")                                                               \
+  X(NOT, "!")                                                                  \
+  X(DIVIDE, "/")                                                               \
+  X(MOD, "%")                                                                  \
+  X(LSHIFT, "<<")                                                              \
+  X(RSHIFT, ">>")                                                              \
+  X(LT, "<")                                                                   \
+  X(GT, ">")                                                                   \
+  X(LE, "<=")                                                                  \
+  X(GE, ">=")                                                                  \
+  X(EQ, "==")                                                                  \
+  X(NE, "!=")                                                                  \
+  X(XOR, "^")                                                                  \
+  X(BITOR, "|")                                                                \
+  X(AND, "&&")                                                                 \
+  X(OR, "||")                                                                  \
+  X(QUESTION, "?")                                                             \
+  X(COLON, ":")                                                                \
+  X(SEMICOLON, ";")                                                            \
+  X(ELIPSIS, "...")                                                            \
+  X(ASSIGN, "=")                                                               \
+  X(TIMESEQ, "*=")                                                             \
+  X(DIVIDEEQ, "/=")                                                            \
+  X(MODEQ, "%=")                                                               \
+  X(PLUSEQ, "+=")                                                              \
+  X(MINUSEQ, "-=")                                                             \
+  X(LSHIFTEQ, "<<=")                                                           \
+  X(RSHIFTEQ, ">>=")                                                           \
+  X(ANDEQ, "&=")                                                               \
+  X(XOREQ, "^=")                                                               \
+  X(OREQ, "|=")                                                                \
+  X(COMMA, ",")                                                                \
+  X(HASH, "#")                                                                 \
+  X(HASH2, "##")                                                               \
+  X(LBRACKET_ALIAS, "<:")                                                      \
+  X(RBRACKET_ALIAS, ":>")                                                      \
+  X(LBRACE_ALIAS, "<%")                                                        \
+  X(RBRACE_ALIAS, "%>")                                                        \
+  X(HASH_ALIAS, "%:")                                                          \
+  X(HASH2_ALIAS, "%:%:")
+
+/* 6.4.1 Keywords */
+#define KEYWORDS(X)                                                            \
+  X(AUTO, "auto")                                                              \
+  X(IF, "if")                                                                  \
+  X(UNSIGNED, "unsigned")                                                      \
+  X(BREAK, "break")                                                            \
+  X(INLINE, "inline")                                                          \
+  X(VOID, "void")                                                              \
+  X(CASE, "case")                                                              \
+  X(INT, "int")                                                                \
+  X(VOLATILE, "volatile")                                                      \
+  X(CHAR, "char")                                                              \
+  X(LONG, "long")                                                              \
+  X(WHILE, "while")                                                            \
+  X(CONST, "const")                                                            \
+  X(REGISTER, "register")                                                      \
+  X(ALIGNAS, "_Alignas")                                                       \
+  X(CONTINUE, "continue")                                                      \
+  X(RESTRICT, "restrict")                                                      \
+  X(ALIGNOF, "_Alignof")                                                       \
+  X(DEFAULT, "default")                                                        \
+  X(RETURN, "return")                                                          \
+  X(ATOMIC, "_Atomic")                                                         \
+  X(DO, "do")                                                                  \
+  X(SHORT, "short")                                                            \
+  X(BOOL, "_Bool")                                                             \
+  X(DOUBLE, "double")                                                          \
+  X(SIGNED, "signed")                                                          \
+  X(COMPLEX, "_Complex")                                                       \
+  X(ELSE, "else")                                                              \
+  X(SIZEOF, "sizeof")                                                          \
+  X(GENERIC, "_Generic")                                                       \
+  X(ENUM, "enum")                                                              \
+  X(STATIC, "static")                                                          \
+  X(IMAGINARY, "_Imaginary")                                                   \
+  X(EXTERN, "extern")                                                          \
+  X(STRUCT, "struct")                                                          \
+  X(NORETURN, "_Noreturn")                                                     \
+  X(FLOAT, "float")                                                            \
+  X(SWITCH, "switch")                                                          \
+  X(STATIC_ASSERT, "_Static_assert")                                           \
+  X(FOR, "for")                                                                \
+  X(TYPEDEF, "typedef")                                                        \
+  X(THREAD_LOCAL, "_Thread_local")                                             \
+  X(GOTO, "goto")                                                              \
+  X(UNION, "union")
+
+#define TK_NAME(NAME, LITERAL) TK_##NAME,
+
+  PUNCTUATORS(TK_NAME) KEYWORDS(TK_NAME) TK_EOF
 } TokenKind;
 
-typedef struct Token {
+typedef struct TokenData {
   TokenKind kind;
   u64 off; /* offset into the buffer of the buffer of the program source */
   u64 len; /* length of the token */
   i64 line;
   i64 column;
-} Token;
+} TokenData;
 
-Token *make_token(TokenKind kind, u64 off, u64 len, i64 line, i64 column) {
-  Token *tok = malloc(sizeof(Token));
+typedef TokenData *Token;
+
+typedef struct Expr {
+  i64 integer;
+} Expr;
+
+typedef struct Stmt {
+  enum {
+    SK_INVALID = 0,
+    SK_RET,
+  } kind;
+  /* return statement */
+  union {
+    Expr *ret;
+  } inner;
+} Stmt;
+
+typedef struct IRJmp {
+  enum {
+    JMP_INV = 0,
+    JMP_RET,
+  } kind;
+} IRJmp;
+
+typedef struct BasicBlockData {
+  /* Id of the current basic block */
+  u32 id;
+  /* Name of the current basic block */
+  char name[64];
+
+  /* Terminator instruction of the current block */
+  IRJmp jmp;
+
+  /* Used in the cfg. */
+  struct BasicBlockData *cfg_next_bb;
+  /* Used in the hash table. */
+  struct BasicBlockData *hash_next_bb;
+} BasicBlockData;
+
+typedef BasicBlockData *BasicBlock;
+
+static u32 hash(const char *s) {
+  u32 h;
+
+  for (h = 0; *s; ++s)
+    h = *s + 17 * h;
+  return h;
+}
+
+BasicBlock make_bb(u32 id, const char *name) {
+  BasicBlock bb = malloc(sizeof(BasicBlockData));
+  memset(bb, 0, sizeof(BasicBlockData));
+  bb->id = id;
+  strcpy(bb->name, name);
+  return bb;
+}
+
+static BasicBlock find_or_make_bb(const char *name) {
+  static u32 bbid = 0;
+  static BasicBlock basicblocks[8192];
+  static u32 nbb = 0;
+  u32 h = hash(name) & 8191;
+  BasicBlock bb = NULL;
+  for (bb = basicblocks[h]; bb; bb = bb->hash_next_bb) {
+    if (strcmp(bb->name, name) == 0)
+      return bb;
+  }
+
+  bb = make_bb(nbb++, name);
+  bb->hash_next_bb = basicblocks[h];
+  basicblocks[h] = bb;
+  return bb;
+}
+
+void gen_ir_for_stmt(BasicBlock bb, Stmt *stmt) {
+  switch (stmt->kind) {
+  case SK_RET: {
+    IRJmp jmp = {
+        .kind = JMP_RET,
+    };
+    bb->jmp = jmp;
+    break;
+  }
+  default:
+    fatalf("unsupported stmt (%d)\n", stmt->kind);
+  }
+}
+
+Token make_token(TokenKind kind, u64 off, u64 len, i64 line, i64 column) {
+  Token tok = malloc(sizeof(TokenData));
   if (!tok)
     fatalf("failed to allocate memory\n");
 
@@ -109,9 +249,6 @@ Token *make_token(TokenKind kind, u64 off, u64 len, i64 line, i64 column) {
   tok->column = column;
   return tok;
 }
-
-VECTOR_GENERATE_TYPE_NAME(Token *, Tokens, tokens);
-VECTOR_GENERATE_TYPE_NAME_IMPL(Token *, Tokens, tokens);
 
 static inline bool startswith(const char *p1, const char *p2) {
   return strncmp(p1, p2, strlen(p2)) == 0;
@@ -130,8 +267,8 @@ static void consume_whitespace(const char **p, i64 *line, i64 *col) {
   }
 }
 
-static Token *read_constant(const char *prog, const char **p, i64 *line,
-                            i64 *col) {
+static Token read_constant(const char *prog, const char **p, i64 *line,
+                           i64 *col) {
   if (!isdigit((*p)[0]))
     return NULL;
 
@@ -142,251 +279,281 @@ static Token *read_constant(const char *prog, const char **p, i64 *line,
     ++(*p);
   }
 
-  Token *tok =
+  Token tok =
       make_token(TK_CONSTANT, (startp - prog), (*p - startp), *line, start_col);
 
   return tok;
 }
 
-static Token *read_punctuator(const char *prog, const char **p, i64 *line,
-                              i64 *col) {
-  u64 tok_len;
+#define MIN(a, b) (a < b ? (a) : (b))
+
+static Token read_keywords(const char *prog, const char **p, i64 *line,
+                           i64 *col) {
+  const char *startp = *p;
+  const i64 start_col = *col;
+  char keyword[64] = {'\0'};
+
+  while (isalpha((*p)[0]) || (*p)[0] == '_') {
+    ++(*col);
+    ++(*p);
+  }
+
+  memcpy(keyword, startp, MIN(63, (*p - startp)));
   TokenKind kind;
+  typedef struct KwPair {
+    const char *literal;
+    TokenKind kind;
+  } KwPair;
+
+  const KwPair kw_list[] = {
+#define KW_PAIR(NAME, LITERAL) {.literal = LITERAL, .kind = TK_##NAME},
+      KEYWORDS(KW_PAIR)};
+
+  u64 nkws = sizeof(kw_list) / sizeof(KwPair);
+  Token tok = NULL;
+
+  for (int i = 0; i < nkws; ++i) {
+    if (startswith(keyword, kw_list[i].literal)) {
+      kind = kw_list[i].kind;
+      tok = make_token(kind, (startp - prog), (*p - startp), *line, start_col);
+      break;
+    }
+  }
+
+  if (!tok) {
+    /* Restore pointers. */
+    *p = startp;
+    *col = start_col;
+  }
+
+  return tok;
+}
+
+static Token read_punctuator(const char *prog, const char **p, i64 *line,
+                             i64 *col) {
+  TokenKind kind;
+
+  static const u64 toks_len[] = {
+#define TOK_LEN(NAME, LITERAL) [TK_##NAME] = strlen(LITERAL),
+      PUNCTUATORS(TOK_LEN)};
+
   switch ((*p)[0]) {
   case '[':
     kind = TK_LBRACKET;
-    tok_len = 1;
     break;
   case ']':
     kind = TK_RBRACKET;
-    tok_len = 1;
     break;
   case '(':
     kind = TK_LPAREN;
-    tok_len = 1;
     break;
   case ')':
     kind = TK_RPAREN;
-    tok_len = 1;
     break;
   case '{':
     kind = TK_LBRACE;
-    tok_len = 1;
     break;
   case '}':
     kind = TK_RBRACE;
-    tok_len = 1;
     break;
   case '~':
     kind = TK_BITNOT;
-    tok_len = 1;
     break;
   case '?':
     kind = TK_QUESTION;
-    tok_len = 1;
     break;
   case ';':
     kind = TK_SEMICOLON;
-    tok_len = 1;
     break;
   case ',':
     kind = TK_COMMA;
-    tok_len = 1;
     break;
   case '.':
     if (startswith(*p, "...")) {
       kind = TK_ELIPSIS;
-      tok_len = 3;
     } else {
       kind = TK_DOT;
-      tok_len = 1;
     }
     break;
   case '&':
     if (startswith(*p, "&=")) {
       kind = TK_ANDEQ;
-      tok_len = 2;
     } else if (startswith(*p, "&&")) {
       kind = TK_AND;
-      tok_len = 2;
     } else {
       kind = TK_AMPERSAND;
-      tok_len = 1;
     }
     break;
   case '*':
     if (startswith(*p, "*=")) {
       kind = TK_TIMESEQ;
-      tok_len = 2;
     } else {
       kind = TK_ASTERISK;
-      tok_len = 1;
     }
     break;
   case '+':
     if (startswith(*p, "++")) {
       kind = TK_INCR;
-      tok_len = 2;
     } else if (startswith(*p, "+=")) {
       kind = TK_PLUSEQ;
-      tok_len = 2;
     } else {
       kind = TK_PLUS;
-      tok_len = 1;
     }
     break;
   case '-':
     if (startswith(*p, "->")) {
       kind = TK_ARROW;
-      tok_len = 2;
     } else if (startswith(*p, "--")) {
       kind = TK_DECR;
-      tok_len = 2;
     } else if (startswith(*p, "-=")) {
       kind = TK_MINUSEQ;
-      tok_len = 2;
     } else {
       kind = TK_MINUS;
-      tok_len = 1;
     }
     break;
   case '!':
     if (startswith(*p, "!=")) {
       kind = TK_NE;
-      tok_len = 2;
     } else {
       kind = TK_NOT;
-      tok_len = 1;
     }
     break;
   case '/':
     if (startswith(*p, "/=")) {
       kind = TK_DIVIDEEQ;
-      tok_len = 2;
     } else {
       kind = TK_DIVIDE;
-      tok_len = 1;
     }
     break;
   case '%':
     if (startswith(*p, "%=")) {
       kind = TK_MODEQ;
-      tok_len = 2;
     } else if (startswith(*p, "%>")) {
       kind = TK_RBRACE_ALIAS;
-      tok_len = 2;
     } else if (startswith(*p, "%:%:")) {
       kind = TK_HASH2_ALIAS;
-      tok_len = 4;
     } else if (startswith(*p, "%:")) {
       kind = TK_HASH_ALIAS;
-      tok_len = 2;
     } else {
       kind = TK_MOD;
-      tok_len = 1;
     }
     break;
   case '<':
     if (startswith(*p, "<<=")) {
       kind = TK_LSHIFTEQ;
-      tok_len = 3;
     } else if (startswith(*p, "<<")) {
       kind = TK_LSHIFT;
-      tok_len = 2;
     } else if (startswith(*p, "<=")) {
       kind = TK_LE;
-      tok_len = 2;
     } else if (startswith(*p, "<:")) {
       kind = TK_LBRACKET_ALIAS;
-      tok_len = 2;
     } else if (startswith(*p, "<%")) {
       kind = TK_LBRACE_ALIAS;
-      tok_len = 2;
     } else {
       kind = TK_LT;
-      tok_len = 1;
     }
     break;
   case '>':
     if (startswith(*p, ">>=")) {
       kind = TK_RSHIFTEQ;
-      tok_len = 3;
     } else if (startswith(*p, ">>")) {
       kind = TK_RSHIFT;
-      tok_len = 2;
     } else if (startswith(*p, ">=")) {
       kind = TK_GE;
-      tok_len = 2;
     } else {
       kind = TK_GT;
-      tok_len = 1;
     }
     break;
   case '=':
     if (startswith(*p, "==")) {
       kind = TK_EQ;
-      tok_len = 2;
     } else {
       kind = TK_ASSIGN;
-      tok_len = 1;
     }
     break;
   case '^':
     if (startswith(*p, "^=")) {
       kind = TK_XOREQ;
-      tok_len = 2;
     } else {
       kind = TK_XOR;
-      tok_len = 1;
     }
     break;
   case '|':
     if (startswith(*p, "|=")) {
       kind = TK_OREQ;
-      tok_len = 2;
     } else if (startswith(*p, "||")) {
       kind = TK_OR;
-      tok_len = 2;
     } else {
       kind = TK_BITOR;
-      tok_len = 1;
     }
     break;
   case ':':
     if (startswith(*p, ":>")) {
       kind = TK_RBRACKET_ALIAS;
-      tok_len = 2;
     } else {
       kind = TK_COLON;
-      tok_len = 1;
     }
     break;
   case '#':
     if (startswith(*p, "##")) {
       kind = TK_HASH2;
-      tok_len = 2;
     } else {
       kind = TK_HASH;
-      tok_len = 1;
     }
     break;
   default:
     return NULL;
   }
 
-  Token *tok = make_token(kind, (*p - prog), tok_len, *line, *col);
+  u64 tok_len = toks_len[kind];
+  Token tok = make_token(kind, (*p - prog), tok_len, *line, *col);
   (*p) += tok_len;
   (*col) += tok_len;
   return tok;
 }
 
+static Expr *parse_expr(const char *prog, Token **tok_ref) {
+  Token tok = **tok_ref;
+  if (tok->kind != TK_CONSTANT)
+    return NULL;
+
+  Expr *const_expr = malloc(sizeof(Expr));
+  const_expr->integer = atoi(&prog[tok->off]);
+  ++(*tok_ref);
+  return const_expr;
+}
+
+static Stmt *parse_stmt(const char *prog, Token **tok_ref) {
+  Token tok = **tok_ref;
+  if (tok->kind != TK_RETURN)
+    fatalf("unexpected token (%d), TK_RETURN expected\n", tok->kind);
+
+  Stmt *ret_stmt = malloc(sizeof(Stmt));
+  ret_stmt->kind = SK_RET;
+  ++(*tok_ref);
+  Expr *expr = parse_expr(prog, tok_ref);
+  if (expr)
+    ret_stmt->inner.ret = expr;
+  return ret_stmt;
+}
+
 static int flag_debug_dump_tokens = 0;
+static int flag_debug_only_tokenize = 0;
+static int flag_debug_dump_ast = 0;
+static int flag_debug_only_parse = 0;
+static int flag_debug_dump_ir = 0;
+static int flag_debug_only_dump_ir = 0;
 
 static void parse_args(int argc, char **argv) {
   int c;
   int option_index = 0;
   static struct option long_options[] = {
+      {"debug-only-tokenize", no_argument, &flag_debug_only_tokenize, 1},
       {"debug-dump-tokens", no_argument, &flag_debug_dump_tokens, 1},
+      {"debug-only-parse", no_argument, &flag_debug_only_parse, 1},
+      {"debug-dump-ast", no_argument, &flag_debug_dump_ast, 1},
+      {"debug-only-dump-ir", no_argument, &flag_debug_only_dump_ir, 1},
+      {"debug-dump-ir", no_argument, &flag_debug_dump_ir, 1},
       {0, 0, 0, 0},
   };
 
@@ -400,22 +567,48 @@ static void parse_args(int argc, char **argv) {
   }
 }
 
+void debug_dump_tokens(const char *prog, Vector *tokens) {
+  for (int i = 0; i < vector_len(tokens); ++i) {
+    Token tok = vector_get(tokens, i);
+    char literal[100];
+    if (tok->kind != TK_EOF) {
+      memcpy(literal, &prog[tok->off], tok->len);
+      literal[tok->len] = '\0';
+    }
+    switch (tok->kind) {
+    case TK_CONSTANT:
+      printf("TK_CONSTANT '%s' line: %ld column: %ld\n", literal, tok->line,
+             tok->column);
+      break;
+    case TK_EOF:
+      printf("TK_EOF line: %ld column: %ld\n", tok->line, tok->column);
+      break;
+    default:
+      printf("TK_PUNCTUATOR '%s' line: %ld column: %ld\n", literal, tok->line,
+             tok->column);
+      break;
+    }
+  }
+}
+
 int main(int argc, char *argv[]) {
   parse_args(argc, argv);
 
   if (optind >= argc)
     fatalf("incorrect number of arguments\n");
 
-  // printf("    .global main\n");
-  // printf("main:\n");
+  if (flag_debug_only_parse && flag_debug_only_tokenize)
+    fatalf("only one of `--debug-only-tokenize` and `--debug-only-parse` can "
+           "be specified\n");
 
+  /* Tokenizer ... */
   /* p is a null-terminated string. */
   const char *prog = argv[optind];
   const char *p = argv[optind];
   i64 line = 1, column = 0;
-  Tokens *tokens = make_tokens();
+  Vector *tokens = make_vector();
   while (p[0]) {
-    Token *tok;
+    Token tok;
     /*
      * token:
      *   keyword
@@ -426,15 +619,21 @@ int main(int argc, char *argv[]) {
      */
     consume_whitespace(&p, &line, &column);
 
+    /* Try to read keyword */
+    if ((tok = read_keywords(prog, &p, &line, &column)) != NULL) {
+      vector_append(tokens, tok);
+      continue;
+    }
+
     /* Try to read constant (number literal) */
     if ((tok = read_constant(prog, &p, &line, &column)) != NULL) {
-      tokens_append(tokens, tok);
+      vector_append(tokens, tok);
       continue;
     }
 
     /* Try to read punctuator */
     if ((tok = read_punctuator(prog, &p, &line, &column)) != NULL) {
-      tokens_append(tokens, tok);
+      vector_append(tokens, tok);
       continue;
     }
 
@@ -442,32 +641,55 @@ int main(int argc, char *argv[]) {
       fatalf("failed to parse the rest of the program: '%s'\n", p);
   }
 
-  tokens_append(tokens, make_token(TK_EOF, 0, 0, -1, -1));
+  vector_append(tokens, make_token(TK_EOF, 0, 0, -1, -1));
 
-  if (flag_debug_dump_tokens) {
-    for (int i = 0; i < tokens_len(tokens); ++i) {
-      Token *tok = tokens_get(tokens, i);
-      char literal[100];
-      if (tok->kind != TK_EOF) {
-        memcpy(literal, &prog[tok->off], tok->len);
-        literal[tok->len] = '\0';
-      }
-      switch (tok->kind) {
-      case TK_CONSTANT:
-        printf("TK_CONSTANT '%s' line: %ld column: %ld\n", literal, tok->line,
-               tok->column);
-        break;
-      case TK_EOF:
-        printf("TK_EOF line: %ld column: %ld\n", tok->line, tok->column);
+  if (flag_debug_dump_tokens)
+    debug_dump_tokens(prog, tokens);
+
+  if (flag_debug_only_tokenize)
+    exit(0);
+
+  /* Parser... */
+  Token *tok = (Token *)vector_data(tokens);
+  Stmt *stmt;
+  while ((*tok)->kind != TK_EOF) {
+    stmt = parse_stmt(prog, &tok);
+  }
+
+  /* Generate IR ... */
+  BasicBlock bb = find_or_make_bb("start");
+  gen_ir_for_stmt(bb, stmt);
+  if (flag_debug_dump_ir) {
+    BasicBlock curbb = NULL;
+    for (curbb = bb; curbb; curbb = bb->cfg_next_bb) {
+      printf("%s:\n", curbb->name);
+
+      switch (curbb->jmp.kind) {
+      case JMP_RET:
+        printf("  ret\n");
         break;
       default:
-        printf("TK_PUNCTUATOR '%s' line: %ld column: %ld\n", literal, tok->line,
-               tok->column);
+        printf("  unknown jmp kind (%d)\n", curbb->jmp.kind);
         break;
       }
     }
   }
 
-  // printf("    retq\n");
+  if (flag_debug_only_dump_ir)
+    exit(0);
+
+  /* CodeGen ... */
+  BasicBlock curbb = NULL;
+  for (curbb = bb; curbb; curbb = bb->cfg_next_bb) {
+    /* TODO: Add support for emitting instructions. */
+    switch (curbb->jmp.kind) {
+    case JMP_RET:
+      printf("\tret\n");
+      break;
+    default:
+      fatalf("unrecognized jmp type: %d\n", curbb->jmp.kind);
+    }
+  }
+
   return 0;
 }

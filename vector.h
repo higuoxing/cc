@@ -72,4 +72,6 @@
     free(vec);                                                                 \
   }
 
+VECTOR_GENERATE_TYPE_NAME(void *, Vector, vector);
+
 #endif /* _VECTOR_H_ */

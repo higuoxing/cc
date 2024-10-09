@@ -1,5 +1,11 @@
-cc: cc.c vector.h
-	clang cc.c -o cc
+SOURCES = $(wildcard *.c)
+HEADERS = $(wildcard *.h)
+cc: $(SOURCES) $(HEADERS)
+	clang $(SOURCES) -o cc
 
 check: cc
 	./test.sh
+
+.PHONY: clean
+clean:
+	rm -f cc
