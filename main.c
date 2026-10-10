@@ -158,11 +158,97 @@ Token lexer_next_token(Lexer *l) {
   return tok;
 }
 
+typedef struct {
+  Lexer lexer;
+  Token current;
+} Parser;
+
+void parser_advance(Parser *p) {
+  p->current = lexer_next_token(&p->lexer);
+}
+
+void parser_init(Parser *p, const char *filename, const char *source) {
+  lexer_init(&p->lexer, filename, source);
+  parser_advance(p);
+}
+
+typedef enum {
+  AST_RETURN,
+} AstType;
+
+typedef struct {
+	AstType type;
+} AstNode;
+
+void parse_error(Parser *p, const char *errmsg) {
+  fprintf(stderr, "%s:%d:%d: error: %s\n", p->lexer.filename, p->current.line,
+          p->current.col, errmsg);
+  exit(1);
+}
+
+AstNode *parse_return_stmt(Parser *p) {
+  AstNode *ast;
+
+  if (p->current.type != TOKEN_RETURN)
+    parse_error(p, "expect 'return'");
+
+  // Consume 'return'
+  parser_advance(p);
+
+  if (p->current.type != TOKEN_SEMICOLON)
+    parse_error(p, "expect ';' after return");
+
+  // Consume ';'
+  parser_advance(p);
+
+  ast = (AstNode *)malloc(sizeof(AstNode));
+  ast->type = AST_RETURN;
+  return ast;
+}
+
+AstNode *parse_stmt(Parser *p) {
+  if (p->current.type == TOKEN_RETURN) {
+    return parse_return_stmt(p);
+  }
+
+  parse_error(p, "failed to parse statement");
+  return NULL;
+}
+
+void codegen_stmt(AstNode *ast) {
+  switch (ast->type) {
+  case AST_RETURN:
+    printf("	movl $0, %%eax\n");
+    printf("	ret\n");
+    break;
+  default:
+    fprintf(stderr, "unknown AST node\n");
+    exit(1);
+  }
+}
+
+void codegen(AstNode *ast) {
+  printf("	.globl main\n");
+  printf("main:\n");
+
+  codegen_stmt(ast);
+}
+
+void dump_ast(AstNode *ast) {
+  switch (ast->type) {
+  case AST_RETURN:
+    printf("RETURN\n");
+    break;
+  default:
+    fprintf(stderr, "unknown ast node\n");
+    exit(1);
+  }
+}
+
 int main(int argc, char **argv) {
   const char *source;
   const char *filename;
-  Lexer lex;
-  Token tok;
+  Parser p;
 
   if (argc != 2) {
     fprintf(stderr, "Usage: %s <filename>\n", argv[0]);
@@ -172,12 +258,9 @@ int main(int argc, char **argv) {
   filename = argv[1];
   source = read_source(filename);
 
-  lexer_init(&lex, filename, source);
+  parser_init(&p, filename, source);
 
-  tok = lexer_next_token(&lex);
-  printf("%d\n", tok.type);
-  tok = lexer_next_token(&lex);
-  printf("%d\n", tok.type);
+  codegen(parse_stmt(&p));
 
   return 0;
 }

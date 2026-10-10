@@ -16,4 +16,7 @@ $(TARGET): $(OBJS)
 clean:
 	rm -f $(OBJS) $(TARGET)
 
-.PHONY: all clean
+test: $(TARGET)
+	./test.sh
+
+.PHONY: all test clean
