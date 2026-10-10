@@ -106,6 +106,7 @@ typedef enum {
   TOKEN_UNKNOW = -1,
   TOKEN_EOF = 0,
   TOKEN_RETURN,
+  TOKEN_INT_LITERAL,
   TOKEN_SEMICOLON,
 } TokenType;
 
@@ -115,6 +116,7 @@ typedef struct {
   int len;
   int line;
   int col;
+  int64_t int_literal_val;
 } Token;
 
 Token lexer_next_token(Lexer *l) {
@@ -138,6 +140,22 @@ Token lexer_next_token(Lexer *l) {
     tok.type = TOKEN_SEMICOLON;
     tok.len = 1;
     lexer_advance(l);
+    return tok;
+  }
+
+  if (isdigit(*l->cursor)) {
+    int64_t int_literal_val;
+
+    int_literal_val = 0;
+
+    while (isdigit(*l->cursor)) {
+      int_literal_val = int_literal_val * 10 + (*l->cursor - '0');
+      lexer_advance(l);
+    }
+
+    tok.type = TOKEN_INT_LITERAL;
+    tok.len = (int)(l->cursor - tok.start);
+    tok.int_literal_val = int_literal_val;
     return tok;
   }
 
@@ -174,10 +192,20 @@ void parser_init(Parser *p, const char *filename, const char *source) {
 
 typedef enum {
   AST_RETURN,
+  AST_INT_LITERAL,
 } AstType;
 
-typedef struct {
-	AstType type;
+typedef struct AstNode {
+  AstType type;
+  union {
+    struct {
+      struct AstNode *expr;
+    } ret;
+
+    struct {
+      int64_t val;
+    } int_literal;
+  } d;
 } AstNode;
 
 void parse_error(Parser *p, const char *errmsg) {
@@ -186,8 +214,25 @@ void parse_error(Parser *p, const char *errmsg) {
   exit(1);
 }
 
+AstNode *parse_expr(Parser *p) {
+  AstNode *expr;
+
+  if (p->current.type == TOKEN_INT_LITERAL) {
+    expr = (AstNode *)malloc(sizeof(AstNode));
+    expr->type = AST_INT_LITERAL;
+    expr->d.int_literal.val = p->current.int_literal_val;
+
+    // Consume integer literal
+    parser_advance(p);
+    return expr;
+  }
+
+  return NULL;
+}
+
 AstNode *parse_return_stmt(Parser *p) {
   AstNode *ast;
+  AstNode *ret_expr;
 
   if (p->current.type != TOKEN_RETURN)
     parse_error(p, "expect 'return'");
@@ -195,14 +240,18 @@ AstNode *parse_return_stmt(Parser *p) {
   // Consume 'return'
   parser_advance(p);
 
-  if (p->current.type != TOKEN_SEMICOLON)
-    parse_error(p, "expect ';' after return");
+  // Consume expr in return stmt.
+  ret_expr = parse_expr(p);
 
+  if (p->current.type != TOKEN_SEMICOLON) {
+    parse_error(p, "expect ';'");
+  }
   // Consume ';'
   parser_advance(p);
 
   ast = (AstNode *)malloc(sizeof(AstNode));
   ast->type = AST_RETURN;
+  ast->d.ret.expr = ret_expr;
   return ast;
 }
 
@@ -218,7 +267,10 @@ AstNode *parse_stmt(Parser *p) {
 void codegen_stmt(AstNode *ast) {
   switch (ast->type) {
   case AST_RETURN:
-    printf("	movl $0, %%eax\n");
+    if (ast->d.ret.expr)
+      printf("	movl $%d, %%eax\n", (int)ast->d.ret.expr->d.int_literal.val);
+    else
+      printf("	movl $0, %%eax\n");
     printf("	ret\n");
     break;
   default:

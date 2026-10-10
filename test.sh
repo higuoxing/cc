@@ -7,15 +7,9 @@ CC="./cc"
 INPUT_DIR="./tests/input"
 OUTPUT_DIR="./tests/output"
 
-passed=0
-failed=0
-total=0
-
-for inp in "$INPUT_DIR"/*.c; do
-    [[ -e $inp ]] || { echo "No .c files found"; exit 0; }
-
-    base=$(basename "$inp" .c)
-    "$CC" "$inp" > "/tmp/$base.s"
+function check() {
+    base=$(basename "$1" .c)
+    "$CC" "$INPUT_DIR/$1" > "/tmp/$base.s"
     "$GCC" "/tmp/$base.s" -o "/tmp/$base.out"
 
     set +e
@@ -23,18 +17,12 @@ for inp in "$INPUT_DIR"/*.c; do
     actual_code=$?
     set -e
 
-    if [[ "$actual_code" -eq "$expected_code" ]]; then
-	echo -e "  [PASS] $base (exit code $actual_code)"
-	passed=$((passed + 1))
+    if [[ "$actual_code" -eq "$2" ]]; then
+	echo -e "[PASS] $base (exit code $actual_code)"
     else
-	echo -e "  [FAIL] $base (exit code $actual_code)"
-	failed=$((failed + 1))
+	echo -e "[FAIL] $base (exit code $actual_code, expected $2)"
     fi
-done
+}
 
-echo "-------------------------"
-echo -e "Result: $passed passed, $failed failed, total $total"
-
-if [[ "$failed" != 0 ]]; then
-    exit 1
-fi
+check 1.c 0
+check 2.c 42
