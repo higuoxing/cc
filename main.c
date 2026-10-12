@@ -16,10 +16,12 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-#include <ctype.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+
+#include "parser.h"
+#include "codegen.h"
 
 char *read_source(const char *path) {
   FILE *file;
@@ -56,251 +58,9 @@ char *read_source(const char *path) {
   return buf;
 }
 
-typedef struct {
-  const char *filename;
-  const char *source;
-  const char *cursor;
-  const char *line_start;
-  int line;
-} Lexer;
-
-void lexer_init(Lexer *l, const char *filename, const char *source) {
-  l->filename = filename;
-  l->source = source;
-  l->cursor = source;
-  l->line_start = source;
-  l->line = 1;
-}
-
-int lexer_column(const Lexer *l) {
-  return (int)(l->cursor - l->line_start) + 1;
-}
-
-void lexer_advance(Lexer *l) {
-  char c = *l->cursor;
-  if (c == '\0') {
-    return;
-  }
-
-  l->cursor++;
-
-  if (c == '\r' || c == '\n') {
-    // Handle \r\n
-    if (c == '\r' && *l->cursor == '\n') {
-      l->cursor++;
-    }
-
-    l->line++;
-    l->line_start = l->cursor;
-  }
-}
-
-void skip_whitespace(Lexer *l) {
-  while (*l->cursor == ' ' || *l->cursor == '\t' || *l->cursor == '\n' ||
-         *l->cursor == '\r') {
-    lexer_advance(l);
-  }
-}
-
-typedef enum {
-  TOKEN_UNKNOW = -1,
-  TOKEN_EOF = 0,
-  TOKEN_RETURN,
-  TOKEN_INT_LITERAL,
-  TOKEN_SEMICOLON,
-} TokenType;
-
-typedef struct {
-  TokenType type;
-  const char *start;
-  int len;
-  int line;
-  int col;
-  int64_t int_literal_val;
-} Token;
-
-Token lexer_next_token(Lexer *l) {
-  Token tok;
-
-  skip_whitespace(l);
-
-  tok.type = TOKEN_UNKNOW;
-  tok.start = l->cursor;
-  tok.line = l->line;
-  tok.col = lexer_column(l);
-  tok.len = 1;
-
-  if (*l->cursor == '\0') {
-    tok.type = TOKEN_EOF;
-    tok.len = 0;
-    return tok;
-  }
-
-  if (*l->cursor == ';') {
-    tok.type = TOKEN_SEMICOLON;
-    tok.len = 1;
-    lexer_advance(l);
-    return tok;
-  }
-
-  if (isdigit(*l->cursor)) {
-    int64_t int_literal_val;
-
-    int_literal_val = 0;
-
-    while (isdigit(*l->cursor)) {
-      int_literal_val = int_literal_val * 10 + (*l->cursor - '0');
-      lexer_advance(l);
-    }
-
-    tok.type = TOKEN_INT_LITERAL;
-    tok.len = (int)(l->cursor - tok.start);
-    tok.int_literal_val = int_literal_val;
-    return tok;
-  }
-
-  if (isalpha(*l->cursor)) {
-    while (isalnum(*l->cursor)) {
-      lexer_advance(l);
-    }
-    tok.len = (int)(l->cursor - tok.start);
-
-    if (tok.len == 6 && strncmp(tok.start, "return", 6) == 0) {
-      tok.type = TOKEN_RETURN;
-    }
-    return tok;
-  }
-
-  lexer_advance(l);
-
-  return tok;
-}
-
-typedef struct {
-  Lexer lexer;
-  Token current;
-} Parser;
-
-void parser_advance(Parser *p) {
-  p->current = lexer_next_token(&p->lexer);
-}
-
-void parser_init(Parser *p, const char *filename, const char *source) {
-  lexer_init(&p->lexer, filename, source);
-  parser_advance(p);
-}
-
-typedef enum {
-  AST_RETURN,
-  AST_INT_LITERAL,
-} AstType;
-
-typedef struct AstNode {
-  AstType type;
-  union {
-    struct {
-      struct AstNode *expr;
-    } ret;
-
-    struct {
-      int64_t val;
-    } int_literal;
-  } d;
-} AstNode;
-
-void parse_error(Parser *p, const char *errmsg) {
-  fprintf(stderr, "%s:%d:%d: error: %s\n", p->lexer.filename, p->current.line,
-          p->current.col, errmsg);
-  exit(1);
-}
-
-AstNode *parse_expr(Parser *p) {
-  AstNode *expr;
-
-  if (p->current.type == TOKEN_INT_LITERAL) {
-    expr = (AstNode *)malloc(sizeof(AstNode));
-    expr->type = AST_INT_LITERAL;
-    expr->d.int_literal.val = p->current.int_literal_val;
-
-    // Consume integer literal
-    parser_advance(p);
-    return expr;
-  }
-
-  return NULL;
-}
-
-AstNode *parse_return_stmt(Parser *p) {
-  AstNode *ast;
-  AstNode *ret_expr;
-
-  if (p->current.type != TOKEN_RETURN)
-    parse_error(p, "expect 'return'");
-
-  // Consume 'return'
-  parser_advance(p);
-
-  // Consume expr in return stmt.
-  ret_expr = parse_expr(p);
-
-  if (p->current.type != TOKEN_SEMICOLON) {
-    parse_error(p, "expect ';'");
-  }
-  // Consume ';'
-  parser_advance(p);
-
-  ast = (AstNode *)malloc(sizeof(AstNode));
-  ast->type = AST_RETURN;
-  ast->d.ret.expr = ret_expr;
-  return ast;
-}
-
-AstNode *parse_stmt(Parser *p) {
-  if (p->current.type == TOKEN_RETURN) {
-    return parse_return_stmt(p);
-  }
-
-  parse_error(p, "failed to parse statement");
-  return NULL;
-}
-
-void codegen_stmt(AstNode *ast) {
-  switch (ast->type) {
-  case AST_RETURN:
-    if (ast->d.ret.expr)
-      printf("	movl $%d, %%eax\n", (int)ast->d.ret.expr->d.int_literal.val);
-    else
-      printf("	movl $0, %%eax\n");
-    printf("	ret\n");
-    break;
-  default:
-    fprintf(stderr, "unknown AST node\n");
-    exit(1);
-  }
-}
-
-void codegen(AstNode *ast) {
-  printf("	.globl main\n");
-  printf("main:\n");
-
-  codegen_stmt(ast);
-}
-
-void dump_ast(AstNode *ast) {
-  switch (ast->type) {
-  case AST_RETURN:
-    printf("RETURN\n");
-    break;
-  default:
-    fprintf(stderr, "unknown ast node\n");
-    exit(1);
-  }
-}
-
 int main(int argc, char **argv) {
   const char *source;
   const char *filename;
-  Parser p;
 
   if (argc != 2) {
     fprintf(stderr, "Usage: %s <filename>\n", argv[0]);
@@ -310,9 +70,7 @@ int main(int argc, char **argv) {
   filename = argv[1];
   source = read_source(filename);
 
-  parser_init(&p, filename, source);
-
-  codegen(parse_stmt(&p));
+  codegen(parse_program(filename, source));
 
   return 0;
 }
