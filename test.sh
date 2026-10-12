@@ -26,3 +26,5 @@ function check() {
 
 check 1.c 0
 check 2.c 42
+check 3.c 3
+check 4.c 4

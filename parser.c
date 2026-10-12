@@ -19,6 +19,7 @@
 #include <stdio.h>
 
 #include "parser.h"
+#include "lexer.h"
 
 void parser_advance(Parser *p) {
   p->current = lexer_next_token(&p->lexer);
@@ -35,7 +36,7 @@ void parse_error(Parser *p, const char *errmsg) {
   exit(1);
 }
 
-AstNode *parse_expr(Parser *p) {
+AstNode *parse_primary_expr(Parser *p) {
   AstNode *expr;
 
   if (p->current.type == TOKEN_INT_LITERAL) {
@@ -49,6 +50,29 @@ AstNode *parse_expr(Parser *p) {
   }
 
   return NULL;
+}
+
+AstNode *parse_expr(Parser *p) {
+  AstNode *lhs;
+
+  lhs = parse_primary_expr(p);
+
+  while (p->current.type == TOKEN_ADD) {
+    AstNode *add_node;
+    AstNode *rhs;
+    // Consume '+'
+    parser_advance(p);
+
+    rhs = parse_primary_expr(p);
+    add_node = (AstNode *)malloc(sizeof(AstNode));
+    add_node->type = AST_ADD;
+    add_node->d.add.lhs = lhs;
+    add_node->d.add.rhs = rhs;
+
+    lhs = add_node;
+  }
+
+  return lhs;
 }
 
 AstNode *parse_return_stmt(Parser *p) {

@@ -17,14 +17,47 @@
  */
 
 #include <stdio.h>
+#include <inttypes.h>
 
 #include "codegen.h"
+#include "parser.h"
 
-static void codegen_stmt(AstNode *ast) {
-  switch (ast->type) {
+static void codegen_expr(AstNode *expr) {
+  if (expr->type == AST_INT_LITERAL) {
+    // movl $VAL, %eax
+    printf("	movl $%" PRId64 ", %%eax\n", expr->d.int_literal.val);
+    return;
+  }
+
+  if (expr->type == AST_ADD) {
+    // Evaluate RHS. Result is stored in %eax
+    codegen_expr(expr->d.add.rhs);
+
+    // Push RHS onto stack (covert 32-bit %eax to 64-bit %rax as we don't pushl instruction)
+    printf("	cltq\n");
+    printf("	pushq %%rax\n");
+
+    // Evaluate LHS. Result is stored in %eax
+    codegen_expr(expr->d.add.lhs);
+
+    // Pop saved RHS into %rcx
+    printf("	popq %%rcx\n");
+
+    // Add RHS (%ecx) to LHS (%eax)
+    printf("	addl %%ecx, %%eax\n");
+    return;
+  }
+
+  fprintf(stderr, "unknown ast node type in codegen\n");
+  exit(1);
+  return;
+}
+
+static void codegen_stmt(AstNode *stmt) {
+  switch (stmt->type) {
   case AST_RETURN:
-    if (ast->d.ret.expr)
-      printf("	movl $%d, %%eax\n", (int)ast->d.ret.expr->d.int_literal.val);
+    if (stmt->d.ret.expr)
+      codegen_expr(stmt->d.ret.expr);
     else
       printf("	movl $0, %%eax\n");
     printf("	ret\n");

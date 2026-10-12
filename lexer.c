@@ -76,8 +76,14 @@ Token lexer_next_token(Lexer *l) {
     return tok;
   }
 
-  if (*l->cursor == ';') {
+  switch (*l->cursor) {
+  case ';':
     tok.type = TOKEN_SEMICOLON;
+    tok.len = 1;
+    lexer_advance(l);
+    return tok;
+  case '+':
+    tok.type = TOKEN_ADD;
     tok.len = 1;
     lexer_advance(l);
     return tok;

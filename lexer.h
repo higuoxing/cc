@@ -27,6 +27,7 @@ typedef enum {
   TOKEN_RETURN,
   TOKEN_INT_LITERAL,
   TOKEN_SEMICOLON,
+  TOKEN_ADD, // '+'
 } TokenType;
 
 typedef struct {
