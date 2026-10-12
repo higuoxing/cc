@@ -20,8 +20,8 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "parser.h"
 #include "codegen.h"
+#include "parser.h"
 
 char *read_source(const char *path) {
   FILE *file;

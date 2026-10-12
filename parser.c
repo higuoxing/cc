@@ -18,12 +18,10 @@
 
 #include <stdio.h>
 
-#include "parser.h"
 #include "lexer.h"
+#include "parser.h"
 
-void parser_advance(Parser *p) {
-  p->current = lexer_next_token(&p->lexer);
-}
+void parser_advance(Parser *p) { p->current = lexer_next_token(&p->lexer); }
 
 void parser_init(Parser *p, const char *filename, const char *source) {
   lexer_init(&p->lexer, filename, source);

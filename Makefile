@@ -19,4 +19,8 @@ clean:
 test: $(TARGET)
 	./test.sh
 
-.PHONY: all test clean
+fmt:
+	@echo "Formatting ..."
+	@clang-format -i $(SRCS)
+
+.PHONY: all test clean fmt

@@ -16,8 +16,8 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-#include <stdio.h>
 #include <inttypes.h>
+#include <stdio.h>
 
 #include "codegen.h"
 #include "parser.h"
@@ -33,7 +33,8 @@ static void codegen_expr(AstNode *expr) {
     // Evaluate RHS. Result is stored in %eax
     codegen_expr(expr->d.add.rhs);
 
-    // Push RHS onto stack (covert 32-bit %eax to 64-bit %rax as we don't pushl instruction)
+    // Push RHS onto stack (covert 32-bit %eax to 64-bit %rax as we don't pushl
+    // instruction)
     printf("	cltq\n");
     printf("	pushq %%rax\n");
 
