@@ -21,6 +21,8 @@
 #include "lexer.h"
 #include "parser.h"
 
+extern AstNode *parse_expr(Parser *p);
+
 void parser_advance(Parser *p) { p->current = lexer_next_token(&p->lexer); }
 
 void parser_init(Parser *p, const char *filename, const char *source) {
@@ -34,10 +36,18 @@ void parse_error(Parser *p, const char *errmsg) {
   exit(1);
 }
 
-AstNode *parse_primary_expr(Parser *p) {
-  AstNode *expr;
+static void parse_expect(Parser *p, TokenType t, const char *msg) {
+  if (p->current.type != t) {
+    parse_error(p, msg);
+  }
 
+  parser_advance(p);
+}
+
+// Parse integers and parentheses
+AstNode *parse_primary(Parser *p) {
   if (p->current.type == TOKEN_INT_LITERAL) {
+    AstNode *expr;
     expr = (AstNode *)malloc(sizeof(AstNode));
     expr->type = AST_INT_LITERAL;
     expr->d.int_literal.val = p->current.int_literal_val;
@@ -47,30 +57,70 @@ AstNode *parse_primary_expr(Parser *p) {
     return expr;
   }
 
+  if (p->current.type == TOKEN_LPAREN) {
+    AstNode *expr;
+    // Consume '('
+    parser_advance(p);
+    expr = parse_expr(p);
+    parse_expect(p, TOKEN_RPAREN, "expect ')'");
+    return expr;
+  }
+
   return NULL;
 }
 
-AstNode *parse_expr(Parser *p) {
-  AstNode *lhs;
+AstNode *parse_multiplicative(Parser *p) {
+  AstNode *left;
 
-  lhs = parse_primary_expr(p);
+  left = parse_primary(p);
 
-  while (p->current.type == TOKEN_ADD) {
-    AstNode *add_node;
-    AstNode *rhs;
-    // Consume '+'
+  while (p->current.type == TOKEN_STAR || p->current.type == TOKEN_SLASH) {
+    TokenType op;
+    AstNode *right;
+    AstNode *node;
+
+    op = p->current.type;
+    // Consume '*' or '/'
     parser_advance(p);
 
-    rhs = parse_primary_expr(p);
-    add_node = (AstNode *)malloc(sizeof(AstNode));
-    add_node->type = AST_ADD;
-    add_node->d.add.lhs = lhs;
-    add_node->d.add.rhs = rhs;
+    right = parse_primary(p);
+    node = (AstNode *)malloc(sizeof(AstNode));
 
-    lhs = add_node;
+    node->type = op == TOKEN_STAR ? AST_MUL : AST_DIV;
+    node->d.binary.lhs = left;
+    node->d.binary.rhs = right;
+
+    left = node;
   }
 
-  return lhs;
+  return left;
+}
+
+// Additive expression
+AstNode *parse_expr(Parser *p) {
+  AstNode *left;
+
+  left = parse_multiplicative(p);
+
+  while (p->current.type == TOKEN_PLUS || p->current.type == TOKEN_MINUS) {
+    TokenType op;
+    AstNode *right;
+    AstNode *node;
+
+    op = p->current.type;
+    // Consume '+' or '-'
+    parser_advance(p);
+    right = parse_multiplicative(p);
+
+    node = (AstNode *)malloc(sizeof(AstNode));
+    node->type = op == TOKEN_PLUS ? AST_ADD : AST_SUB;
+    node->d.binary.lhs = left;
+    node->d.binary.rhs = right;
+
+    left = node;
+  }
+
+  return left;
 }
 
 AstNode *parse_return_stmt(Parser *p) {

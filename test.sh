@@ -28,3 +28,7 @@ check 1.c 0
 check 2.c 42
 check 3.c 3
 check 4.c 4
+check 5.c 3
+check 6.c 2
+check 7.c 9
+check 8.c 1

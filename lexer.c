@@ -83,7 +83,32 @@ Token lexer_next_token(Lexer *l) {
     lexer_advance(l);
     return tok;
   case '+':
-    tok.type = TOKEN_ADD;
+    tok.type = TOKEN_PLUS;
+    tok.len = 1;
+    lexer_advance(l);
+    return tok;
+  case '-':
+    tok.type = TOKEN_MINUS;
+    tok.len = 1;
+    lexer_advance(l);
+    return tok;
+  case '*':
+    tok.type = TOKEN_STAR;
+    tok.len = 1;
+    lexer_advance(l);
+    return tok;
+  case '/':
+    tok.type = TOKEN_SLASH;
+    tok.len = 1;
+    lexer_advance(l);
+    return tok;
+  case '(':
+    tok.type = TOKEN_LPAREN;
+    tok.len = 1;
+    lexer_advance(l);
+    return tok;
+  case ')':
+    tok.type = TOKEN_RPAREN;
     tok.len = 1;
     lexer_advance(l);
     return tok;

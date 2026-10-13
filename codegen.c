@@ -29,28 +29,35 @@ static void codegen_expr(AstNode *expr) {
     return;
   }
 
-  if (expr->type == AST_ADD) {
-    // Evaluate RHS. Result is stored in %eax
-    codegen_expr(expr->d.add.rhs);
+  codegen_expr(expr->d.binary.rhs);
+  printf("	cltq\n");
+  printf("	pushq %%rax\n");
+  codegen_expr(expr->d.binary.lhs);
+  printf("	popq %%rcx\n");
 
-    // Push RHS onto stack (covert 32-bit %eax to 64-bit %rax as we don't pushl
-    // instruction)
-    printf("	cltq\n");
-    printf("	pushq %%rax\n");
-
-    // Evaluate LHS. Result is stored in %eax
-    codegen_expr(expr->d.add.lhs);
-
-    // Pop saved RHS into %rcx
-    printf("	popq %%rcx\n");
-
-    // Add RHS (%ecx) to LHS (%eax)
+  switch (expr->type) {
+  case AST_ADD:
+    // %eax = %eax + %ecx
     printf("	addl %%ecx, %%eax\n");
-    return;
+    break;
+  case AST_SUB:
+    // %eax = %eax - %ecx
+    printf("	subl %%ecx, %%eax\n");
+    break;
+  case AST_MUL:
+    // %eax = %eax * %ecx
+    printf("	imull %%ecx, %%eax\n");
+    break;
+  case AST_DIV:
+    // idivl divides 64-bit value in %edx:%eax by operand (%ecx)
+    printf("	cltd\n");        // Sign-extend %eax into %edx:%eax
+    printf("	idivl %%ecx\n"); // Quotient in %eax, remainder in %edx
+    break;
+  default:
+    fprintf(stderr, "unrecognized binary operator\n");
+    exit(1);
   }
 
-  fprintf(stderr, "unknown ast node type in codegen\n");
-  exit(1);
   return;
 }
 

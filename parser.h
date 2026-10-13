@@ -30,6 +30,9 @@ typedef enum {
   AST_RETURN,
   AST_INT_LITERAL,
   AST_ADD, // '+'
+  AST_SUB, // '-'
+  AST_MUL, // '*'
+  AST_DIV, // '/'
 } AstType;
 
 typedef struct AstNode {
@@ -46,7 +49,7 @@ typedef struct AstNode {
     struct {
       struct AstNode *lhs;
       struct AstNode *rhs;
-    } add;
+    } binary;
   } d;
 } AstNode;
 
