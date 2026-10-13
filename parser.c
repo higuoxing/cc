@@ -23,6 +23,9 @@
 
 extern AstNode *parse_expr(Parser *p);
 
+static AstNode *parse_unary(Parser *p);
+static AstNode *parse_primary(Parser *p);
+
 void parser_advance(Parser *p) { p->current = lexer_next_token(&p->lexer); }
 
 void parser_init(Parser *p, const char *filename, const char *source) {
@@ -42,6 +45,28 @@ static void parse_expect(Parser *p, TokenType t, const char *msg) {
   }
 
   parser_advance(p);
+}
+
+AstNode *parse_unary(Parser *p) {
+  if (p->current.type == TOKEN_MINUS || p->current.type == TOKEN_TILDE ||
+      p->current.type == TOKEN_BANG) {
+    AstNode *node;
+    AstType op;
+
+    op = p->current.type == TOKEN_MINUS
+             ? AST_NEG
+             : (p->current.type == TOKEN_TILDE ? AST_BITWISE_NOT
+                                               : AST_LOGICAL_NOT);
+    // Consume '-' or '~' or '!'
+    parser_advance(p);
+    node = (AstNode *)malloc(sizeof(AstNode));
+    node->type = op;
+    node->d.unary.operand = parse_unary(p);
+
+    return node;
+  }
+
+  return parse_primary(p);
 }
 
 // Parse integers and parentheses
@@ -72,7 +97,7 @@ AstNode *parse_primary(Parser *p) {
 AstNode *parse_multiplicative(Parser *p) {
   AstNode *left;
 
-  left = parse_primary(p);
+  left = parse_unary(p);
 
   while (p->current.type == TOKEN_STAR || p->current.type == TOKEN_SLASH) {
     TokenType op;
@@ -83,7 +108,7 @@ AstNode *parse_multiplicative(Parser *p) {
     // Consume '*' or '/'
     parser_advance(p);
 
-    right = parse_primary(p);
+    right = parse_unary(p);
     node = (AstNode *)malloc(sizeof(AstNode));
 
     node->type = op == TOKEN_STAR ? AST_MUL : AST_DIV;

@@ -27,12 +27,14 @@ typedef enum {
   TOKEN_RETURN,
   TOKEN_INT_LITERAL,
   TOKEN_SEMICOLON,
-  TOKEN_PLUS,    // '+'
-  TOKEN_MINUS,    // '-'
+  TOKEN_PLUS,   // '+'
+  TOKEN_MINUS,  // '-'
   TOKEN_STAR,   // '*'
   TOKEN_SLASH,  // '/'
   TOKEN_LPAREN, // '('
   TOKEN_RPAREN, // ')'
+  TOKEN_TILDE,  // '~'
+  TOKEN_BANG, // '!'
 } TokenType;
 
 typedef struct {

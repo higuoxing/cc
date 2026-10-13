@@ -23,41 +23,60 @@
 #include "parser.h"
 
 static void codegen_expr(AstNode *expr) {
-  if (expr->type == AST_INT_LITERAL) {
+  switch (expr->type) {
+  case AST_INT_LITERAL:
     // movl $VAL, %eax
     printf("	movl $%" PRId64 ", %%eax\n", expr->d.int_literal.val);
-    return;
-  }
-
-  codegen_expr(expr->d.binary.rhs);
-  printf("	cltq\n");
-  printf("	pushq %%rax\n");
-  codegen_expr(expr->d.binary.lhs);
-  printf("	popq %%rcx\n");
-
-  switch (expr->type) {
+    break;
   case AST_ADD:
-    // %eax = %eax + %ecx
-    printf("	addl %%ecx, %%eax\n");
-    break;
   case AST_SUB:
-    // %eax = %eax - %ecx
-    printf("	subl %%ecx, %%eax\n");
-    break;
   case AST_MUL:
-    // %eax = %eax * %ecx
-    printf("	imull %%ecx, %%eax\n");
-    break;
   case AST_DIV:
-    // idivl divides 64-bit value in %edx:%eax by operand (%ecx)
-    printf("	cltd\n");        // Sign-extend %eax into %edx:%eax
-    printf("	idivl %%ecx\n"); // Quotient in %eax, remainder in %edx
+    codegen_expr(expr->d.binary.rhs);
+    printf("	cltq\n");
+    printf("	pushq %%rax\n");
+    codegen_expr(expr->d.binary.lhs);
+    printf("	popq %%rcx\n");
+
+    if (expr->type == AST_ADD) {
+      // %eax = %eax + %ecx
+      printf("	addl %%ecx, %%eax\n");
+    } else if (expr->type == AST_SUB) {
+      // %eax = %eax - %ecx
+      printf("	subl %%ecx, %%eax\n");
+    } else if (expr->type == AST_MUL) {
+      // %eax = %eax * %ecx
+      printf("	imull %%ecx, %%eax\n");
+    } else if (expr->type == AST_DIV) {
+      // idivl divides 64-bit value in %edx:%eax by operand (%ecx)
+      printf("	cltd\n");        // Sign-extend %eax into %edx:%eax
+      printf("	idivl %%ecx\n"); // Quotient in %eax, remainder in %edx
+    } else {
+      fprintf(stderr, "unrecognized binary operator\n");
+      exit(1);
+    }
+    break;
+  case AST_NEG:
+    codegen_expr(expr->d.unary.operand);
+    printf("	negl %%eax\n");
+    break;
+  case AST_BITWISE_NOT:
+    codegen_expr(expr->d.unary.operand);
+    printf("	notl %%eax\n");
+    break;
+  case AST_LOGICAL_NOT:
+    codegen_expr(expr->d.unary.operand);
+    // Compare %eax to 0
+    printf("	cmpl $0, %%eax\n");
+    // Set %al to 1 if %eax was 0
+    printf("	sete %%al\n");
+    // Zero-extend %al into %eax
+    printf("	movzbl %%al, %%eax\n");
     break;
   default:
-    fprintf(stderr, "unrecognized binary operator\n");
+    fprintf(stderr, "unrecognized ast node\n");
     exit(1);
   }
-
   return;
 }
 

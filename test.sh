@@ -32,3 +32,7 @@ check 5.c 3
 check 6.c 2
 check 7.c 9
 check 8.c 1
+check 9.c 255
+check 10.c 0
+check 11.c 245
+check 12.c 1

@@ -29,10 +29,13 @@ typedef struct {
 typedef enum {
   AST_RETURN,
   AST_INT_LITERAL,
-  AST_ADD, // '+'
-  AST_SUB, // '-'
-  AST_MUL, // '*'
-  AST_DIV, // '/'
+  AST_ADD,
+  AST_SUB,
+  AST_MUL,
+  AST_DIV,
+  AST_NEG,
+  AST_BITWISE_NOT,
+  AST_LOGICAL_NOT,
 } AstType;
 
 typedef struct AstNode {
@@ -45,6 +48,10 @@ typedef struct AstNode {
     struct {
       int64_t val;
     } int_literal;
+
+    struct {
+      struct AstNode *operand;
+    } unary;
 
     struct {
       struct AstNode *lhs;

@@ -112,6 +112,16 @@ Token lexer_next_token(Lexer *l) {
     tok.len = 1;
     lexer_advance(l);
     return tok;
+  case '~':
+    tok.type = TOKEN_TILDE;
+    tok.len = 1;
+    lexer_advance(l);
+    return tok;
+  case '!':
+    tok.type = TOKEN_BANG;
+    tok.len = 1;
+    lexer_advance(l);
+    return tok;
   }
 
   if (isdigit(*l->cursor)) {
