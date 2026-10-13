@@ -4,8 +4,7 @@ set -e
 
 GCC="gcc"
 CC="./cc"
-INPUT_DIR="./tests/input"
-OUTPUT_DIR="./tests/output"
+INPUT_DIR="./tests"
 
 function check() {
     base=$(basename "$1" .c)
