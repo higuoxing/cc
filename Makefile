@@ -1,8 +1,9 @@
 CC := gcc
-CFLAGS := -Wall -Wextra -O2
+OPT := -O2
+CFLAGS := -std=c11 -Wall -Wextra -Wpedantic -Werror $(OPT)
 TARGET := cc
 
-SRCS := $(wildcard *.c)
+SRCS := main.c lexer.c parser.c codegen.c
 OBJS := $(SRCS:.c=.o)
 
 all: $(TARGET)

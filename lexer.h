@@ -19,6 +19,7 @@
 #ifndef _LEXER_H_
 #define _LEXER_H_
 
+#include <stdint.h>
 #include <stdlib.h>
 
 typedef enum {

@@ -91,6 +91,7 @@ AstNode *parse_primary(Parser *p) {
     return expr;
   }
 
+  parse_error(p, "expect expr");
   return NULL;
 }
 
@@ -159,13 +160,11 @@ AstNode *parse_return_stmt(Parser *p) {
   parser_advance(p);
 
   // Consume expr in return stmt.
-  ret_expr = parse_expr(p);
+  ret_expr = NULL;
+  if (p->current.type != TOKEN_SEMICOLON)
+    ret_expr = parse_expr(p);
 
-  if (p->current.type != TOKEN_SEMICOLON) {
-    parse_error(p, "expect ';'");
-  }
-  // Consume ';'
-  parser_advance(p);
+  parse_expect(p, TOKEN_SEMICOLON, "expect ';'");
 
   ast = (AstNode *)malloc(sizeof(AstNode));
   ast->type = AST_RETURN;
@@ -188,6 +187,7 @@ AstNode *parse_program(const char *filename, const char *source) {
 
   parser_init(&p, filename, source);
   ast = parse_stmt(&p);
+  parse_expect(&p, TOKEN_EOF, "unexpected token after statement");
 
   return ast;
 }
