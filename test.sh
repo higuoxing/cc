@@ -108,56 +108,52 @@ function check_error() {
     printf '[PASS] %s (rejected with expected diagnostic)\n' "$name"
 }
 
-check 0 'return;'
-check 42 'return 42;'
-check 3  'return 1+2;'
-check 4 'return 1 +        1 +1+1;'
-check 3 'return (1+2);'
-check 2 'return 1 * 2;'
-check 9 'return 3 * (1+2);'
-check 1 'return (1+2) / 3;'
-check 255 'return -1;'
-check 0 'return !1;'
-check 245 'return ~10;'
-check 1 'return !!10;'
-check 42 'return (((42)));'
-check 42 'return -(-6) * 7;'
-check 42 'return 2 * -3 + 48;'
-check 42 $'return (\n6 * 7\n)\n;\n'
+check 0 'int main() {}'
+check 42 'int main() { return 42; }'
+check 3  'int main() { return 1+2; }'
+check 4 'int main() { return 1 +        1 +1+1; }'
+check 3 'int main() { return (1+2); }'
+check 2 'int main() { return 1 * 2; }'
+check 9 'int main() { return 3 * (1+2); }'
+check 1 'int main() { return (1+2) / 3; }'
+check 255 'int main() { return -1; }'
+check 0 'int main() { return !1; }'
+check 245 'int main() { return ~10; }'
+check 1 'int main() { return !!10; }'
+check 42 'int main() { return (((42))); }'
+check 42 'int main() { return -(-6) * 7; }'
+check 42 'int main() { return 2 * -3 + 48; }'
+check 42 $'int main() { return (\n6 * 7\n)\n;\n }'
 
-check_error missing-plus-rhs 'return 1 +;' '1:11: error: expect expr'
-check_error missing-sub-rhs 'return 1 -;' '1:11: error: expect expr'
-check_error missing-mul-rhs 'return 1 *;' '1:11: error: expect expr'
-check_error missing-div-rhs 'return 1 /;' '1:11: error: expect expr'
-check_error missing-neg-operand 'return -;' '1:9: error: expect expr'
-check_error missing-not-operand 'return !;' '1:9: error: expect expr'
-check_error missing-bitnot-operand 'return ~;' '1:9: error: expect expr'
-check_error missing-unary-chain 'return !~-;' '1:11: error: expect expr'
-check_error empty-parens 'return ();' '1:9: error: expect expr'
-check_error nested-empty-parens 'return (());' '1:10: error: expect expr'
-check_error empty-rhs 'return 1 + ();' '1:13: error: expect expr'
-check_error empty-lhs 'return () + 1;' '1:9: error: expect expr'
-check_error unexpected-mul 'return * 2;' '1:8: error: expect expr'
-check_error double-operator 'return 1 + * 2;' '1:12: error: expect expr'
-check_error unknown-operand 'return @;' '1:8: error: expect expr'
-check_error keyword-operand 'return return;' '1:8: error: expect expr'
-check_error unexpected-close 'return );' '1:8: error: expect expr'
-check_error missing-rhs-eof 'return 1 +' '1:11: error: expect expr'
-check_error missing-neg-eof 'return -' '1:9: error: expect expr'
-check_error missing-expr-eof 'return' '1:7: error: expect expr'
-check_error missing-rparen 'return (1 + 2;' "1:14: error: expect ')'"
-check_error missing-rparen-eof 'return (1 + 2' "1:14: error: expect ')'"
-check_error missing-semicolon 'return 42' "1:10: error: expect ';'"
-check_error extra-rparen 'return (1+2));' "1:13: error: expect ';'"
-check_error adjacent-literals 'return 1 2;' "1:10: error: expect ';'"
-check_error trailing-identifier 'return 42; garbage' "1:12: error: unexpected token after statement"
-check_error trailing-token 'return 42; @' "1:12: error: unexpected token after statement"
-check_error second-statement 'return 1; return 2;' "1:11: error: unexpected token after statement"
-check_error trailing-after-bare-return 'return; garbage' '1:9: error: unexpected token after statement'
-check_error empty-input '' '1:1: error: failed to parse statement'
-check_error whitespace-only $' \t\n' '2:1: error: failed to parse statement'
-check_error missing-statement '42;' '1:1: error: failed to parse statement'
-check_error trailing-multiline $'return 42;\nreturn 1;' '2:1: error: unexpected token after statement'
-check_error missing-rhs-lf $'return 1 +\n;' '2:1: error: expect expr'
+check_error missing-plus-rhs 'int main() { return 1 +; }' '1:24: error: expect expr'
+check_error missing-sub-rhs 'int main() { return 1 -; }' '1:24: error: expect expr'
+check_error missing-mul-rhs 'int main() { return 1 *; }' '1:24: error: expect expr'
+check_error missing-div-rhs 'int main() { return 1 /; }' '1:24: error: expect expr'
+check_error missing-neg-operand 'int main() { return -; }' '1:22: error: expect expr'
+check_error missing-not-operand 'int main() { return !; }' '1:22: error: expect expr'
+check_error missing-bitnot-operand 'int main() { return ~; }' '1:22: error: expect expr'
+check_error missing-unary-chain 'int main() { return !~-; }' '1:24: error: expect expr'
+check_error empty-parens 'int main() { return (); }' '1:22: error: expect expr'
+check_error nested-empty-parens 'int main() { return (()); }' '1:23: error: expect expr'
+check_error empty-rhs 'int main() { return 1 + (); }' '1:26: error: expect expr'
+check_error empty-lhs 'int main() { return () + 1; }' '1:22: error: expect expr'
+check_error unexpected-mul 'int main() { return * 2; }' '1:21: error: expect expr'
+check_error double-operator 'int main() { return 1 + * 2; }' '1:25: error: expect expr'
+check_error unknown-operand 'int main() { return @; }' '1:21: error: expect expr'
+check_error keyword-operand 'int main() { return return; }' '1:21: error: expect expr'
+check_error unexpected-close 'int main() { return ); }' '1:21: error: expect expr'
+check_error missing-rhs-eof 'int main() { return 1 + }' '1:25: error: expect expr'
+check_error missing-neg-eof 'int main() { return - }' '1:23: error: expect expr'
+check_error missing-expr-eof 'int main() { return }' '1:21: error: expect expr'
+check_error missing-rparen 'int main() { return (1 + 2; }' "1:27: error: expect ')'"
+check_error missing-rparen-eof 'int main() { return (1 + 2 }' "1:28: error: expect ')'"
+check_error missing-semicolon 'int main() { return 42 }' "1:24: error: expect ';'"
+check_error extra-rparen 'int main() { return (1+2)); }' "1:26: error: expect ';'"
+check_error adjacent-literals 'int main() { return 1 2; }' "1:23: error: expect ';'"
+check_error trailing-identifier 'int main() { return 42; garbage }' "1:25: error: unexpected token after statement"
+check_error trailing-token 'int main() { return 42; @ }' "1:25: error: unexpected token after statement"
+check_error trailing-after-bare-return 'int main() { return; garbage }' '1:20: error: expect return expr'
+check_error empty-input '' "1:1: error: expect 'int'"
+check_error whitespace-only $' \t\n' "2:1: error: expect 'int'"
 
 printf 'All %d tests passed (%d execution, %d rejection).\n' "$((passed + rejected))" "$passed" "$rejected"

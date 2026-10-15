@@ -23,17 +23,35 @@
 
 extern AstNode *parse_expr(Parser *p);
 
+static AstNode *new_ast_node(Parser *p, AstType ty);
+static void parser_advance(Parser *p);
+static void parse_error(Parser *p, const char *errmsg);
 static AstNode *parse_unary(Parser *p);
 static AstNode *parse_primary(Parser *p);
+static AstNode *parse_return_stmt(Parser *p);
+static AstNode *parse_stmt(Parser *p);
+static AstNode *parse_block(Parser *p);
+static AstNode *parse_function(Parser *p);
 
-void parser_advance(Parser *p) { p->current = lexer_next_token(&p->lexer); }
+static AstNode *new_ast_node(Parser *p, AstType ty) {
+  AstNode *node;
+  node = calloc(1, sizeof(AstNode));
+  if (!node)
+    parse_error(p, "out of memory");
+  node->type = ty;
+  return node;
+}
 
-void parser_init(Parser *p, const char *filename, const char *source) {
+static void parser_advance(Parser *p) {
+  p->current = lexer_next_token(&p->lexer);
+}
+
+static void parser_init(Parser *p, const char *filename, const char *source) {
   lexer_init(&p->lexer, filename, source);
   parser_advance(p);
 }
 
-void parse_error(Parser *p, const char *errmsg) {
+static void parse_error(Parser *p, const char *errmsg) {
   fprintf(stderr, "%s:%d:%d: error: %s\n", p->lexer.filename, p->current.line,
           p->current.col, errmsg);
   exit(1);
@@ -59,8 +77,7 @@ AstNode *parse_unary(Parser *p) {
                                                : AST_LOGICAL_NOT);
     // Consume '-' or '~' or '!'
     parser_advance(p);
-    node = (AstNode *)malloc(sizeof(AstNode));
-    node->type = op;
+    node = new_ast_node(p, op);
     node->d.unary.operand = parse_unary(p);
 
     return node;
@@ -73,8 +90,7 @@ AstNode *parse_unary(Parser *p) {
 AstNode *parse_primary(Parser *p) {
   if (p->current.type == TOKEN_INT_LITERAL) {
     AstNode *expr;
-    expr = (AstNode *)malloc(sizeof(AstNode));
-    expr->type = AST_INT_LITERAL;
+    expr = new_ast_node(p, AST_INT_LITERAL);
     expr->d.int_literal.val = p->current.int_literal_val;
 
     // Consume integer literal
@@ -110,9 +126,7 @@ AstNode *parse_multiplicative(Parser *p) {
     parser_advance(p);
 
     right = parse_unary(p);
-    node = (AstNode *)malloc(sizeof(AstNode));
-
-    node->type = op == TOKEN_STAR ? AST_MUL : AST_DIV;
+    node = new_ast_node(p, op == TOKEN_STAR ? AST_MUL : AST_DIV);
     node->d.binary.lhs = left;
     node->d.binary.rhs = right;
 
@@ -138,8 +152,7 @@ AstNode *parse_expr(Parser *p) {
     parser_advance(p);
     right = parse_multiplicative(p);
 
-    node = (AstNode *)malloc(sizeof(AstNode));
-    node->type = op == TOKEN_PLUS ? AST_ADD : AST_SUB;
+    node = new_ast_node(p, op == TOKEN_PLUS ? AST_ADD : AST_SUB);
     node->d.binary.lhs = left;
     node->d.binary.rhs = right;
 
@@ -149,35 +162,67 @@ AstNode *parse_expr(Parser *p) {
   return left;
 }
 
-AstNode *parse_return_stmt(Parser *p) {
+static AstNode *parse_return_stmt(Parser *p) {
   AstNode *ast;
-  AstNode *ret_expr;
 
-  if (p->current.type != TOKEN_RETURN)
-    parse_error(p, "expect 'return'");
+  parse_expect(p, TOKEN_RETURN, "expect 'return'");
+  if (p->current.type == TOKEN_SEMICOLON)
+    parse_error(p, "expect return expr");
 
-  // Consume 'return'
-  parser_advance(p);
-
-  // Consume expr in return stmt.
-  ret_expr = NULL;
-  if (p->current.type != TOKEN_SEMICOLON)
-    ret_expr = parse_expr(p);
-
+  ast = new_ast_node(p, AST_RETURN);
+  ast->d.ret.expr = parse_expr(p);
   parse_expect(p, TOKEN_SEMICOLON, "expect ';'");
 
-  ast = (AstNode *)malloc(sizeof(AstNode));
-  ast->type = AST_RETURN;
-  ast->d.ret.expr = ret_expr;
   return ast;
 }
 
-AstNode *parse_stmt(Parser *p) {
+static AstNode *parse_block(Parser *p) {
+  AstNode *block;
+  AstNode **tail;
+
+  block = new_ast_node(p, AST_BLOCK);
+  tail = &block->d.block.first_stmt;
+
+  parse_expect(p, TOKEN_LBRACE, "expect '{'");
+  while (p->current.type != TOKEN_RBRACE) {
+    if (p->current.type == TOKEN_EOF)
+      parse_error(p, "expect '}'");
+
+    *tail = parse_stmt(p);
+    tail = &(*tail)->next;
+  }
+
+  parse_expect(p, TOKEN_RBRACE, "expect '}'");
+  return block;
+}
+
+static AstNode *parse_function(Parser *p) {
+  AstNode *fn;
+
+  fn = new_ast_node(p, AST_FUNCTION);
+  parse_expect(p, TOKEN_INT, "expect 'int'");
+  if (p->current.type != TOKEN_IDENTIFIER)
+    parse_error(p, "expect function name");
+
+  fn->d.function.name = p->current;
+  // Consume <function_name>
+  parser_advance(p);
+
+  parse_expect(p, TOKEN_LPAREN, "expect '('");
+  parse_expect(p, TOKEN_RPAREN, "expect ')'");
+  fn->d.function.body = parse_block(p);
+  return fn;
+}
+
+static AstNode *parse_stmt(Parser *p) {
   if (p->current.type == TOKEN_RETURN) {
     return parse_return_stmt(p);
   }
 
-  parse_error(p, "failed to parse statement");
+  if (p->current.type == TOKEN_LBRACE)
+    return parse_block(p);
+
+  parse_error(p, "unexpected token after statement");
   return NULL;
 }
 
@@ -186,8 +231,8 @@ AstNode *parse_program(const char *filename, const char *source) {
   AstNode *ast;
 
   parser_init(&p, filename, source);
-  ast = parse_stmt(&p);
-  parse_expect(&p, TOKEN_EOF, "unexpected token after statement");
+  ast = parse_function(&p);
+  parse_expect(&p, TOKEN_EOF, "unexpected token after function");
 
   return ast;
 }

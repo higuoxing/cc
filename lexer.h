@@ -26,6 +26,8 @@ typedef enum {
   TOKEN_UNKNOW = -1,
   TOKEN_EOF = 0,
   TOKEN_RETURN,
+  TOKEN_INT, // 'int'
+  TOKEN_IDENTIFIER,
   TOKEN_INT_LITERAL,
   TOKEN_SEMICOLON,
   TOKEN_PLUS,   // '+'
@@ -34,8 +36,10 @@ typedef enum {
   TOKEN_SLASH,  // '/'
   TOKEN_LPAREN, // '('
   TOKEN_RPAREN, // ')'
+  TOKEN_LBRACE, // '{'
+  TOKEN_RBRACE, // '}'
   TOKEN_TILDE,  // '~'
-  TOKEN_BANG, // '!'
+  TOKEN_BANG,   // '!'
 } TokenType;
 
 typedef struct {

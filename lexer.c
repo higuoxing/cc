@@ -112,6 +112,16 @@ Token lexer_next_token(Lexer *l) {
     tok.len = 1;
     lexer_advance(l);
     return tok;
+  case '{':
+    tok.type = TOKEN_LBRACE;
+    tok.len = 1;
+    lexer_advance(l);
+    return tok;
+  case '}':
+    tok.type = TOKEN_RBRACE;
+    tok.len = 1;
+    lexer_advance(l);
+    return tok;
   case '~':
     tok.type = TOKEN_TILDE;
     tok.len = 1;
@@ -140,15 +150,16 @@ Token lexer_next_token(Lexer *l) {
     return tok;
   }
 
-  if (isalpha(*l->cursor)) {
-    while (isalnum(*l->cursor)) {
+  if (isalpha(*l->cursor) || *l->cursor == '_') {
+    while (isalnum(*l->cursor) || *l->cursor == '_') {
       lexer_advance(l);
     }
     tok.len = (int)(l->cursor - tok.start);
-
-    if (tok.len == 6 && strncmp(tok.start, "return", 6) == 0) {
+    tok.type = TOKEN_IDENTIFIER;
+    if (tok.len == 6 && strncmp(tok.start, "return", 6) == 0)
       tok.type = TOKEN_RETURN;
-    }
+    else if (tok.len == 3 && strncmp(tok.start, "int", 3) == 0)
+      tok.type = TOKEN_INT;
     return tok;
   }
 

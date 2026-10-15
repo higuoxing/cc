@@ -27,6 +27,8 @@ typedef struct {
 } Parser;
 
 typedef enum {
+  AST_FUNCTION,
+  AST_BLOCK,
   AST_RETURN,
   AST_INT_LITERAL,
   AST_ADD,
@@ -40,7 +42,17 @@ typedef enum {
 
 typedef struct AstNode {
   AstType type;
+  struct AstNode *next; // Linked list of statements inside a block.
   union {
+    struct {
+      Token name;
+      struct AstNode *body;
+    } function;
+
+    struct {
+      struct AstNode *first_stmt;
+    } block;
+
     struct {
       struct AstNode *expr;
     } ret;
