@@ -21,15 +21,31 @@
 
 #include "lexer.h"
 
+typedef struct LocalVar {
+  Token name;
+  int offset; // Positive distance below %rbp
+  int scope_depth;
+  struct LocalVar *next;
+} LocalVar;
+
 typedef struct {
   Lexer lexer;
   Token current;
+  Token lookahead;
+
+  LocalVar *locals;
+  int scope_depth;
+  int stack_size;
 } Parser;
 
 typedef enum {
   AST_FUNCTION,
   AST_BLOCK,
   AST_RETURN,
+  AST_DECL,
+  AST_EXPR_STMT,
+  AST_VAR,
+  AST_ASSIGN,
   AST_INT_LITERAL,
   AST_ADD,
   AST_SUB,
@@ -47,6 +63,7 @@ typedef struct AstNode {
     struct {
       Token name;
       struct AstNode *body;
+      int stack_size;
     } function;
 
     struct {
@@ -56,6 +73,19 @@ typedef struct AstNode {
     struct {
       struct AstNode *expr;
     } ret;
+
+    struct {
+      LocalVar *var;
+      struct AstNode *init;
+    } decl;
+
+    struct {
+      struct AstNode *expr;
+    } expr_stmt;
+
+    struct {
+      LocalVar *var;
+    } variable;
 
     struct {
       int64_t val;

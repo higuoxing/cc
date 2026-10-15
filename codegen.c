@@ -22,8 +22,27 @@
 #include "codegen.h"
 #include "parser.h"
 
+static void codegen_addr(AstNode *expr) {
+  if (expr->type != AST_VAR) {
+    fprintf(stderr, "invalid address expr in codegen");
+  }
+  printf("\tleaq -%d(%%rbp), %%rax\n", expr->d.variable.var->offset);
+}
+
 static void codegen_expr(AstNode *expr) {
   switch (expr->type) {
+  case AST_VAR:
+    codegen_addr(expr);
+    printf("\tmovl (%%rax), %%eax\n");
+    break;
+  case AST_ASSIGN:
+    codegen_expr(expr->d.binary.rhs);
+    printf("\tpushq %%rax\n");
+    codegen_addr(expr->d.binary.lhs);
+    printf("\tpopq %%rcx\n");
+    printf("\tmovl %%ecx, (%%rax)\n");
+    printf("\tmovl %%ecx, %%eax\n");
+    break;
   case AST_INT_LITERAL:
     // movl $VAL, %eax
     printf("\tmovl $%" PRId64 ", %%eax\n", expr->d.int_literal.val);
@@ -84,7 +103,17 @@ static void codegen_stmt(AstNode *stmt) {
   switch (stmt->type) {
   case AST_RETURN:
     codegen_expr(stmt->d.ret.expr);
-    printf("\tret\n");
+    printf("\tjmp .Lreturn\n");
+    break;
+  case AST_DECL:
+    if (stmt->d.decl.init) {
+      codegen_expr(stmt->d.decl.init);
+      printf("\tmovl %%eax, -%d(%%rbp)\n", stmt->d.decl.var->offset);
+    }
+    break;
+  case AST_EXPR_STMT:
+    if (stmt->d.expr_stmt.expr)
+      codegen_expr(stmt->d.expr_stmt.expr);
     break;
   case AST_BLOCK: {
     AstNode *cur;
@@ -100,6 +129,7 @@ static void codegen_stmt(AstNode *stmt) {
 
 void codegen(AstNode *ast) {
   Token name;
+  int stack_size;
 
   if (ast->type != AST_FUNCTION) {
     fprintf(stderr, "expected function AST\n");
@@ -107,16 +137,21 @@ void codegen(AstNode *ast) {
   }
 
   name = ast->d.function.name;
+  stack_size = (ast->d.function.stack_size + 15) / 16 * 16;
+  printf("\t.text\n");
   printf("\t.globl %.*s\n", name.len, name.start);
   printf("%.*s:\n", name.len, name.start);
+  printf("\tpushq %%rbp\n");
+  printf("\tmovq %%rsp, %%rbp\n");
+  if (stack_size)
+    printf("\tsubq $%d, %%rsp\n", stack_size);
   codegen_stmt(ast->d.function.body);
 
   // Reaching the end of main returns zero.
-  // non-zero return codes are handled in function's codegen.
-  // movl $42, %%eax
-  // ret
-  // movl $0, %%eax
-  // ret
   printf("\tmovl $0, %%eax\n");
+  printf(".Lreturn:\n");
+  printf("\tmovq %%rbp, %%rsp\n");
+  printf("\tpopq %%rbp\n");
   printf("\tret\n");
+  printf("\t.section .note.GNU-stack, \"\",@progbits\n");
 }

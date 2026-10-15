@@ -40,6 +40,7 @@ typedef enum {
   TOKEN_RBRACE, // '}'
   TOKEN_TILDE,  // '~'
   TOKEN_BANG,   // '!'
+  TOKEN_ASSIGN, // '='
 } TokenType;
 
 typedef struct {
