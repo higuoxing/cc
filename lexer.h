@@ -41,6 +41,7 @@ typedef enum {
   TOKEN_TILDE,  // '~'
   TOKEN_BANG,   // '!'
   TOKEN_ASSIGN, // '='
+  TOKEN_RESERVED,
 } TokenType;
 
 typedef struct {

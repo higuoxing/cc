@@ -21,6 +21,55 @@
 
 #include "lexer.h"
 
+typedef struct {
+  const char *name;
+  size_t len;
+  TokenType type;
+} Keyword;
+
+// C11 keywords
+#define KW(spelling, kind)                                                     \
+  {.name = spelling, .len = sizeof(spelling) - 1, .type = kind}
+
+static const Keyword keywords[] = {
+    KW("_Alignas", TOKEN_RESERVED),       KW("_Alignof", TOKEN_RESERVED),
+    KW("_Atomic", TOKEN_RESERVED),        KW("_Bool", TOKEN_RESERVED),
+    KW("_Complex", TOKEN_RESERVED),       KW("_Generic", TOKEN_RESERVED),
+    KW("_Imaginary", TOKEN_RESERVED),     KW("_Noreturn", TOKEN_RESERVED),
+    KW("_Static_assert", TOKEN_RESERVED), KW("_Thread_local", TOKEN_RESERVED),
+    KW("auto", TOKEN_RESERVED),           KW("break", TOKEN_RESERVED),
+    KW("case", TOKEN_RESERVED),           KW("char", TOKEN_RESERVED),
+    KW("const", TOKEN_RESERVED),          KW("continue", TOKEN_RESERVED),
+    KW("default", TOKEN_RESERVED),        KW("do", TOKEN_RESERVED),
+    KW("double", TOKEN_RESERVED),         KW("else", TOKEN_RESERVED),
+    KW("enum", TOKEN_RESERVED),           KW("extern", TOKEN_RESERVED),
+    KW("float", TOKEN_RESERVED),          KW("for", TOKEN_RESERVED),
+    KW("goto", TOKEN_RESERVED),           KW("if", TOKEN_RESERVED),
+    KW("inline", TOKEN_RESERVED),         KW("int", TOKEN_INT),
+    KW("long", TOKEN_RESERVED),           KW("register", TOKEN_RESERVED),
+    KW("restrict", TOKEN_RESERVED),       KW("return", TOKEN_RETURN),
+    KW("short", TOKEN_RESERVED),          KW("signed", TOKEN_RESERVED),
+    KW("sizeof", TOKEN_RESERVED),         KW("static", TOKEN_RESERVED),
+    KW("struct", TOKEN_RESERVED),         KW("switch", TOKEN_RESERVED),
+    KW("typedef", TOKEN_RESERVED),        KW("union", TOKEN_RESERVED),
+    KW("unsigned", TOKEN_RESERVED),       KW("void", TOKEN_RESERVED),
+    KW("volatile", TOKEN_RESERVED),       KW("while", TOKEN_RESERVED),
+};
+
+#undef KW
+
+static TokenType kw_token_type(const Token *tok) {
+  size_t i;
+  for (i = 0; i < sizeof(keywords) / sizeof(keywords[0]); ++i) {
+    const Keyword *kw = &keywords[i];
+    if ((size_t)tok->len == kw->len &&
+        memcmp(tok->start, kw->name, kw->len) == 0)
+      return kw->type;
+  }
+
+  return TOKEN_IDENTIFIER;
+}
+
 void lexer_init(Lexer *l, const char *filename, const char *source) {
   l->filename = filename;
   l->source = source;
@@ -160,11 +209,8 @@ Token lexer_next_token(Lexer *l) {
       lexer_advance(l);
     }
     tok.len = (int)(l->cursor - tok.start);
-    tok.type = TOKEN_IDENTIFIER;
-    if (tok.len == 6 && strncmp(tok.start, "return", 6) == 0)
-      tok.type = TOKEN_RETURN;
-    else if (tok.len == 3 && strncmp(tok.start, "int", 3) == 0)
-      tok.type = TOKEN_INT;
+    tok.type = kw_token_type(&tok);
+
     return tok;
   }
 

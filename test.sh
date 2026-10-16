@@ -149,6 +149,7 @@ check 42 'int main() { int a = 10; int aa = 32; return a + aa; }'
 check 42 'int main() { int _a = 20; int A1 = 22; return _a + A1; }'
 check 42 'int main() { int a = 0; int b = (a = 40) + 2; return b; }'
 check 42 'int main() { int a; return a = 6 * 7; }'
+check 42 'int main() { int while_count = 40; int return_value = 2; int _Boolish = 0; return while_count + return_value + _Boolish; }'
 
 check_error missing-plus-rhs 'int main() { return 1 +; }' '1:24: error: expect expr'
 check_error missing-sub-rhs 'int main() { return 1 -; }' '1:24: error: expect expr'
@@ -204,5 +205,16 @@ check_error use-post-scope-shadow 'int main() { { int x = 1; } x = 42; return 0;
 check_error redecl-after-nested 'int main() { int a; { int a; } int a; }' '1:36: error: duplicate local variable'
 check_error unsupported-comma-decl 'int main() { int a, b; return 0; }' "1:19: error: expect ';'"
 check_error unexpected-extra-equals 'int main() { int a; a == 3; }' '1:24: error: expect expr'
+for kw in \
+    _Alignas _Alignof _Atomic _Bool _Complex _Generic _Imaginary \
+	     _Noreturn _Static_assert _Thread_local \
+	     auto break case char const continue default do double else enum extern \
+	     float for goto if inline long register restrict short signed sizeof \
+	     static struct switch typedef union unsigned void volatile while; do
+    check_error "reserved-kw-$kw" \
+		"int main() { int $kw; return 0; }" \
+		'1:18: error: expect variable name'
+done
+	     
 
 printf 'All %d tests passed (%d execution, %d rejection).\n' "$((passed + rejected))" "$passed" "$rejected"
