@@ -17,6 +17,7 @@
  */
 
 #include <ctype.h>
+#include <stdio.h>
 #include <string.h>
 
 #include "lexer.h"
@@ -194,7 +195,16 @@ Token lexer_next_token(Lexer *l) {
     int_literal_val = 0;
 
     while (isdigit(*l->cursor)) {
-      int_literal_val = int_literal_val * 10 + (*l->cursor - '0');
+      int digit;
+      digit = *l->cursor - '0';
+      if (int_literal_val > (INT32_MAX - digit) / 10) {
+        fprintf(
+            stderr,
+            "%s:%d:%d: error: integer literal out of range for 32-bit int\n",
+            l->filename, tok.line, tok.col);
+        exit(1);
+      }
+      int_literal_val = int_literal_val * 10 + digit;
       lexer_advance(l);
     }
 

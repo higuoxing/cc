@@ -150,6 +150,10 @@ check 42 'int main() { int _a = 20; int A1 = 22; return _a + A1; }'
 check 42 'int main() { int a = 0; int b = (a = 40) + 2; return b; }'
 check 42 'int main() { int a; return a = 6 * 7; }'
 check 42 'int main() { int while_count = 40; int return_value = 2; int _Boolish = 0; return while_count + return_value + _Boolish; }'
+check 42 'int main() { return 2147483647 - 2147483605; }'
+check 1 'int main() { return 2147483647 / 2147483647; }'
+check 1 'int main() { return - 2147483647 + 2147483647 + 1; }'
+check 7 'int main() { return 000000000000000000000000000000007; }'
 
 check_error missing-plus-rhs 'int main() { return 1 +; }' '1:24: error: expect expr'
 check_error missing-sub-rhs 'int main() { return 1 -; }' '1:24: error: expect expr'
@@ -215,6 +219,8 @@ for kw in \
 		"int main() { int $kw; return 0; }" \
 		'1:18: error: expect variable name'
 done
-	     
+# TODO: Allow different type of integer literals
+check_error literal-over-int32 'int main() { return 2147483648; }' \
+	    '1:21: error: integer literal out of range for 32-bit int'
 
 printf 'All %d tests passed (%d execution, %d rejection).\n' "$((passed + rejected))" "$passed" "$rejected"
