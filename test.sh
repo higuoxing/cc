@@ -471,6 +471,21 @@ check_error duplicate-default \
 check_error case-not-constant \
 	    'int main() { int a; switch (1) { case a: ; } }' \
 	    '1:40: error: case label is not an integer constant'
+check_error decl-as-if-body 'int main() { if (1) int a = 1; return 0; }' \
+	    '1:21: error: expect statement'
+check_error decl-as-else-body 'int main() { if (1) ; else int b = 2; }' \
+	    '1:28: error: expect statement'
+check_error decl-as-while-body 'int main() { while (1) int a; }' \
+	    '1:24: error: expect statement'
+check_error decl-as-for-body 'int main() { for (;;) int a; }' \
+	    '1:23: error: expect statement'
+check_error decl-as-do-body 'int main() { do int a; while (1); }' \
+	    '1:17: error: expect statement'
+check_error decl-as-label-body 'int main() { L: int a; }' \
+	    '1:17: error: expect statement'
+check_error decl-as-case-body \
+	    'int main() { switch (1) { case 1: int a; } }' \
+	    '1:35: error: expect statement'
 check_error missing-break-semi 'int main() { while (1) break }' \
 	    "1:30: error: expect ';'"
 check_error goto-undefined 'int main() { goto L; }' \

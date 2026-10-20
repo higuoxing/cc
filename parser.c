@@ -46,7 +46,7 @@ static AstNode *parse_label_stmt(Parser *p);
 static AstNode *parse_switch_stmt(Parser *p);
 static AstNode *parse_case_stmt(Parser *p);
 static AstNode *parse_default_stmt(Parser *p);
-static AstNode *parse_stmt(Parser *p);
+static AstNode *parse_stmt(Parser *p, bool allow_decl);
 static void check_gotos(Parser *p);
 static int64_t eval_const_expr(Parser *p, AstNode *expr);
 static AstNode *parse_block(Parser *p);
@@ -777,7 +777,7 @@ static AstNode *parse_block(Parser *p) {
     if (p->current.type == TOKEN_EOF)
       parse_error(p, "expect '}'");
 
-    *tail = parse_stmt(p);
+    *tail = parse_stmt(p, /*allow_decl=*/true);
     tail = &(*tail)->next;
   }
 
@@ -848,11 +848,11 @@ static AstNode *parse_if_stmt(Parser *p) {
   if_node = new_ast_node(p, AST_IF);
   if_node->d.if_stmt.cond = parse_expr(p);
   parse_expect(p, TOKEN_RPAREN, "expect ')'");
-  if_node->d.if_stmt.then_stmt = parse_stmt(p);
+  if_node->d.if_stmt.then_stmt = parse_stmt(p, /*allow_decl=*/false);
   if (p->current.type == TOKEN_ELSE) {
     /* Consume 'else' */
     parser_advance(p);
-    if_node->d.if_stmt.else_stmt = parse_stmt(p);
+    if_node->d.if_stmt.else_stmt = parse_stmt(p, /*allow_decl=*/false);
   }
   return if_node;
 }
@@ -871,7 +871,7 @@ static AstNode *parse_while_stmt(Parser *p) {
   while_node->d.while_stmt.cond = parse_expr(p);
   parse_expect(p, TOKEN_RPAREN, "expect ')'");
   ++p->loop_depth;
-  while_node->d.while_stmt.body = parse_stmt(p);
+  while_node->d.while_stmt.body = parse_stmt(p, /*allow_decl=*/false);
   --p->loop_depth;
   return while_node;
 }
@@ -919,7 +919,7 @@ static AstNode *parse_for_stmt(Parser *p) {
   parse_expect(p, TOKEN_RPAREN, "expect ')'");
 
   ++p->loop_depth;
-  for_node->d.for_stmt.body = parse_stmt(p);
+  for_node->d.for_stmt.body = parse_stmt(p, /*allow_decl=*/false);
   --p->loop_depth;
   p->locals = outer_locals;
   --p->scope_depth;
@@ -938,7 +938,7 @@ static AstNode *parse_do_stmt(Parser *p) {
   parse_expect(p, TOKEN_DO, "expect 'do'");
   do_node = new_ast_node(p, AST_DO);
   ++p->loop_depth;
-  do_node->d.do_stmt.body = parse_stmt(p);
+  do_node->d.do_stmt.body = parse_stmt(p, /*allow_decl=*/false);
   --p->loop_depth;
   parse_expect(p, TOKEN_WHILE, "expect 'while'");
   parse_expect(p, TOKEN_LPAREN, "expect '('");
@@ -1041,7 +1041,7 @@ static AstNode *parse_label_stmt(Parser *p) {
 
   label_node = new_ast_node(p, AST_LABEL);
   label_node->d.label_stmt.name = name;
-  label_node->d.label_stmt.stmt = parse_stmt(p);
+  label_node->d.label_stmt.stmt = parse_stmt(p, /*allow_decl=*/false);
   return label_node;
 }
 
@@ -1144,7 +1144,7 @@ static AstNode *parse_switch_stmt(Parser *p) {
   outer_switch = p->current_switch;
   p->current_switch = switch_node;
 
-  switch_node->d.switch_stmt.body = parse_stmt(p);
+  switch_node->d.switch_stmt.body = parse_stmt(p, /*allow_decl=*/false);
 
   p->current_switch = outer_switch;
 
@@ -1189,7 +1189,7 @@ static AstNode *parse_case_stmt(Parser *p) {
   entry->next = p->current_switch->d.switch_stmt.cases;
   p->current_switch->d.switch_stmt.cases = entry;
 
-  case_node->d.case_stmt.stmt = parse_stmt(p);
+  case_node->d.case_stmt.stmt = parse_stmt(p, /*allow_decl=*/false);
   return case_node;
 }
 
@@ -1225,20 +1225,22 @@ static AstNode *parse_default_stmt(Parser *p) {
   entry->next = p->current_switch->d.switch_stmt.cases;
   p->current_switch->d.switch_stmt.cases = entry;
 
-  default_node->d.case_stmt.stmt = parse_stmt(p);
+  default_node->d.case_stmt.stmt = parse_stmt(p, /*allow_decl=*/false);
   return default_node;
 }
 
 /*
  * statement:
  *   jump-statement | selection-statement | iteration-statement
- *   labeled-statement | compound-statement | declaration
- *   expression-statement | ';'
+ *   labeled-statement | compound-statement | expression-statement | ';'
  * (C11 6.8; as in GCC and Clang, anything not dispatched above is
  *  attempted as an expression-statement, whose parser diagnoses
- *  tokens that cannot start an expression)
+ *  tokens that cannot start an expression. Declarations are block items,
+ *  not statements, so they are accepted only when allow_decl is set —
+ *  i.e. directly inside a compound-statement, like Clang's
+ *  ParsedStmtContext::AllowDeclarationsInC)
  */
-static AstNode *parse_stmt(Parser *p) {
+static AstNode *parse_stmt(Parser *p, bool allow_decl) {
   AstNode *stmt;
 
   if (p->current.type == TOKEN_IDENTIFIER && p->lookahead.type == TOKEN_COLON)
@@ -1270,7 +1272,11 @@ static AstNode *parse_stmt(Parser *p) {
   case TOKEN_LBRACE:
     return parse_block(p);
   case TOKEN_INT:
-    return parse_decl(p);
+    if (allow_decl)
+      return parse_decl(p);
+    // C11 6.8: a declaration is not a statement, so it cannot be the
+    // body of if/while/for/do or a label.
+    parse_error(p, "expect statement");
   case TOKEN_SEMICOLON:
     stmt = new_ast_node(p, AST_EXPR_STMT);
     parser_advance(p);
