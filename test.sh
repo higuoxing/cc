@@ -270,6 +270,13 @@ check 8 'int main() { int a = 12; a &= 10; return a; }'
 check 7 'int main() { int a = 3; a ^= 4; return a; }'
 check 5 'int main() { int a = 1; return a |= 4; }'
 check 24 'int main() { int a = 42; int b = 24; a ^= b; b ^= a; a ^= b; return a; }'
+check 1 'int main() { int i = 0; do { i = i + 1; } while (0); return i; }'
+check 3 'int main() { int i = 0; do { i = i + 1; } while (i < 3); return i; }'
+check 42 'int main() { int i = 0; do { i = i + 1; if (i == 42) return i; } while (1); }'
+check 6 'int main() { int i = 3; int sum = 0; do { sum = sum + i; i = i - 1; } while (i); return sum; }'
+check 4 'int main() { int i = 0; do { i = i + 1; } while (i++ < 3); return i; }'
+check 1 'int main() { int i = 0; do i = i + 1; while (0); return i; }'
+check 9 'int main() { int i = 0; int j; int n = 0; do { j = 0; do { n = n + 1; j = j + 1; } while (j < 3); i = i + 1; } while (i < 3); return n; }'
 
 check_error missing-plus-rhs 'int main() { return 1 +; }' '1:24: error: expect expr'
 check_error missing-sub-rhs 'int main() { return 1 -; }' '1:24: error: expect expr'
@@ -400,5 +407,15 @@ check_error bitand-operand 'int main() { return & 1; }' \
 	    '1:21: error: expect expr'
 check_error bitand-assign-literal 'int main() { 1 &= 2; return 0; }' \
 	    '1:16: error: invalid assignment target'
+check_error missing-do-while 'int main() { do return 0; }' \
+	    "1:27: error: expect 'while'"
+check_error missing-do-cond 'int main() { do return 0; while (); }' \
+	    '1:34: error: expect expr'
+check_error missing-do-rparen 'int main() { do return 0; while (1; }' \
+	    "1:35: error: expect ')'"
+check_error missing-do-semi 'int main() { do return 0; while (1) }' \
+	    "1:37: error: expect ';'"
+check_error missing-do-body 'int main() { do }' \
+	    '1:17: error: expect expr'
 
 printf 'All %d tests passed (%d execution, %d rejection).\n' "$((passed + rejected))" "$passed" "$rejected"

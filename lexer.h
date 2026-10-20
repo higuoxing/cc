@@ -31,6 +31,7 @@ typedef enum {
   TOKEN_ELSE, // 'else'
   TOKEN_WHILE, // 'while'
   TOKEN_FOR,   // 'for'
+  TOKEN_DO,    // 'do'
   TOKEN_IDENTIFIER,
   TOKEN_INT_LITERAL,
   TOKEN_SEMICOLON,

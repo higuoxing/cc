@@ -38,6 +38,7 @@ static AstNode *parse_return_stmt(Parser *p);
 static AstNode *parse_if_stmt(Parser *p);
 static AstNode *parse_while_stmt(Parser *p);
 static AstNode *parse_for_stmt(Parser *p);
+static AstNode *parse_do_stmt(Parser *p);
 static AstNode *parse_stmt(Parser *p);
 static AstNode *parse_block(Parser *p);
 static AstNode *parse_function(Parser *p);
@@ -888,6 +889,26 @@ static AstNode *parse_for_stmt(Parser *p) {
 }
 
 /*
+ * iteration-statement:
+ *   'do' statement 'while' '(' expression ')' ';'
+ * (C11 6.8.5.2)
+ */
+static AstNode *parse_do_stmt(Parser *p) {
+  AstNode *do_node;
+
+  parse_expect(p, TOKEN_DO, "expect 'do'");
+  do_node = new_ast_node(p, AST_DO);
+  do_node->d.do_stmt.body = parse_stmt(p);
+  parse_expect(p, TOKEN_WHILE, "expect 'while'");
+  parse_expect(p, TOKEN_LPAREN, "expect '('");
+  do_node->d.do_stmt.cond = parse_expr(p);
+  parse_expect(p, TOKEN_RPAREN, "expect ')'");
+  // The trailing ';' is part of the do-statement itself.
+  parse_expect(p, TOKEN_SEMICOLON, "expect ';'");
+  return do_node;
+}
+
+/*
  * statement:
  *   jump-statement | selection-statement | iteration-statement
  *   compound-statement | declaration | expression-statement | ';'
@@ -907,6 +928,8 @@ static AstNode *parse_stmt(Parser *p) {
     return parse_while_stmt(p);
   case TOKEN_FOR:
     return parse_for_stmt(p);
+  case TOKEN_DO:
+    return parse_do_stmt(p);
   case TOKEN_LBRACE:
     return parse_block(p);
   case TOKEN_INT:

@@ -298,6 +298,18 @@ static void codegen_stmt(AstNode *stmt) {
     printf(".L.end.%d:\n", seq);
     break;
   }
+  case AST_DO: {
+    int seq = label_seq++;
+
+    // The test sits after the body, so it always runs at least once and
+    // no end label is needed: falling through exits the loop.
+    printf(".L.begin.%d:\n", seq);
+    codegen_stmt(stmt->d.do_stmt.body);
+    codegen_expr(stmt->d.do_stmt.cond);
+    printf("\tcmpl $0, %%eax\n");
+    printf("\tjne .L.begin.%d\n", seq);
+    break;
+  }
   case AST_DECL:
     if (stmt->d.decl.init) {
       codegen_expr(stmt->d.decl.init);
