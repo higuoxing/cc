@@ -39,6 +39,8 @@ static AstNode *parse_if_stmt(Parser *p);
 static AstNode *parse_while_stmt(Parser *p);
 static AstNode *parse_for_stmt(Parser *p);
 static AstNode *parse_do_stmt(Parser *p);
+static AstNode *parse_break_stmt(Parser *p);
+static AstNode *parse_continue_stmt(Parser *p);
 static AstNode *parse_stmt(Parser *p);
 static AstNode *parse_block(Parser *p);
 static AstNode *parse_function(Parser *p);
@@ -95,6 +97,7 @@ static void parser_advance(Parser *p) {
 static void parser_init(Parser *p, const char *filename, const char *source) {
   p->locals = NULL;
   p->scope_depth = 0;
+  p->loop_depth = 0;
   p->stack_size = 0;
   lexer_init(&p->lexer, filename, source);
   p->current = lexer_next_token(&p->lexer);
@@ -835,7 +838,9 @@ static AstNode *parse_while_stmt(Parser *p) {
   while_node = new_ast_node(p, AST_WHILE);
   while_node->d.while_stmt.cond = parse_expr(p);
   parse_expect(p, TOKEN_RPAREN, "expect ')'");
+  ++p->loop_depth;
   while_node->d.while_stmt.body = parse_stmt(p);
+  --p->loop_depth;
   return while_node;
 }
 
@@ -881,7 +886,9 @@ static AstNode *parse_for_stmt(Parser *p) {
     for_node->d.for_stmt.post = parse_expr(p);
   parse_expect(p, TOKEN_RPAREN, "expect ')'");
 
+  ++p->loop_depth;
   for_node->d.for_stmt.body = parse_stmt(p);
+  --p->loop_depth;
   p->locals = outer_locals;
   --p->scope_depth;
 
@@ -898,7 +905,9 @@ static AstNode *parse_do_stmt(Parser *p) {
 
   parse_expect(p, TOKEN_DO, "expect 'do'");
   do_node = new_ast_node(p, AST_DO);
+  ++p->loop_depth;
   do_node->d.do_stmt.body = parse_stmt(p);
+  --p->loop_depth;
   parse_expect(p, TOKEN_WHILE, "expect 'while'");
   parse_expect(p, TOKEN_LPAREN, "expect '('");
   do_node->d.do_stmt.cond = parse_expr(p);
@@ -906,6 +915,34 @@ static AstNode *parse_do_stmt(Parser *p) {
   // The trailing ';' is part of the do-statement itself.
   parse_expect(p, TOKEN_SEMICOLON, "expect ';'");
   return do_node;
+}
+
+/*
+ * jump-statement:
+ *   'break' ';'
+ * (C11 6.8.6.3, valid only within a loop)
+ */
+static AstNode *parse_break_stmt(Parser *p) {
+  // Check before consuming so the error lands on 'break' itself.
+  if (p->loop_depth == 0)
+    parse_error(p, "break statement not within loop");
+  parse_expect(p, TOKEN_BREAK, "expect 'break'");
+  parse_expect(p, TOKEN_SEMICOLON, "expect ';'");
+  return new_ast_node(p, AST_BREAK);
+}
+
+/*
+ * jump-statement:
+ *   'continue' ';'
+ * (C11 6.8.6.2, valid only within a loop)
+ */
+static AstNode *parse_continue_stmt(Parser *p) {
+  // Check before consuming so the error lands on 'continue' itself.
+  if (p->loop_depth == 0)
+    parse_error(p, "continue statement not within loop");
+  parse_expect(p, TOKEN_CONTINUE, "expect 'continue'");
+  parse_expect(p, TOKEN_SEMICOLON, "expect ';'");
+  return new_ast_node(p, AST_CONTINUE);
 }
 
 /*
@@ -930,6 +967,10 @@ static AstNode *parse_stmt(Parser *p) {
     return parse_for_stmt(p);
   case TOKEN_DO:
     return parse_do_stmt(p);
+  case TOKEN_BREAK:
+    return parse_break_stmt(p);
+  case TOKEN_CONTINUE:
+    return parse_continue_stmt(p);
   case TOKEN_LBRACE:
     return parse_block(p);
   case TOKEN_INT:

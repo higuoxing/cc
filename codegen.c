@@ -250,11 +250,28 @@ static void codegen_expr(AstNode *expr) {
   return;
 }
 
-static void codegen_stmt(AstNode *stmt) {
+// break_label and continue_label are the label_seq values of the enclosing
+// loop's .L.end.N and .L.continue.N labels, or -1 outside any loop (the
+// parser rejects break/continue there, so -1 is defensive).
+static void codegen_stmt(AstNode *stmt, int break_label, int continue_label) {
   switch (stmt->type) {
   case AST_RETURN:
     codegen_expr(stmt->d.ret.expr);
     fprintf(out, "\tjmp .Lreturn\n");
+    break;
+  case AST_BREAK:
+    if (break_label < 0) {
+      fprintf(stderr, "break outside loop in codegen\n");
+      exit(1);
+    }
+    fprintf(out, "\tjmp .L.end.%d\n", break_label);
+    break;
+  case AST_CONTINUE:
+    if (continue_label < 0) {
+      fprintf(stderr, "continue outside loop in codegen\n");
+      exit(1);
+    }
+    fprintf(out, "\tjmp .L.continue.%d\n", continue_label);
     break;
   case AST_IF: {
     int seq = label_seq++;
@@ -263,22 +280,25 @@ static void codegen_stmt(AstNode *stmt) {
     codegen_expr(stmt->d.if_stmt.cond);
     fprintf(out, "\tcmpl $0, %%eax\n");
     fprintf(out, "\tje .L.else.%d\n", seq);
-    codegen_stmt(stmt->d.if_stmt.then_stmt);
+    codegen_stmt(stmt->d.if_stmt.then_stmt, break_label, continue_label);
     fprintf(out, "\tjmp .L.end.%d\n", seq);
     fprintf(out, ".L.else.%d:\n", seq);
     if (stmt->d.if_stmt.else_stmt)
-      codegen_stmt(stmt->d.if_stmt.else_stmt);
+      codegen_stmt(stmt->d.if_stmt.else_stmt, break_label, continue_label);
     fprintf(out, ".L.end.%d:\n", seq);
     break;
   }
   case AST_WHILE: {
     int seq = label_seq++;
 
+    // .L.continue.N coincides with the head: 'continue' re-tests the
+    // condition.
     fprintf(out, ".L.begin.%d:\n", seq);
+    fprintf(out, ".L.continue.%d:\n", seq);
     codegen_expr(stmt->d.while_stmt.cond);
     fprintf(out, "\tcmpl $0, %%eax\n");
     fprintf(out, "\tje .L.end.%d\n", seq);
-    codegen_stmt(stmt->d.while_stmt.body);
+    codegen_stmt(stmt->d.while_stmt.body, seq, seq);
     fprintf(out, "\tjmp .L.begin.%d\n", seq);
     fprintf(out, ".L.end.%d:\n", seq);
     break;
@@ -287,7 +307,7 @@ static void codegen_stmt(AstNode *stmt) {
     int seq = label_seq++;
 
     if (stmt->d.for_stmt.init)
-      codegen_stmt(stmt->d.for_stmt.init);
+      codegen_stmt(stmt->d.for_stmt.init, break_label, continue_label);
     fprintf(out, ".L.begin.%d:\n", seq);
     if (stmt->d.for_stmt.cond) {
       // An omitted condition is a nonzero constant: skip the test.
@@ -295,7 +315,9 @@ static void codegen_stmt(AstNode *stmt) {
       fprintf(out, "\tcmpl $0, %%eax\n");
       fprintf(out, "\tje .L.end.%d\n", seq);
     }
-    codegen_stmt(stmt->d.for_stmt.body);
+    codegen_stmt(stmt->d.for_stmt.body, seq, seq);
+    // 'continue' must skip to the post expression, not the condition.
+    fprintf(out, ".L.continue.%d:\n", seq);
     if (stmt->d.for_stmt.post)
       codegen_expr(stmt->d.for_stmt.post);
     fprintf(out, "\tjmp .L.begin.%d\n", seq);
@@ -305,13 +327,15 @@ static void codegen_stmt(AstNode *stmt) {
   case AST_DO: {
     int seq = label_seq++;
 
-    // The test sits after the body, so it always runs at least once and
-    // no end label is needed: falling through exits the loop.
+    // The test sits after the body, so the loop always runs at least once;
+    // 'continue' jumps to the test and 'break' to the end label.
     fprintf(out, ".L.begin.%d:\n", seq);
-    codegen_stmt(stmt->d.do_stmt.body);
+    codegen_stmt(stmt->d.do_stmt.body, seq, seq);
+    fprintf(out, ".L.continue.%d:\n", seq);
     codegen_expr(stmt->d.do_stmt.cond);
     fprintf(out, "\tcmpl $0, %%eax\n");
     fprintf(out, "\tjne .L.begin.%d\n", seq);
+    fprintf(out, ".L.end.%d:\n", seq);
     break;
   }
   case AST_DECL:
@@ -327,7 +351,7 @@ static void codegen_stmt(AstNode *stmt) {
   case AST_BLOCK: {
     AstNode *cur;
     for (cur = stmt->d.block.first_stmt; cur; cur = cur->next)
-      codegen_stmt(cur);
+      codegen_stmt(cur, break_label, continue_label);
     break;
   }
   default:
@@ -355,7 +379,7 @@ void codegen(AstNode *ast, FILE *out_file) {
   fprintf(out, "\tmovq %%rsp, %%rbp\n");
   if (stack_size)
     fprintf(out, "\tsubq $%d, %%rsp\n", stack_size);
-  codegen_stmt(ast->d.function.body);
+  codegen_stmt(ast->d.function.body, -1, -1);
 
   // Reaching the end of main returns zero.
   fprintf(out, "\tmovl $0, %%eax\n");

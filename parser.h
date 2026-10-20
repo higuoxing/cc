@@ -35,6 +35,7 @@ typedef struct {
 
   LocalVar *locals;
   int scope_depth;
+  int loop_depth;
   int stack_size;
 } Parser;
 
@@ -45,6 +46,8 @@ typedef enum {
   AST_WHILE,
   AST_FOR,
   AST_DO,
+  AST_BREAK,
+  AST_CONTINUE,
   AST_RETURN,
   AST_DECL,
   AST_EXPR_STMT,

@@ -283,6 +283,14 @@ check 42 $'int main() { /* multi\nline\ncomment */ return 42; }'
 check 42 'int main() { return /* inline */ 42; }'
 check 7 'int main() { /* a */ return /* b */ 3 /* c */ + /* d */ 4; }'
 check 0 $'int main() { return 0; } // trailing comment'
+check 42 'int main() { int i = 0; while (1) { i = i + 1; if (i == 42) break; } return i; }'
+check 0 'int main() { while (1) break; return 0; }'
+check 5 'int main() { int i = 0; int n = 0; while (i < 10) { i = i + 1; if (i % 2) continue; n = n + 1; } return n; }'
+check 5 'int main() { int i; int n = 0; for (i = 0; i < 10; i = i + 1) { if (i % 2) continue; n = n + 1; } return n; }'
+check 5 'int main() { int i = 0; int n = 0; do { i = i + 1; if (i % 2) continue; n = n + 1; } while (i < 10); return n; }'
+check 3 'int main() { int i = 0; do { i = i + 1; if (i == 3) break; } while (1); return i; }'
+check 9 'int main() { int i; int j; int n = 0; for (i = 0; i < 3; i = i + 1) for (j = 0; j < 10; j = j + 1) { if (j == 3) break; n = n + 1; } return n; }'
+check 6 'int main() { int i; int j; int n = 0; for (i = 0; i < 3; i = i + 1) for (j = 0; j < 3; j = j + 1) { if (j == 1) continue; n = n + 1; } return n; }'
 
 check_error missing-plus-rhs 'int main() { return 1 +; }' '1:24: error: expect expr'
 check_error missing-sub-rhs 'int main() { return 1 -; }' '1:24: error: expect expr'
@@ -425,5 +433,13 @@ check_error missing-do-body 'int main() { do }' \
 	    '1:17: error: expect expr'
 check_error unterminated-comment 'int main() { /* comment' \
 	    '1:24: error: unterminated comment'
+check_error break-outside-loop 'int main() { break; }' \
+	    '1:14: error: break statement not within loop'
+check_error continue-outside-loop 'int main() { continue; }' \
+	    '1:14: error: continue statement not within loop'
+check_error break-after-loop 'int main() { while (1) break; break; }' \
+	    '1:31: error: break statement not within loop'
+check_error missing-break-semi 'int main() { while (1) break }' \
+	    "1:30: error: expect ';'"
 
 printf 'All %d tests passed (%d execution, %d rejection).\n' "$((passed + rejected))" "$passed" "$rejected"
