@@ -315,6 +315,20 @@ check 42 'int foo() { return 24; } int main() { return 42; }'
 check 42 'int main() { return 42; } int foo() { return 24; }'
 check 42 'int foo() { L: ; return 24; } int main() { L: ; return 42; }'
 check 42 'int foo() { int x = 0; while (x < 3) x = x + 1; switch (x) { case 3: return 42; } return 0; } int main() { return 42; }'
+check 42 'int foo() { return 42; } int main() { return foo(); }'
+check 42 'int foo() { return 40; } int main() { return foo() + 2; }'
+check 42 'int foo() { return 42; } int main() { foo(); return 42; }'
+check 42 'int foo() { return 21; } int main() { return foo() + foo(); }'
+check 42 'int foo() { return 42; } int bar() { return foo(); } int main() { return bar(); }'
+check 42 'int main() { return foo(); } int foo() { return 42; }'
+check 3 'int one() { return 1; } int main() { return one() + one() + one(); }'
+check 127 'int foo() { return 40; } int main() { return 1 + (2 + foo()) * 3; }'
+check 42 'int add(int a, int b) { return a + b; } int main() { return add(40, 2); }'
+check 42 'int add1(int a) { return a + 1; } int main() { return add1(41); }'
+check 120 'int fact(int n) { if (n == 0) return 1; return n * fact(n - 1); } int main() { return fact(5); }'
+check 55 'int fib(int n) { if (n < 2) return n; return fib(n - 1) + fib(n - 2); } int main() { return fib(10); }'
+check 21 'int sum6(int a, int b, int c, int d, int e, int f) { return a + b + c + d + e + f; } int main() { return sum6(1, 2, 3, 4, 5, 6); }'
+check 42 'int pick(int a, int b) { return b; } int main() { int x = 42; return pick(0, x); }'
 
 check_error missing-plus-rhs 'int main() { return 1 +; }' '1:24: error: expect expr'
 check_error missing-sub-rhs 'int main() { return 1 -; }' '1:24: error: expect expr'
@@ -493,6 +507,19 @@ check_error decl-as-case-body \
 check_error redefinition \
 	    'int foo() { return 0; } int foo() { return 1; } int main() { return 0; }' \
 	    "1:29: error: redefinition of function 'foo'"
+check_error call-undefined 'int main() { return foo(); }' \
+	    "1:21: error: function 'foo' not defined"
+check_error call-on-variable 'int main() { int a = 1; return a(); }' \
+	    '1:32: error: called object is not a function'
+check_error param-shadow 'int foo(int a) { int a = 42; return a; } int main() { return foo(24); }' \
+	    "1:22: error: declaration of 'a' shadows a parameter"
+check_error too-many-args 'int foo(int a) { return a; } int main() { return foo(1, 2); }' \
+	    "1:50: error: wrong number of arguments to function 'foo'"
+check_error too-few-args 'int foo(int a) { return a; } int main() { return foo(); }' \
+	    "1:50: error: wrong number of arguments to function 'foo'"
+check_error too-many-params \
+	    'int foo(int a, int b, int c, int d, int e, int f, int g) { return 0; } int main() { return 42; }' \
+	    '1:51: error: too many parameters'
 check_error missing-break-semi 'int main() { while (1) break }' \
 	    "1:30: error: expect ';'"
 check_error goto-undefined 'int main() { goto L; }' \

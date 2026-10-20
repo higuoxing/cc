@@ -32,6 +32,7 @@ static void parse_error(Parser *p, const char *fmt, ...)
     __attribute__((format(printf, 2, 3), noreturn));
 static AstNode *parse_expr(Parser *p);
 static AstNode *parse_unary(Parser *p);
+static AstNode *parse_call_expr(Parser *p);
 static AstNode *parse_postfix(Parser *p);
 static AstNode *parse_primary(Parser *p);
 static AstNode *parse_decl(Parser *p);
@@ -49,6 +50,7 @@ static AstNode *parse_case_stmt(Parser *p);
 static AstNode *parse_default_stmt(Parser *p);
 static AstNode *parse_stmt(Parser *p, bool allow_decl);
 static void check_gotos(Parser *p);
+static void check_calls(Parser *p);
 static int64_t eval_const_expr(Parser *p, AstNode *expr);
 static AstNode *parse_block(Parser *p);
 static AstNode *parse_function(Parser *p);
@@ -76,6 +78,14 @@ static LocalVar *declare_local_var(Parser *p, Token name) {
     if (same_identifier(var->name, name))
       parse_error(p, "duplicate local variable");
   }
+
+  /* The function body's outermost block (depth 1) may not redeclare a
+   * parameter (depth 0); deeper blocks may shadow freely (C11 6.2.1). */
+  if (p->scope_depth == 1)
+    for (var = p->locals; var && var->scope_depth == 0; var = var->next)
+      if (same_identifier(var->name, name))
+        parse_error(p, "declaration of '%.*s' shadows a parameter", name.len,
+                    name.start);
 
   var = (LocalVar *)calloc(1, sizeof(LocalVar));
   if (!var)
@@ -127,6 +137,7 @@ static void parser_init(Parser *p, const char *filename, const char *source) {
   p->labels = NULL;
   p->goto_refs = NULL;
   p->functions = NULL;
+  p->call_refs = NULL;
   p->current_switch = NULL;
   p->scope_depth = 0;
   p->loop_depth = 0;
@@ -234,14 +245,71 @@ static AstNode *parse_unary(Parser *p) {
 
 /*
  * postfix-expression:
+ *   identifier '(' argument-expression-list_opt ')'
+ * (C11 6.5.2.2; the callee and the argument count are validated after
+ *  the translation unit is parsed, since a function may be called before
+ *  it is defined. At most six arguments, matching the register ABI.)
+ */
+static AstNode *parse_call_expr(Parser *p) {
+  AstNode *call;
+  CallRef *ref;
+  int nargs = 0;
+
+  ref = (CallRef *)calloc(1, sizeof(CallRef));
+  if (!ref)
+    parse_error(p, "out of memory");
+  ref->name = p->current;
+  ref->loc = p->current;
+  ref->next = p->call_refs;
+  p->call_refs = ref;
+
+  call = new_ast_node(p, AST_CALL);
+  call->d.call.name = p->current;
+  /* Consume the function name. */
+  parser_advance(p);
+  parse_expect(p, TOKEN_LPAREN, "expect '('");
+
+  if (p->current.type != TOKEN_RPAREN) {
+    AstNode **tail = &call->d.call.args;
+
+    for (;;) {
+      if (nargs == 6)
+        parse_error(p, "too many arguments");
+      *tail = parse_expr(p);
+      tail = &(*tail)->next;
+      nargs++;
+      if (p->current.type == TOKEN_COMMA) {
+        parser_advance(p);
+        continue;
+      }
+      break;
+    }
+  }
+  parse_expect(p, TOKEN_RPAREN, "expect ')'");
+
+  ref->nargs = nargs;
+  return call;
+}
+
+/*
+ * postfix-expression:
  *   primary-expression
+ *   identifier '(' ')'
  *   postfix-expression '++' | postfix-expression '--'
- * (C11 6.5.2; the operand must be a modifiable lvalue, 6.5.2.4)
+ * (C11 6.5.2; the increment operand must be a modifiable lvalue, 6.5.2.4)
  */
 static AstNode *parse_postfix(Parser *p) {
   AstNode *left;
 
-  left = parse_primary(p);
+  if (p->current.type == TOKEN_IDENTIFIER &&
+      p->lookahead.type == TOKEN_LPAREN) {
+    if (find_local_var(p, p->current))
+      parse_error(p, "called object is not a function");
+    left = parse_call_expr(p);
+  } else {
+    left = parse_primary(p);
+  }
+
   while (p->current.type == TOKEN_PLUS_PLUS ||
          p->current.type == TOKEN_MINUS_MINUS) {
     AstNode *postfixed;
@@ -811,10 +879,31 @@ static AstNode *parse_block(Parser *p) {
 }
 
 /*
- * function-definition:
- *   'int' identifier '(' ')' compound-statement
- * (C11 6.9.1, restricted to int return type and no parameters)
+ * Every call must name a function defined somewhere in the translation
+ * unit; a function may be called before it is defined.
  */
+static void check_calls(Parser *p) {
+  CallRef *ref;
+
+  for (ref = p->call_refs; ref; ref = ref->next) {
+    Function *func;
+
+    for (func = p->functions; func; func = func->next)
+      if (same_identifier(func->name, ref->name))
+        break;
+    if (!func) {
+      p->current = ref->loc;
+      parse_error(p, "function '%.*s' not defined", ref->name.len,
+                  ref->name.start);
+    }
+    if (ref->nargs != func->nparams) {
+      p->current = ref->loc;
+      parse_error(p, "wrong number of arguments to function '%.*s'",
+                  ref->name.len, ref->name.start);
+    }
+  }
+}
+
 /*
  * Every 'goto' must refer to a label declared somewhere in the function;
  * labels have function scope and may be declared after the goto.
@@ -836,9 +925,15 @@ static void check_gotos(Parser *p) {
   }
 }
 
+/*
+ * function-definition:
+ *   'int' identifier '(' parameter-list_opt ')' compound-statement
+ * (C11 6.9.1, restricted to int return type and int parameters)
+ */
 static AstNode *parse_function(Parser *p) {
   AstNode *fn;
   Function *func;
+  LocalVar *var;
 
   reset_function_state(p);
   fn = new_ast_node(p, AST_FUNCTION);
@@ -866,6 +961,57 @@ static AstNode *parse_function(Parser *p) {
   parser_advance(p);
 
   parse_expect(p, TOKEN_LPAREN, "expect '('");
+
+  if (p->current.type != TOKEN_RPAREN) {
+    int nparams = 0;
+
+    for (;;) {
+      LocalVar *param;
+      Token name;
+
+      /* At most six parameters, matching the register ABI; the call
+       * side enforces the same limit on arguments. */
+      if (nparams == 6)
+        parse_error(p, "too many parameters");
+      parse_expect(p, TOKEN_INT, "expect 'int'");
+      if (p->current.type != TOKEN_IDENTIFIER)
+        parse_error(p, "expect parameter name");
+
+      /* The duplicate check runs while 'current' is the name itself. */
+      for (var = p->locals; var && var->scope_depth == 0; var = var->next)
+        if (same_identifier(var->name, p->current))
+          parse_error(p, "duplicate local variable");
+
+      name = p->current;
+      parser_advance(p);
+
+      param = (LocalVar *)calloc(1, sizeof(LocalVar));
+      if (!param)
+        parse_error(p, "out of memory");
+      param->name = name;
+      param->scope_depth = 0;
+      /* The usual offset convention: the slot is at -offset(%rbp).
+       * Parameters occupy the 8-byte slots closest to %rbp, and locals
+       * start below them via stack_size. */
+      param->offset = 8 * (nparams + 1);
+      param->next = p->locals;
+      p->locals = param;
+      nparams++;
+
+      if (p->current.type == TOKEN_COMMA) {
+        parser_advance(p);
+        continue;
+      }
+      break;
+    }
+
+    /* Snapshot the parameter chain (reversed: last parameter first);
+     * codegen counts and maps registers accordingly. Locals start below
+     * the parameter slots. */
+    fn->d.function.params = p->locals;
+    func->nparams = nparams;
+    p->stack_size = 8 * nparams;
+  }
   parse_expect(p, TOKEN_RPAREN, "expect ')'");
   fn->d.function.body = parse_block(p);
   check_gotos(p);
@@ -1350,5 +1496,6 @@ AstNode *parse_translation_unit(const char *filename, const char *source) {
     tail = &(*tail)->next;
   }
 
+  check_calls(&p);
   return head;
 }

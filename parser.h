@@ -55,8 +55,20 @@ typedef struct GotoRef {
  */
 typedef struct Function {
   Token name;
+  int nparams;
   struct Function *next;
 } Function;
+
+/*
+ * A function call whose target is validated after the translation unit is
+ * parsed, since a function may be called before it is defined.
+ */
+typedef struct CallRef {
+  Token name; /* Called function. */
+  Token loc; /* The callee identifier, for diagnostics. */
+  int nargs;
+  struct CallRef *next;
+} CallRef;
 
 /*
  * The case labels of one switch, attached to its AST_SWITCH node for
@@ -76,6 +88,7 @@ typedef struct {
   Label *labels;
   GotoRef *goto_refs;
   Function *functions;
+  CallRef *call_refs;
   /*
    * The innermost switch being parsed, or NULL; 'case' and 'default' are
    * valid only inside its body, and 'break' may target it.
@@ -99,6 +112,7 @@ typedef enum {
   AST_LABEL,
   AST_SWITCH,
   AST_CASE,
+  AST_CALL,
   AST_RETURN,
   AST_DECL,
   AST_EXPR_STMT,
@@ -139,6 +153,12 @@ typedef struct AstNode {
     struct {
       Token name;
       struct AstNode *body;
+      /*
+       * The parameters, in declaration order. Their LocalVar entries also
+       * sit in the function's locals chain for lookup, so the chain here
+       * is the snapshot taken before locals are declared.
+       */
+      struct LocalVar *params;
       int stack_size;
     } function;
 
@@ -196,6 +216,11 @@ typedef struct AstNode {
       int label; /* Dispatch label number, assigned by codegen. */
       int is_default; /* 1 for 'default:', 0 for 'case'. */
     } case_stmt;
+
+    struct {
+      Token name;
+      struct AstNode *args; /* First argument expression; NULL for now. */
+    } call;
 
     struct {
       struct AstNode *expr;
