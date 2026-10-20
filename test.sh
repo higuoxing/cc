@@ -236,6 +236,40 @@ check 42 'int main() { for (int i = 0; i < 3; i = i + 1) ; int i = 42; return i;
 check 42 'int main() { int i = 0; for (;;) { i = i + 1; if (i == 42) return i; } }'
 check 1 'int main() { int i = 0; for (; i < 3; i = i + 1) ; return i == 3; }'
 check 9 'int main() { int i; int j; int n = 0; for (i = 0; i < 3; i = i + 1) for (j = 0; j < 3; j = j + 1) n = n + 1; return n; }'
+check 1 'int main() { return 1 && 1; }'
+check 0 'int main() { return 1 && 0; }'
+check 0 'int main() { return 0 && 1; }'
+check 1 'int main() { return 1 || 0; }'
+check 1 'int main() { return 0 || 1; }'
+check 0 'int main() { return 0 || 0; }'
+check 42 'int main() { int a = 42; 0 && (a = 1); return a; }'
+check 42 'int main() { int a = 42; 1 || (a = 1); return a; }'
+check 1 'int main() { int a = 0; 1 && (a = 1); return a; }'
+check 1 'int main() { int a = 0; 0 || (a = 1); return a; }'
+check 1 'int main() { return 2 && 3; }'
+check 1 'int main() { int a = 2; return a && a; }'
+check 1 'int main() { return 1 || 0 && 0; }'
+check 0 'int main() { return (1 || 0) && 0; }'
+check 42 'int main() { int a = 1; int b = 2; if (a == 1 && b == 2) return 42; return 0; }'
+check 3 'int main() { int i = 0; while (i < 3 && i != 0 || i == 0) i = i + 1; return i; }'
+check 1 'int main() { return 1 & 1; }'
+check 0 'int main() { return 1 & 2; }'
+check 3 'int main() { return 1 | 2; }'
+check 0 'int main() { return 0 | 0; }'
+check 3 'int main() { return 1 ^ 2; }'
+check 0 'int main() { return 5 ^ 5; }'
+check 12 'int main() { return 12 & 15; }'
+check 15 'int main() { return 12 | 3; }'
+check 3 'int main() { return 1 | 2 & 2; }'
+check 7 'int main() { return 2 | 4 ^ 3; }'
+check 4 'int main() { return 2 & 4 ^ 4; }'
+check 1 'int main() { return 1 & 2 == 2; }'
+check 1 'int main() { return 5 & 3 && 5 | 3; }'
+check 6 'int main() { int a = 4; a |= 2; return a; }'
+check 8 'int main() { int a = 12; a &= 10; return a; }'
+check 7 'int main() { int a = 3; a ^= 4; return a; }'
+check 5 'int main() { int a = 1; return a |= 4; }'
+check 24 'int main() { int a = 42; int b = 24; a ^= b; b ^= a; a ^= b; return a; }'
 
 check_error missing-plus-rhs 'int main() { return 1 +; }' '1:24: error: expect expr'
 check_error missing-sub-rhs 'int main() { return 1 -; }' '1:24: error: expect expr'
@@ -350,5 +384,21 @@ check_error missing-for-semi 'int main() { for (1) return 0; }' \
 	    "1:20: error: expect ';'"
 check_error missing-for-rparen 'int main() { for (1; 1; 1 return 0; }' \
 	    "1:27: error: expect ')'"
+check_error logical-and-operand 'int main() { return && 1; }' \
+	    '1:21: error: expect expr'
+check_error missing-logical-and-rhs 'int main() { return 1 &&; }' \
+	    '1:25: error: expect expr'
+check_error missing-logical-or-rhs 'int main() { return 1 ||; }' \
+	    '1:25: error: expect expr'
+check_error missing-bitand-rhs 'int main() { return 1 &; }' \
+	    '1:24: error: expect expr'
+check_error missing-bitor-rhs 'int main() { return 1 |; }' \
+	    '1:24: error: expect expr'
+check_error missing-bitxor-rhs 'int main() { return 1 ^; }' \
+	    '1:24: error: expect expr'
+check_error bitand-operand 'int main() { return & 1; }' \
+	    '1:21: error: expect expr'
+check_error bitand-assign-literal 'int main() { 1 &= 2; return 0; }' \
+	    '1:16: error: invalid assignment target'
 
 printf 'All %d tests passed (%d execution, %d rejection).\n' "$((passed + rejected))" "$passed" "$rejected"

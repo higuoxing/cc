@@ -59,6 +59,9 @@ static void codegen_expr(AstNode *expr) {
   case AST_MOD:
   case AST_LSHIFT:
   case AST_RSHIFT:
+  case AST_BIT_AND:
+  case AST_BIT_XOR:
+  case AST_BIT_OR:
     codegen_expr(expr->d.binary.rhs);
     printf("\tcltq\n");
     printf("\tpushq %%rax\n");
@@ -86,6 +89,12 @@ static void codegen_expr(AstNode *expr) {
     } else if (expr->type == AST_RSHIFT) {
       // Arithmetic shift: C requires sign-fill for signed '>>'.
       printf("\tsarl %%cl, %%eax\n");
+    } else if (expr->type == AST_BIT_AND) {
+      printf("\tandl %%ecx, %%eax\n");
+    } else if (expr->type == AST_BIT_XOR) {
+      printf("\txorl %%ecx, %%eax\n");
+    } else if (expr->type == AST_BIT_OR) {
+      printf("\torl %%ecx, %%eax\n");
     } else {
       fprintf(stderr, "unrecognized binary operator\n");
       exit(1);
@@ -131,6 +140,40 @@ static void codegen_expr(AstNode *expr) {
     // Zero-extend %al into %eax.
     printf("\tmovzbl %%al, %%eax\n");
     break;
+  case AST_LOGICAL_AND: {
+    int seq = label_seq++;
+
+    // Short-circuit: skip the right operand when the left one is zero.
+    codegen_expr(expr->d.binary.lhs);
+    printf("\tcmpl $0, %%eax\n");
+    printf("\tje .L.false.%d\n", seq);
+    codegen_expr(expr->d.binary.rhs);
+    printf("\tcmpl $0, %%eax\n");
+    printf("\tje .L.false.%d\n", seq);
+    printf("\tmovl $1, %%eax\n");
+    printf("\tjmp .L.end.%d\n", seq);
+    printf(".L.false.%d:\n", seq);
+    printf("\tmovl $0, %%eax\n");
+    printf(".L.end.%d:\n", seq);
+    break;
+  }
+  case AST_LOGICAL_OR: {
+    int seq = label_seq++;
+
+    // Short-circuit: skip the right operand when the left one is nonzero.
+    codegen_expr(expr->d.binary.lhs);
+    printf("\tcmpl $0, %%eax\n");
+    printf("\tjne .L.true.%d\n", seq);
+    codegen_expr(expr->d.binary.rhs);
+    printf("\tcmpl $0, %%eax\n");
+    printf("\tjne .L.true.%d\n", seq);
+    printf("\tmovl $0, %%eax\n");
+    printf("\tjmp .L.end.%d\n", seq);
+    printf(".L.true.%d:\n", seq);
+    printf("\tmovl $1, %%eax\n");
+    printf(".L.end.%d:\n", seq);
+    break;
+  }
   case AST_NEG:
     codegen_expr(expr->d.unary.operand);
     printf("\tnegl %%eax\n");

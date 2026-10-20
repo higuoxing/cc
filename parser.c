@@ -481,23 +481,171 @@ static AstNode *parse_equality(Parser *p) {
 }
 
 /*
- * assignment-expression:
+ * AND-expression:
  *   equality-expression
- *   equality-expression assignment-operator assignment-expression
+ *   AND-expression '&' equality-expression
+ * (C11 6.5.10)
+ */
+static AstNode *parse_bitwise_and(Parser *p) {
+  AstNode *left;
+
+  left = parse_equality(p);
+
+  while (p->current.type == TOKEN_BIT_AND) {
+    AstNode *right;
+    AstNode *node;
+
+    // Consume '&'
+    parser_advance(p);
+
+    right = parse_equality(p);
+    node = new_ast_node(p, AST_BIT_AND);
+    node->d.binary.lhs = left;
+    node->d.binary.rhs = right;
+
+    left = node;
+  }
+
+  return left;
+}
+
+/*
+ * exclusive-OR-expression:
+ *   AND-expression
+ *   exclusive-OR-expression '^' AND-expression
+ * (C11 6.5.11)
+ */
+static AstNode *parse_bitwise_xor(Parser *p) {
+  AstNode *left;
+
+  left = parse_bitwise_and(p);
+
+  while (p->current.type == TOKEN_BIT_XOR) {
+    AstNode *right;
+    AstNode *node;
+
+    // Consume '^'
+    parser_advance(p);
+
+    right = parse_bitwise_and(p);
+    node = new_ast_node(p, AST_BIT_XOR);
+    node->d.binary.lhs = left;
+    node->d.binary.rhs = right;
+
+    left = node;
+  }
+
+  return left;
+}
+
+/*
+ * inclusive-OR-expression:
+ *   exclusive-OR-expression
+ *   inclusive-OR-expression '|' exclusive-OR-expression
+ * (C11 6.5.12)
+ */
+static AstNode *parse_bitwise_or(Parser *p) {
+  AstNode *left;
+
+  left = parse_bitwise_xor(p);
+
+  while (p->current.type == TOKEN_BIT_OR) {
+    AstNode *right;
+    AstNode *node;
+
+    // Consume '|'
+    parser_advance(p);
+
+    right = parse_bitwise_xor(p);
+    node = new_ast_node(p, AST_BIT_OR);
+    node->d.binary.lhs = left;
+    node->d.binary.rhs = right;
+
+    left = node;
+  }
+
+  return left;
+}
+
+/*
+ * logical-AND-expression:
+ *   inclusive-OR-expression
+ *   logical-AND-expression '&&' inclusive-OR-expression
+ * (C11 6.5.13)
+ */
+static AstNode *parse_logical_and(Parser *p) {
+  AstNode *left;
+
+  left = parse_bitwise_or(p);
+
+  while (p->current.type == TOKEN_AND_AND) {
+    AstNode *right;
+    AstNode *node;
+
+    // Consume '&&'
+    parser_advance(p);
+
+    right = parse_bitwise_or(p);
+    node = new_ast_node(p, AST_LOGICAL_AND);
+    node->d.binary.lhs = left;
+    node->d.binary.rhs = right;
+
+    left = node;
+  }
+
+  return left;
+}
+
+/*
+ * logical-OR-expression:
+ *   logical-AND-expression
+ *   logical-OR-expression '||' logical-AND-expression
+ * (C11 6.5.14)
+ */
+static AstNode *parse_logical_or(Parser *p) {
+  AstNode *left;
+
+  left = parse_logical_and(p);
+
+  while (p->current.type == TOKEN_OR_OR) {
+    AstNode *right;
+    AstNode *node;
+
+    // Consume '||'
+    parser_advance(p);
+
+    right = parse_logical_and(p);
+    node = new_ast_node(p, AST_LOGICAL_OR);
+    node->d.binary.lhs = left;
+    node->d.binary.rhs = right;
+
+    left = node;
+  }
+
+  return left;
+}
+
+/*
+ * assignment-expression:
+ *   logical-OR-expression
+ *   logical-OR-expression assignment-operator assignment-expression
  * (C11 6.5.16, without conditional or comma expressions; the left
  *  operand must be an lvalue. assignment-operator: = += -= *= /= %=
- *  <<= >>=)
+ *  <<= >>= &= ^= |=)
  */
 static AstNode *parse_expr(Parser *p) {
   AstNode *left;
 
-  left = parse_equality(p);
+  left = parse_logical_or(p);
   if (p->current.type == TOKEN_ASSIGN || p->current.type == TOKEN_PLUS_EQ ||
       p->current.type == TOKEN_MINUS_EQ || p->current.type == TOKEN_STAR_EQ ||
       p->current.type == TOKEN_SLASH_EQ ||
       p->current.type == TOKEN_PERCENT_EQ ||
       p->current.type == TOKEN_LSHIFT_EQ ||
-      p->current.type == TOKEN_RSHIFT_EQ) {
+      p->current.type == TOKEN_RSHIFT_EQ ||
+      p->current.type == TOKEN_BIT_AND_EQ ||
+      p->current.type == TOKEN_BIT_XOR_EQ ||
+      p->current.type == TOKEN_BIT_OR_EQ) {
     AstNode *node;
     AstNode *rhs;
     TokenType op;
@@ -545,6 +693,15 @@ static AstNode *parse_expr(Parser *p) {
         break;
       case TOKEN_RSHIFT_EQ:
         binop_ty = AST_RSHIFT;
+        break;
+      case TOKEN_BIT_AND_EQ:
+        binop_ty = AST_BIT_AND;
+        break;
+      case TOKEN_BIT_XOR_EQ:
+        binop_ty = AST_BIT_XOR;
+        break;
+      case TOKEN_BIT_OR_EQ:
+        binop_ty = AST_BIT_OR;
         break;
       default:
         fprintf(stderr, "unreachable %s:%d", __FILE__, __LINE__);

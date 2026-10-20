@@ -220,6 +220,47 @@ Token lexer_next_token(Lexer *l) {
       tok.len = 1;
     }
     return tok;
+  case '&':
+    lexer_advance(l);
+    if (*l->cursor == '&') {
+      lexer_advance(l);
+      tok.type = TOKEN_AND_AND;
+      tok.len = 2;
+    } else if (*l->cursor == '=') {
+      lexer_advance(l);
+      tok.type = TOKEN_BIT_AND_EQ;
+      tok.len = 2;
+    } else {
+      tok.type = TOKEN_BIT_AND;
+      tok.len = 1;
+    }
+    return tok;
+  case '|':
+    lexer_advance(l);
+    if (*l->cursor == '|') {
+      lexer_advance(l);
+      tok.type = TOKEN_OR_OR;
+      tok.len = 2;
+    } else if (*l->cursor == '=') {
+      lexer_advance(l);
+      tok.type = TOKEN_BIT_OR_EQ;
+      tok.len = 2;
+    } else {
+      tok.type = TOKEN_BIT_OR;
+      tok.len = 1;
+    }
+    return tok;
+  case '^':
+    lexer_advance(l);
+    if (*l->cursor == '=') {
+      lexer_advance(l);
+      tok.type = TOKEN_BIT_XOR_EQ;
+      tok.len = 2;
+    } else {
+      tok.type = TOKEN_BIT_XOR;
+      tok.len = 1;
+    }
+    return tok;
   case '=':
     lexer_advance(l);
     if (*l->cursor == '=') {
