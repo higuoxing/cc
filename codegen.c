@@ -26,31 +26,35 @@
 // ones (.L.else.N, .L.end.N, ...).
 static int label_seq;
 
+// Assembly is emitted here; set by codegen() so that helpers need no FILE*
+// parameter (GCC's asm_out_file).
+static FILE *out;
+
 static void codegen_addr(AstNode *expr) {
   if (expr->type != AST_VAR) {
     fprintf(stderr, "invalid address expr in codegen\n");
     exit(1);
   }
-  printf("\tleaq -%d(%%rbp), %%rax\n", expr->d.variable.var->offset);
+  fprintf(out, "\tleaq -%d(%%rbp), %%rax\n", expr->d.variable.var->offset);
 }
 
 static void codegen_expr(AstNode *expr) {
   switch (expr->type) {
   case AST_VAR:
     codegen_addr(expr);
-    printf("\tmovl (%%rax), %%eax\n");
+    fprintf(out, "\tmovl (%%rax), %%eax\n");
     break;
   case AST_ASSIGN:
     codegen_expr(expr->d.binary.rhs);
-    printf("\tpushq %%rax\n");
+    fprintf(out, "\tpushq %%rax\n");
     codegen_addr(expr->d.binary.lhs);
-    printf("\tpopq %%rcx\n");
-    printf("\tmovl %%ecx, (%%rax)\n");
-    printf("\tmovl %%ecx, %%eax\n");
+    fprintf(out, "\tpopq %%rcx\n");
+    fprintf(out, "\tmovl %%ecx, (%%rax)\n");
+    fprintf(out, "\tmovl %%ecx, %%eax\n");
     break;
   case AST_INT_LITERAL:
     // movl $VAL, %eax
-    printf("\tmovl $%" PRId64 ", %%eax\n", expr->d.int_literal.val);
+    fprintf(out, "\tmovl $%" PRId64 ", %%eax\n", expr->d.int_literal.val);
     break;
   case AST_ADD:
   case AST_SUB:
@@ -63,38 +67,38 @@ static void codegen_expr(AstNode *expr) {
   case AST_BIT_XOR:
   case AST_BIT_OR:
     codegen_expr(expr->d.binary.rhs);
-    printf("\tcltq\n");
-    printf("\tpushq %%rax\n");
+    fprintf(out, "\tcltq\n");
+    fprintf(out, "\tpushq %%rax\n");
     codegen_expr(expr->d.binary.lhs);
-    printf("\tpopq %%rcx\n");
+    fprintf(out, "\tpopq %%rcx\n");
 
     if (expr->type == AST_ADD) {
       // %eax = %eax + %ecx
-      printf("\taddl %%ecx, %%eax\n");
+      fprintf(out, "\taddl %%ecx, %%eax\n");
     } else if (expr->type == AST_SUB) {
       // %eax = %eax - %ecx
-      printf("\tsubl %%ecx, %%eax\n");
+      fprintf(out, "\tsubl %%ecx, %%eax\n");
     } else if (expr->type == AST_MUL) {
       // %eax = %eax * %ecx
-      printf("\timull %%ecx, %%eax\n");
+      fprintf(out, "\timull %%ecx, %%eax\n");
     } else if (expr->type == AST_DIV || expr->type == AST_MOD) {
       // idivl divides 64-bit value in %edx:%eax by operand (%ecx)
-      printf("\tcltd\n");        // Sign-extend %eax into %edx:%eax
-      printf("\tidivl %%ecx\n"); // Quotient in %eax, remainder in %edx
+      fprintf(out, "\tcltd\n");        // Sign-extend %eax into %edx:%eax
+      fprintf(out, "\tidivl %%ecx\n"); // Quotient in %eax, remainder in %edx
       if (expr->type == AST_MOD)
-        printf("\tmovl %%edx, %%eax\n"); // Remainder is the result
+        fprintf(out, "\tmovl %%edx, %%eax\n"); // Remainder is the result
     } else if (expr->type == AST_LSHIFT) {
       // The shift count comes from %cl, the low byte of %ecx.
-      printf("\tsall %%cl, %%eax\n");
+      fprintf(out, "\tsall %%cl, %%eax\n");
     } else if (expr->type == AST_RSHIFT) {
       // Arithmetic shift: C requires sign-fill for signed '>>'.
-      printf("\tsarl %%cl, %%eax\n");
+      fprintf(out, "\tsarl %%cl, %%eax\n");
     } else if (expr->type == AST_BIT_AND) {
-      printf("\tandl %%ecx, %%eax\n");
+      fprintf(out, "\tandl %%ecx, %%eax\n");
     } else if (expr->type == AST_BIT_XOR) {
-      printf("\txorl %%ecx, %%eax\n");
+      fprintf(out, "\txorl %%ecx, %%eax\n");
     } else if (expr->type == AST_BIT_OR) {
-      printf("\torl %%ecx, %%eax\n");
+      fprintf(out, "\torl %%ecx, %%eax\n");
     } else {
       fprintf(stderr, "unrecognized binary operator\n");
       exit(1);
@@ -107,54 +111,54 @@ static void codegen_expr(AstNode *expr) {
   case AST_EQ:
   case AST_NE:
     codegen_expr(expr->d.binary.rhs);
-    printf("\tcltq\n");
-    printf("\tpushq %%rax\n");
+    fprintf(out, "\tcltq\n");
+    fprintf(out, "\tpushq %%rax\n");
     codegen_expr(expr->d.binary.lhs);
-    printf("\tpopq %%rcx\n");
+    fprintf(out, "\tpopq %%rcx\n");
 
     // cmpl computes %eax - %ecx, i.e. lhs - rhs, and sets the flags.
-    printf("\tcmpl %%ecx, %%eax\n");
+    fprintf(out, "\tcmpl %%ecx, %%eax\n");
     switch (expr->type) {
     case AST_EQ:
-      printf("\tsete %%al\n");
+      fprintf(out, "\tsete %%al\n");
       break;
     case AST_NE:
-      printf("\tsetne %%al\n");
+      fprintf(out, "\tsetne %%al\n");
       break;
     case AST_LT:
-      printf("\tsetl %%al\n");
+      fprintf(out, "\tsetl %%al\n");
       break;
     case AST_LE:
-      printf("\tsetle %%al\n");
+      fprintf(out, "\tsetle %%al\n");
       break;
     case AST_GT:
-      printf("\tsetg %%al\n");
+      fprintf(out, "\tsetg %%al\n");
       break;
     case AST_GE:
-      printf("\tsetge %%al\n");
+      fprintf(out, "\tsetge %%al\n");
       break;
     default:
       fprintf(stderr, "unrecognized comparison operator\n");
       exit(1);
     }
     // Zero-extend %al into %eax.
-    printf("\tmovzbl %%al, %%eax\n");
+    fprintf(out, "\tmovzbl %%al, %%eax\n");
     break;
   case AST_LOGICAL_AND: {
     int seq = label_seq++;
 
     // Short-circuit: skip the right operand when the left one is zero.
     codegen_expr(expr->d.binary.lhs);
-    printf("\tcmpl $0, %%eax\n");
-    printf("\tje .L.false.%d\n", seq);
+    fprintf(out, "\tcmpl $0, %%eax\n");
+    fprintf(out, "\tje .L.false.%d\n", seq);
     codegen_expr(expr->d.binary.rhs);
-    printf("\tcmpl $0, %%eax\n");
-    printf("\tje .L.false.%d\n", seq);
-    printf("\tmovl $1, %%eax\n");
-    printf("\tjmp .L.end.%d\n", seq);
-    printf(".L.false.%d:\n", seq);
-    printf("\tmovl $0, %%eax\n");
-    printf(".L.end.%d:\n", seq);
+    fprintf(out, "\tcmpl $0, %%eax\n");
+    fprintf(out, "\tje .L.false.%d\n", seq);
+    fprintf(out, "\tmovl $1, %%eax\n");
+    fprintf(out, "\tjmp .L.end.%d\n", seq);
+    fprintf(out, ".L.false.%d:\n", seq);
+    fprintf(out, "\tmovl $0, %%eax\n");
+    fprintf(out, ".L.end.%d:\n", seq);
     break;
   }
   case AST_LOGICAL_OR: {
@@ -162,82 +166,82 @@ static void codegen_expr(AstNode *expr) {
 
     // Short-circuit: skip the right operand when the left one is nonzero.
     codegen_expr(expr->d.binary.lhs);
-    printf("\tcmpl $0, %%eax\n");
-    printf("\tjne .L.true.%d\n", seq);
+    fprintf(out, "\tcmpl $0, %%eax\n");
+    fprintf(out, "\tjne .L.true.%d\n", seq);
     codegen_expr(expr->d.binary.rhs);
-    printf("\tcmpl $0, %%eax\n");
-    printf("\tjne .L.true.%d\n", seq);
-    printf("\tmovl $0, %%eax\n");
-    printf("\tjmp .L.end.%d\n", seq);
-    printf(".L.true.%d:\n", seq);
-    printf("\tmovl $1, %%eax\n");
-    printf(".L.end.%d:\n", seq);
+    fprintf(out, "\tcmpl $0, %%eax\n");
+    fprintf(out, "\tjne .L.true.%d\n", seq);
+    fprintf(out, "\tmovl $0, %%eax\n");
+    fprintf(out, "\tjmp .L.end.%d\n", seq);
+    fprintf(out, ".L.true.%d:\n", seq);
+    fprintf(out, "\tmovl $1, %%eax\n");
+    fprintf(out, ".L.end.%d:\n", seq);
     break;
   }
   case AST_NEG:
     codegen_expr(expr->d.unary.operand);
-    printf("\tnegl %%eax\n");
+    fprintf(out, "\tnegl %%eax\n");
     break;
   case AST_BITWISE_NOT:
     codegen_expr(expr->d.unary.operand);
-    printf("\tnotl %%eax\n");
+    fprintf(out, "\tnotl %%eax\n");
     break;
   case AST_LOGICAL_NOT:
     codegen_expr(expr->d.unary.operand);
     // Compare %eax to 0
-    printf("\tcmpl $0, %%eax\n");
+    fprintf(out, "\tcmpl $0, %%eax\n");
     // Set %al to 1 if %eax was 0
-    printf("\tsete %%al\n");
+    fprintf(out, "\tsete %%al\n");
     // Zero-extend %al into %eax
-    printf("\tmovzbl %%al, %%eax\n");
+    fprintf(out, "\tmovzbl %%al, %%eax\n");
     break;
   case AST_PRE_INCREMENT:
     codegen_addr(expr->d.unary.operand);
     // movl (%rax), %ecx, load
-    printf("\tmovl (%%rax), %%ecx\n");
+    fprintf(out, "\tmovl (%%rax), %%ecx\n");
     // addl $1, %ecx, increment
-    printf("\taddl $1, %%ecx\n");
+    fprintf(out, "\taddl $1, %%ecx\n");
     // movl %eax, (%rax), write back
-    printf("\tmovl %%ecx, (%%rax)\n");
+    fprintf(out, "\tmovl %%ecx, (%%rax)\n");
     // movl %ecx, %eax, result
-    printf("\tmovl %%ecx, %%eax\n");
+    fprintf(out, "\tmovl %%ecx, %%eax\n");
     break;
   case AST_POST_INCREMENT:
     codegen_addr(expr->d.unary.operand);
     // movl (%rax), %ecx, load
-    printf("\tmovl (%%rax), %%ecx\n");
+    fprintf(out, "\tmovl (%%rax), %%ecx\n");
     // pushq %rcx, save the original val
-    printf("\tpushq %%rcx\n");
+    fprintf(out, "\tpushq %%rcx\n");
     // addl $1, %ecx, increment
-    printf("\taddl $1, %%ecx\n");
+    fprintf(out, "\taddl $1, %%ecx\n");
     // movl %ecx, (%rax), write back
-    printf("\tmovl %%ecx, (%%rax)\n");
+    fprintf(out, "\tmovl %%ecx, (%%rax)\n");
     // popq %rax, result
-    printf("\tpopq %%rax\n");
+    fprintf(out, "\tpopq %%rax\n");
     break;
   case AST_PRE_DECREMENT:
     codegen_addr(expr->d.unary.operand);
     // movl (%rax), %ecx, load
-    printf("\tmovl (%%rax), %%ecx\n");
+    fprintf(out, "\tmovl (%%rax), %%ecx\n");
     // subl $1, %ecx, decrement
-    printf("\tsubl $1, %%ecx\n");
+    fprintf(out, "\tsubl $1, %%ecx\n");
     // movl %eax, (%rax), write back
-    printf("\tmovl %%ecx, (%%rax)\n");
+    fprintf(out, "\tmovl %%ecx, (%%rax)\n");
     // movl %ecx, %eax, result
-    printf("\tmovl %%ecx, %%eax\n");
+    fprintf(out, "\tmovl %%ecx, %%eax\n");
     break;
   case AST_POST_DECREMENT:
     codegen_addr(expr->d.unary.operand);
     // movl (%rax), %ecx, load
-    printf("\tmovl (%%rax), %%ecx\n");
+    fprintf(out, "\tmovl (%%rax), %%ecx\n");
     // pushq %rcx, save the original val
-    printf("\tpushq %%rcx\n");
+    fprintf(out, "\tpushq %%rcx\n");
     // subl $1, %ecx, decrement
-    printf("\tsubl $1, %%ecx\n");
+    fprintf(out, "\tsubl $1, %%ecx\n");
     // movl %ecx, (%rax), write back
-    printf("\tmovl %%ecx, (%%rax)\n");
+    fprintf(out, "\tmovl %%ecx, (%%rax)\n");
     // popq %rax, result
-    printf("\tpopq %%rax\n");
+    fprintf(out, "\tpopq %%rax\n");
     break;
   default:
     fprintf(stderr, "unrecognized ast node\n");
@@ -250,33 +254,33 @@ static void codegen_stmt(AstNode *stmt) {
   switch (stmt->type) {
   case AST_RETURN:
     codegen_expr(stmt->d.ret.expr);
-    printf("\tjmp .Lreturn\n");
+    fprintf(out, "\tjmp .Lreturn\n");
     break;
   case AST_IF: {
     int seq = label_seq++;
 
     // Jump to the else branch when the condition is zero.
     codegen_expr(stmt->d.if_stmt.cond);
-    printf("\tcmpl $0, %%eax\n");
-    printf("\tje .L.else.%d\n", seq);
+    fprintf(out, "\tcmpl $0, %%eax\n");
+    fprintf(out, "\tje .L.else.%d\n", seq);
     codegen_stmt(stmt->d.if_stmt.then_stmt);
-    printf("\tjmp .L.end.%d\n", seq);
-    printf(".L.else.%d:\n", seq);
+    fprintf(out, "\tjmp .L.end.%d\n", seq);
+    fprintf(out, ".L.else.%d:\n", seq);
     if (stmt->d.if_stmt.else_stmt)
       codegen_stmt(stmt->d.if_stmt.else_stmt);
-    printf(".L.end.%d:\n", seq);
+    fprintf(out, ".L.end.%d:\n", seq);
     break;
   }
   case AST_WHILE: {
     int seq = label_seq++;
 
-    printf(".L.begin.%d:\n", seq);
+    fprintf(out, ".L.begin.%d:\n", seq);
     codegen_expr(stmt->d.while_stmt.cond);
-    printf("\tcmpl $0, %%eax\n");
-    printf("\tje .L.end.%d\n", seq);
+    fprintf(out, "\tcmpl $0, %%eax\n");
+    fprintf(out, "\tje .L.end.%d\n", seq);
     codegen_stmt(stmt->d.while_stmt.body);
-    printf("\tjmp .L.begin.%d\n", seq);
-    printf(".L.end.%d:\n", seq);
+    fprintf(out, "\tjmp .L.begin.%d\n", seq);
+    fprintf(out, ".L.end.%d:\n", seq);
     break;
   }
   case AST_FOR: {
@@ -284,18 +288,18 @@ static void codegen_stmt(AstNode *stmt) {
 
     if (stmt->d.for_stmt.init)
       codegen_stmt(stmt->d.for_stmt.init);
-    printf(".L.begin.%d:\n", seq);
+    fprintf(out, ".L.begin.%d:\n", seq);
     if (stmt->d.for_stmt.cond) {
       // An omitted condition is a nonzero constant: skip the test.
       codegen_expr(stmt->d.for_stmt.cond);
-      printf("\tcmpl $0, %%eax\n");
-      printf("\tje .L.end.%d\n", seq);
+      fprintf(out, "\tcmpl $0, %%eax\n");
+      fprintf(out, "\tje .L.end.%d\n", seq);
     }
     codegen_stmt(stmt->d.for_stmt.body);
     if (stmt->d.for_stmt.post)
       codegen_expr(stmt->d.for_stmt.post);
-    printf("\tjmp .L.begin.%d\n", seq);
-    printf(".L.end.%d:\n", seq);
+    fprintf(out, "\tjmp .L.begin.%d\n", seq);
+    fprintf(out, ".L.end.%d:\n", seq);
     break;
   }
   case AST_DO: {
@@ -303,17 +307,17 @@ static void codegen_stmt(AstNode *stmt) {
 
     // The test sits after the body, so it always runs at least once and
     // no end label is needed: falling through exits the loop.
-    printf(".L.begin.%d:\n", seq);
+    fprintf(out, ".L.begin.%d:\n", seq);
     codegen_stmt(stmt->d.do_stmt.body);
     codegen_expr(stmt->d.do_stmt.cond);
-    printf("\tcmpl $0, %%eax\n");
-    printf("\tjne .L.begin.%d\n", seq);
+    fprintf(out, "\tcmpl $0, %%eax\n");
+    fprintf(out, "\tjne .L.begin.%d\n", seq);
     break;
   }
   case AST_DECL:
     if (stmt->d.decl.init) {
       codegen_expr(stmt->d.decl.init);
-      printf("\tmovl %%eax, -%d(%%rbp)\n", stmt->d.decl.var->offset);
+      fprintf(out, "\tmovl %%eax, -%d(%%rbp)\n", stmt->d.decl.var->offset);
     }
     break;
   case AST_EXPR_STMT:
@@ -332,7 +336,7 @@ static void codegen_stmt(AstNode *stmt) {
   }
 }
 
-void codegen(AstNode *ast) {
+void codegen(AstNode *ast, FILE *out_file) {
   Token name;
   int stack_size;
 
@@ -341,22 +345,23 @@ void codegen(AstNode *ast) {
     exit(1);
   }
 
+  out = out_file;
   name = ast->d.function.name;
   stack_size = (ast->d.function.stack_size + 15) / 16 * 16;
-  printf("\t.text\n");
-  printf("\t.globl %.*s\n", name.len, name.start);
-  printf("%.*s:\n", name.len, name.start);
-  printf("\tpushq %%rbp\n");
-  printf("\tmovq %%rsp, %%rbp\n");
+  fprintf(out, "\t.text\n");
+  fprintf(out, "\t.globl %.*s\n", name.len, name.start);
+  fprintf(out, "%.*s:\n", name.len, name.start);
+  fprintf(out, "\tpushq %%rbp\n");
+  fprintf(out, "\tmovq %%rsp, %%rbp\n");
   if (stack_size)
-    printf("\tsubq $%d, %%rsp\n", stack_size);
+    fprintf(out, "\tsubq $%d, %%rsp\n", stack_size);
   codegen_stmt(ast->d.function.body);
 
   // Reaching the end of main returns zero.
-  printf("\tmovl $0, %%eax\n");
-  printf(".Lreturn:\n");
-  printf("\tmovq %%rbp, %%rsp\n");
-  printf("\tpopq %%rbp\n");
-  printf("\tret\n");
-  printf("\t.section .note.GNU-stack, \"\",@progbits\n");
+  fprintf(out, "\tmovl $0, %%eax\n");
+  fprintf(out, ".Lreturn:\n");
+  fprintf(out, "\tmovq %%rbp, %%rsp\n");
+  fprintf(out, "\tpopq %%rbp\n");
+  fprintf(out, "\tret\n");
+  fprintf(out, "\t.section .note.GNU-stack, \"\",@progbits\n");
 }

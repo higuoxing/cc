@@ -58,19 +58,72 @@ char *read_source(const char *path) {
   return buf;
 }
 
-int main(int argc, char **argv) {
-  const char *source;
-  const char *filename;
+static void usage(const char *prog) {
+  fprintf(stderr, "Usage: %s <filename> [-o <output>]\n", prog);
+  exit(1);
+}
 
-  if (argc != 2) {
-    fprintf(stderr, "Usage: %s <filename>\n", argv[0]);
+// Derive the assembly file name from the input one, mirroring 'gcc -S':
+// 'foo.c' becomes 'foo.s', and a name without a dot gets '.s' appended.
+static char *derive_output_path(const char *input) {
+  const char *dot = strrchr(input, '.');
+  size_t base_len = dot ? (size_t)(dot - input) : strlen(input);
+  char *path;
+
+  path = malloc(base_len + 3);
+  if (!path) {
+    fprintf(stderr, "failed to allocate output file name\n");
     exit(1);
   }
+  memcpy(path, input, base_len);
+  memcpy(path + base_len, ".s", 3); // Includes the terminating NUL.
+  return path;
+}
 
-  filename = argv[1];
+int main(int argc, char **argv) {
+  const char *filename = NULL;
+  const char *output = NULL;
+  char *derived = NULL;
+  FILE *out_file;
+  const char *source;
+  int i;
+
+  for (i = 1; i < argc; ++i) {
+    if (strcmp(argv[i], "-o") == 0) {
+      if (i + 1 >= argc)
+        usage(argv[0]);
+      output = argv[++i];
+    } else if (argv[i][0] == '-' && argv[i][1] != '\0') {
+      usage(argv[0]);
+    } else if (!filename) {
+      filename = argv[i];
+    } else {
+      usage(argv[0]);
+    }
+  }
+
+  if (!filename)
+    usage(argv[0]);
+
+  if (output && strcmp(output, "-") == 0) {
+    // '-o -' writes assembly to stdout, like gcc and clang.
+    out_file = stdout;
+  } else {
+    if (!output)
+      output = derived = derive_output_path(filename);
+    out_file = fopen(output, "wb");
+    if (!out_file) {
+      fprintf(stderr, "failed to open output file '%s'\n", output);
+      exit(1);
+    }
+  }
+
   source = read_source(filename);
+  codegen(parse_translation_unit(filename, source), out_file);
 
-  codegen(parse_translation_unit(filename, source));
+  if (out_file != stdout)
+    fclose(out_file);
+  free(derived);
 
   return 0;
 }

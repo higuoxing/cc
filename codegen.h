@@ -19,8 +19,10 @@
 #ifndef _CODEGEN_H_
 #define _CODEGEN_H_
 
+#include <stdio.h>
+
 #include "parser.h"
 
-extern void codegen(AstNode *ast);
+extern void codegen(AstNode *ast, FILE *out);
 
 #endif

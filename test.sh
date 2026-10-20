@@ -37,7 +37,7 @@ function check() {
     local actual_code
 
     printf '%s' "$source" > "$input"
-    if "$CC" "$input" > "$base.s" 2> "$base.compile.err"; then
+    if "$CC" "$input" -o "$base.s" 2> "$base.compile.err"; then
 	:
     else
 	actual_code=$?
@@ -80,7 +80,7 @@ function check_error() {
     local actual_code
 
     printf '%s' "$source" > "$input"
-    if "$CC" "$input" > "$base.s" 2> "$base.err"; then
+    if "$CC" "$input" -o "$base.s" 2> "$base.err"; then
 	actual_code=0
     else
 	actual_code=$?
