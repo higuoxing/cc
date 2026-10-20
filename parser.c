@@ -53,6 +53,7 @@ static AstNode *parse_block(Parser *p);
 static AstNode *parse_function(Parser *p);
 static bool is_lvalue(AstType ty);
 static bool is_increment_op(AstType ty);
+static bool is_assignment_op(TokenType ty);
 
 static bool same_identifier(Token a, Token b) {
   return a.len == b.len && strncmp(a.start, b.start, a.len) == 0;
@@ -143,6 +144,15 @@ static bool is_lvalue(AstType ty) { return ty == AST_VAR; }
 
 static bool is_increment_op(AstType ty) {
   return ty == AST_PRE_INCREMENT || ty == AST_POST_INCREMENT;
+}
+
+/* assignment-operator: = += -= *= /= %= <<= >>= &= ^= |=  (C11 6.5.16) */
+static bool is_assignment_op(TokenType ty) {
+  return ty == TOKEN_ASSIGN || ty == TOKEN_PLUS_EQ || ty == TOKEN_MINUS_EQ ||
+         ty == TOKEN_STAR_EQ || ty == TOKEN_SLASH_EQ ||
+         ty == TOKEN_PERCENT_EQ || ty == TOKEN_LSHIFT_EQ ||
+         ty == TOKEN_RSHIFT_EQ || ty == TOKEN_BIT_AND_EQ ||
+         ty == TOKEN_BIT_XOR_EQ || ty == TOKEN_BIT_OR_EQ;
 }
 
 /*
@@ -651,15 +661,7 @@ static AstNode *parse_expr(Parser *p) {
   AstNode *left;
 
   left = parse_logical_or(p);
-  if (p->current.type == TOKEN_ASSIGN || p->current.type == TOKEN_PLUS_EQ ||
-      p->current.type == TOKEN_MINUS_EQ || p->current.type == TOKEN_STAR_EQ ||
-      p->current.type == TOKEN_SLASH_EQ ||
-      p->current.type == TOKEN_PERCENT_EQ ||
-      p->current.type == TOKEN_LSHIFT_EQ ||
-      p->current.type == TOKEN_RSHIFT_EQ ||
-      p->current.type == TOKEN_BIT_AND_EQ ||
-      p->current.type == TOKEN_BIT_XOR_EQ ||
-      p->current.type == TOKEN_BIT_OR_EQ) {
+  if (is_assignment_op(p->current.type)) {
     AstNode *node;
     AstNode *rhs;
     TokenType op;
@@ -1274,8 +1276,8 @@ static AstNode *parse_stmt(Parser *p, bool allow_decl) {
   case TOKEN_INT:
     if (allow_decl)
       return parse_decl(p);
-    // C11 6.8: a declaration is not a statement, so it cannot be the
-    // body of if/while/for/do or a label.
+    /* C11 6.8: a declaration is not a statement, so it cannot be the
+       body of if/while/for/do or a label. */
     parse_error(p, "expect statement");
   case TOKEN_SEMICOLON:
     stmt = new_ast_node(p, AST_EXPR_STMT);
