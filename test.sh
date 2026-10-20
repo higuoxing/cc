@@ -202,6 +202,24 @@ check 42 'int main() { int a = 42; return a << 2 >> 2; }'
 check 40 'int main() { int a = 5; a <<= 3; return a; }'
 check 10 'int main() { int a = 40; a >>= 2; return a; }'
 check 16 'int main() { int a = 1; return a <<= 4; }'
+check 42 'int main() { if (1) return 42; return 24; }'
+check 24 'int main() { if (0) return 42; return 24; }'
+check 42 'int main() { if (1) return 42; else return 24; }'
+check 24 'int main() { if (0) return 42; else return 24; }'
+check 42 'int main() { if (1) { return 42; } else { return 24; } }'
+check 24 'int main() { if (0) { return 42; } else { return 24; } }'
+check 42 'int main() { int a = 1; if (a == 1) return 42; return 0; }'
+check 42 'int main() { int a = 0; if (a) return 24; else return 42; }'
+check 42 'int main() { if (2 < 1) return 24; else if (1 < 2) return 42; else return 0; }'
+check 42 'int main() { int a = 1; if (a == 1) a = 42; return a; }'
+check 1 'int main() { int a = 1; if (a == 0) a = 42; return a; }'
+check 42 'int main() { int a = 1; int b = 0; if (a) if (b) return 24; else return 42; return 0; }'
+check 0 'int main() { int a = 0; int b = 0; if (a) if (b) return 24; else return 42; return 0; }'
+check 42 'int main() { if (0) ; else return 42; return 0; }'
+check 42 'int main() { int a = 1; if (a++) return 42; return 0; }'
+check 1 'int main() { int a = 0; if (a++) return 42; return a; }'
+check 42 'int main() { if (1) { int a = 42; return a; } return 0; }'
+check 42 'int main() { if (0) return 24; else ; return 42; }'
 
 check_error missing-plus-rhs 'int main() { return 1 +; }' '1:24: error: expect expr'
 check_error missing-sub-rhs 'int main() { return 1 -; }' '1:24: error: expect expr'
@@ -294,5 +312,13 @@ check_error missing-shift-rhs 'int main() { return 1 <<; }' \
 	    '1:25: error: expect expr'
 check_error shift-assign-literal 'int main() { 1 <<= 2; return 0; }' \
 	    '1:16: error: invalid assignment target'
+check_error missing-if-paren 'int main() { if 1; return 0; }' \
+	    "1:17: error: expect '('"
+check_error missing-if-cond 'int main() { if () return 2; }' \
+	    '1:18: error: expect expr'
+check_error missing-if-rparen 'int main() { if (1 return 2; }' \
+	    "1:20: error: expect ')'"
+check_error missing-if-body 'int main() { if (1) }' \
+	    '1:21: error: expect expr'
 
 printf 'All %d tests passed (%d execution, %d rejection).\n' "$((passed + rejected))" "$passed" "$rejected"

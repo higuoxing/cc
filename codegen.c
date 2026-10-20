@@ -22,6 +22,10 @@
 #include "codegen.h"
 #include "parser.h"
 
+// Counts generated labels so that each control-flow construct gets unique
+// ones (.L.else.N, .L.end.N, ...).
+static int label_seq;
+
 static void codegen_addr(AstNode *expr) {
   if (expr->type != AST_VAR) {
     fprintf(stderr, "invalid address expr in codegen\n");
@@ -205,6 +209,21 @@ static void codegen_stmt(AstNode *stmt) {
     codegen_expr(stmt->d.ret.expr);
     printf("\tjmp .Lreturn\n");
     break;
+  case AST_IF: {
+    int seq = label_seq++;
+
+    // Jump to the else branch when the condition is zero.
+    codegen_expr(stmt->d.if_stmt.cond);
+    printf("\tcmpl $0, %%eax\n");
+    printf("\tje .L.else.%d\n", seq);
+    codegen_stmt(stmt->d.if_stmt.then_stmt);
+    printf("\tjmp .L.end.%d\n", seq);
+    printf(".L.else.%d:\n", seq);
+    if (stmt->d.if_stmt.else_stmt)
+      codegen_stmt(stmt->d.if_stmt.else_stmt);
+    printf(".L.end.%d:\n", seq);
+    break;
+  }
   case AST_DECL:
     if (stmt->d.decl.init) {
       codegen_expr(stmt->d.decl.init);

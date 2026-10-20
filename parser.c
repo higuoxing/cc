@@ -35,6 +35,7 @@ static AstNode *parse_postfix(Parser *p);
 static AstNode *parse_primary(Parser *p);
 static AstNode *parse_decl(Parser *p);
 static AstNode *parse_return_stmt(Parser *p);
+static AstNode *parse_if_stmt(Parser *p);
 static AstNode *parse_stmt(Parser *p);
 static AstNode *parse_block(Parser *p);
 static AstNode *parse_function(Parser *p);
@@ -491,7 +492,8 @@ static AstNode *parse_expr(Parser *p) {
   left = parse_equality(p);
   if (p->current.type == TOKEN_ASSIGN || p->current.type == TOKEN_PLUS_EQ ||
       p->current.type == TOKEN_MINUS_EQ || p->current.type == TOKEN_STAR_EQ ||
-      p->current.type == TOKEN_SLASH_EQ || p->current.type == TOKEN_PERCENT_EQ ||
+      p->current.type == TOKEN_SLASH_EQ ||
+      p->current.type == TOKEN_PERCENT_EQ ||
       p->current.type == TOKEN_LSHIFT_EQ ||
       p->current.type == TOKEN_RSHIFT_EQ) {
     AstNode *node;
@@ -637,9 +639,33 @@ static AstNode *parse_function(Parser *p) {
 }
 
 /*
+ * selection-statement:
+ *   'if' '(' expression ')' statement
+ *   'if' '(' expression ')' statement 'else' statement
+ * (C11 6.8.4.1; the recursive call to parse_stmt for the branches
+ *  gives 'else' the C association with the nearest unmatched 'if')
+ */
+static AstNode *parse_if_stmt(Parser *p) {
+  AstNode *if_node;
+
+  parse_expect(p, TOKEN_IF, "expect 'if'");
+  parse_expect(p, TOKEN_LPAREN, "expect '('");
+  if_node = new_ast_node(p, AST_IF);
+  if_node->d.if_stmt.cond = parse_expr(p);
+  parse_expect(p, TOKEN_RPAREN, "expect ')'");
+  if_node->d.if_stmt.then_stmt = parse_stmt(p);
+  if (p->current.type == TOKEN_ELSE) {
+    // Consume 'else'
+    parser_advance(p);
+    if_node->d.if_stmt.else_stmt = parse_stmt(p);
+  }
+  return if_node;
+}
+
+/*
  * statement:
- *   jump-statement | compound-statement | declaration
- *   expression-statement | ';'
+ *   jump-statement | selection-statement | compound-statement
+ *   declaration | expression-statement | ';'
  * (C11 6.8; as in GCC and Clang, anything not dispatched above is
  *  attempted as an expression-statement, whose parser diagnoses
  *  tokens that cannot start an expression)
@@ -650,6 +676,8 @@ static AstNode *parse_stmt(Parser *p) {
   switch (p->current.type) {
   case TOKEN_RETURN:
     return parse_return_stmt(p);
+  case TOKEN_IF:
+    return parse_if_stmt(p);
   case TOKEN_LBRACE:
     return parse_block(p);
   case TOKEN_INT:

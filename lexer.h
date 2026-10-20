@@ -26,7 +26,9 @@ typedef enum {
   TOKEN_UNKNOW = -1,
   TOKEN_EOF = 0,
   TOKEN_RETURN,
-  TOKEN_INT, // 'int'
+  TOKEN_INT,  // 'int'
+  TOKEN_IF,   // 'if'
+  TOKEN_ELSE, // 'else'
   TOKEN_IDENTIFIER,
   TOKEN_INT_LITERAL,
   TOKEN_SEMICOLON,
