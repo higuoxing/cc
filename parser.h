@@ -25,30 +25,36 @@ typedef struct AstNode AstNode;
 
 typedef struct LocalVar {
   Token name;
-  int offset; // Positive distance below %rbp
+  int offset; /* Positive distance below %rbp */
   int scope_depth;
   struct LocalVar *next;
 } LocalVar;
 
-// Labels have function scope (C11 6.2.1), so this table is not restored
-// when a block ends, unlike the locals list.
+/*
+ * Labels have function scope (C11 6.2.1), so this table is not restored
+ * when a block ends, unlike the locals list.
+ */
 typedef struct Label {
   Token name;
   struct Label *next;
 } Label;
 
-// A 'goto' whose target is validated after the function body is parsed,
-// since labels may be declared after the goto that uses them.
+/*
+ * A 'goto' whose target is validated after the function body is parsed,
+ * since labels may be declared after the goto that uses them.
+ */
 typedef struct GotoRef {
-  Token name; // Target label.
-  Token loc;  // The 'goto' keyword, for diagnostics.
+  Token name; /* Target label. */
+  Token loc; /* The 'goto' keyword, for diagnostics. */
   struct GotoRef *next;
 } GotoRef;
 
-// The case labels of one switch, attached to its AST_SWITCH node for
-// codegen's dispatch. Order in the list is not significant.
+/*
+ * The case labels of one switch, attached to its AST_SWITCH node for
+ * codegen's dispatch. Order in the list is not significant.
+ */
 typedef struct CaseList {
-  struct AstNode *node; // AST_CASE
+  struct AstNode *node; /* AST_CASE */
   struct CaseList *next;
 } CaseList;
 
@@ -60,8 +66,10 @@ typedef struct {
   LocalVar *locals;
   Label *labels;
   GotoRef *goto_refs;
-  // The innermost switch being parsed, or NULL; 'case' and 'default' are
-  // valid only inside its body, and 'break' may target it.
+  /*
+   * The innermost switch being parsed, or NULL; 'case' and 'default' are
+   * valid only inside its body, and 'break' may target it.
+   */
   AstNode *current_switch;
   int scope_depth;
   int loop_depth;
@@ -116,7 +124,7 @@ typedef enum {
 
 typedef struct AstNode {
   AstType type;
-  struct AstNode *next; // Linked list of statements inside a block.
+  struct AstNode *next; /* Linked list of statements inside a block. */
   union {
     struct {
       Token name;
@@ -131,7 +139,7 @@ typedef struct AstNode {
     struct {
       struct AstNode *cond;
       struct AstNode *then_stmt;
-      struct AstNode *else_stmt; // NULL if there is no 'else' clause.
+      struct AstNode *else_stmt; /* NULL if there is no 'else' clause. */
     } if_stmt;
 
     struct {
@@ -140,9 +148,9 @@ typedef struct AstNode {
     } while_stmt;
 
     struct {
-      struct AstNode *init; // Decl or expression-statement, NULL if omitted.
-      struct AstNode *cond; // NULL if omitted (a nonzero constant, 6.8.5.3p2).
-      struct AstNode *post; // Expression, NULL if omitted.
+      struct AstNode *init; /* Decl or expression-statement, NULL if omitted. */
+      struct AstNode *cond; /* NULL if omitted (a nonzero constant, 6.8.5.3p2). */
+      struct AstNode *post; /* Expression, NULL if omitted. */
       struct AstNode *body;
     } for_stmt;
 
@@ -163,18 +171,20 @@ typedef struct AstNode {
     struct {
       struct AstNode *cond;
       struct AstNode *body;
-      // The case and default nodes still sit in the body's statement
-      // chain (their position matters for fallthrough); this list is for
-      // codegen's dispatch. The default case, if any, is the entry whose
-      // node has is_default set.
+      /*
+       * The case and default nodes still sit in the body's statement
+       * chain (their position matters for fallthrough); this list is for
+       * codegen's dispatch. The default case, if any, is the entry whose
+       * node has is_default set.
+       */
       struct CaseList *cases;
     } switch_stmt;
 
     struct {
-      int64_t val; // Meaningless when is_default is set.
+      int64_t val; /* Meaningless when is_default is set. */
       struct AstNode *stmt;
-      int label;      // Dispatch label number, assigned by codegen.
-      int is_default; // 1 for 'default:', 0 for 'case'.
+      int label; /* Dispatch label number, assigned by codegen. */
+      int is_default; /* 1 for 'default:', 0 for 'case'. */
     } case_stmt;
 
     struct {

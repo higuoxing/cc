@@ -22,12 +22,16 @@
 #include "codegen.h"
 #include "parser.h"
 
-// Counts generated labels so that each control-flow construct gets unique
-// ones (.L.else.N, .L.end.N, ...).
+/*
+ * Counts generated labels so that each control-flow construct gets unique
+ * ones (.L.else.N, .L.end.N, ...).
+ */
 static int label_seq;
 
-// Assembly is emitted here; set by codegen() so that helpers need no FILE*
-// parameter (GCC's asm_out_file).
+/*
+ * Assembly is emitted here; set by codegen() so that helpers need no FILE*
+ * parameter (GCC's asm_out_file).
+ */
 static FILE *out;
 
 static void codegen_addr(AstNode *expr) {
@@ -53,7 +57,7 @@ static void codegen_expr(AstNode *expr) {
     fprintf(out, "\tmovl %%ecx, %%eax\n");
     break;
   case AST_INT_LITERAL:
-    // movl $VAL, %eax
+    /* movl $VAL, %eax */
     fprintf(out, "\tmovl $%" PRId64 ", %%eax\n", expr->d.int_literal.val);
     break;
   case AST_ADD:
@@ -73,25 +77,25 @@ static void codegen_expr(AstNode *expr) {
     fprintf(out, "\tpopq %%rcx\n");
 
     if (expr->type == AST_ADD) {
-      // %eax = %eax + %ecx
+      /* %eax = %eax + %ecx */
       fprintf(out, "\taddl %%ecx, %%eax\n");
     } else if (expr->type == AST_SUB) {
-      // %eax = %eax - %ecx
+      /* %eax = %eax - %ecx */
       fprintf(out, "\tsubl %%ecx, %%eax\n");
     } else if (expr->type == AST_MUL) {
-      // %eax = %eax * %ecx
+      /* %eax = %eax * %ecx */
       fprintf(out, "\timull %%ecx, %%eax\n");
     } else if (expr->type == AST_DIV || expr->type == AST_MOD) {
-      // idivl divides 64-bit value in %edx:%eax by operand (%ecx)
-      fprintf(out, "\tcltd\n");        // Sign-extend %eax into %edx:%eax
-      fprintf(out, "\tidivl %%ecx\n"); // Quotient in %eax, remainder in %edx
+      /* idivl divides 64-bit value in %edx:%eax by operand (%ecx) */
+      fprintf(out, "\tcltd\n");        /* Sign-extend %eax into %edx:%eax */
+      fprintf(out, "\tidivl %%ecx\n"); /* Quotient in %eax, remainder in %edx */
       if (expr->type == AST_MOD)
-        fprintf(out, "\tmovl %%edx, %%eax\n"); // Remainder is the result
+        fprintf(out, "\tmovl %%edx, %%eax\n"); /* Remainder is the result */
     } else if (expr->type == AST_LSHIFT) {
-      // The shift count comes from %cl, the low byte of %ecx.
+      /* The shift count comes from %cl, the low byte of %ecx. */
       fprintf(out, "\tsall %%cl, %%eax\n");
     } else if (expr->type == AST_RSHIFT) {
-      // Arithmetic shift: C requires sign-fill for signed '>>'.
+      /* Arithmetic shift: C requires sign-fill for signed '>>'. */
       fprintf(out, "\tsarl %%cl, %%eax\n");
     } else if (expr->type == AST_BIT_AND) {
       fprintf(out, "\tandl %%ecx, %%eax\n");
@@ -116,7 +120,7 @@ static void codegen_expr(AstNode *expr) {
     codegen_expr(expr->d.binary.lhs);
     fprintf(out, "\tpopq %%rcx\n");
 
-    // cmpl computes %eax - %ecx, i.e. lhs - rhs, and sets the flags.
+    /* cmpl computes %eax - %ecx, i.e. lhs - rhs, and sets the flags. */
     fprintf(out, "\tcmpl %%ecx, %%eax\n");
     switch (expr->type) {
     case AST_EQ:
@@ -141,13 +145,13 @@ static void codegen_expr(AstNode *expr) {
       fprintf(stderr, "unrecognized comparison operator\n");
       exit(1);
     }
-    // Zero-extend %al into %eax.
+    /* Zero-extend %al into %eax. */
     fprintf(out, "\tmovzbl %%al, %%eax\n");
     break;
   case AST_LOGICAL_AND: {
     int seq = label_seq++;
 
-    // Short-circuit: skip the right operand when the left one is zero.
+    /* Short-circuit: skip the right operand when the left one is zero. */
     codegen_expr(expr->d.binary.lhs);
     fprintf(out, "\tcmpl $0, %%eax\n");
     fprintf(out, "\tje .L.false.%d\n", seq);
@@ -164,7 +168,7 @@ static void codegen_expr(AstNode *expr) {
   case AST_LOGICAL_OR: {
     int seq = label_seq++;
 
-    // Short-circuit: skip the right operand when the left one is nonzero.
+    /* Short-circuit: skip the right operand when the left one is nonzero. */
     codegen_expr(expr->d.binary.lhs);
     fprintf(out, "\tcmpl $0, %%eax\n");
     fprintf(out, "\tjne .L.true.%d\n", seq);
@@ -188,59 +192,59 @@ static void codegen_expr(AstNode *expr) {
     break;
   case AST_LOGICAL_NOT:
     codegen_expr(expr->d.unary.operand);
-    // Compare %eax to 0
+    /* Compare %eax to 0 */
     fprintf(out, "\tcmpl $0, %%eax\n");
-    // Set %al to 1 if %eax was 0
+    /* Set %al to 1 if %eax was 0 */
     fprintf(out, "\tsete %%al\n");
-    // Zero-extend %al into %eax
+    /* Zero-extend %al into %eax */
     fprintf(out, "\tmovzbl %%al, %%eax\n");
     break;
   case AST_PRE_INCREMENT:
     codegen_addr(expr->d.unary.operand);
-    // movl (%rax), %ecx, load
+    /* movl (%rax), %ecx, load */
     fprintf(out, "\tmovl (%%rax), %%ecx\n");
-    // addl $1, %ecx, increment
+    /* addl $1, %ecx, increment */
     fprintf(out, "\taddl $1, %%ecx\n");
-    // movl %eax, (%rax), write back
+    /* movl %eax, (%rax), write back */
     fprintf(out, "\tmovl %%ecx, (%%rax)\n");
-    // movl %ecx, %eax, result
+    /* movl %ecx, %eax, result */
     fprintf(out, "\tmovl %%ecx, %%eax\n");
     break;
   case AST_POST_INCREMENT:
     codegen_addr(expr->d.unary.operand);
-    // movl (%rax), %ecx, load
+    /* movl (%rax), %ecx, load */
     fprintf(out, "\tmovl (%%rax), %%ecx\n");
-    // pushq %rcx, save the original val
+    /* pushq %rcx, save the original val */
     fprintf(out, "\tpushq %%rcx\n");
-    // addl $1, %ecx, increment
+    /* addl $1, %ecx, increment */
     fprintf(out, "\taddl $1, %%ecx\n");
-    // movl %ecx, (%rax), write back
+    /* movl %ecx, (%rax), write back */
     fprintf(out, "\tmovl %%ecx, (%%rax)\n");
-    // popq %rax, result
+    /* popq %rax, result */
     fprintf(out, "\tpopq %%rax\n");
     break;
   case AST_PRE_DECREMENT:
     codegen_addr(expr->d.unary.operand);
-    // movl (%rax), %ecx, load
+    /* movl (%rax), %ecx, load */
     fprintf(out, "\tmovl (%%rax), %%ecx\n");
-    // subl $1, %ecx, decrement
+    /* subl $1, %ecx, decrement */
     fprintf(out, "\tsubl $1, %%ecx\n");
-    // movl %eax, (%rax), write back
+    /* movl %eax, (%rax), write back */
     fprintf(out, "\tmovl %%ecx, (%%rax)\n");
-    // movl %ecx, %eax, result
+    /* movl %ecx, %eax, result */
     fprintf(out, "\tmovl %%ecx, %%eax\n");
     break;
   case AST_POST_DECREMENT:
     codegen_addr(expr->d.unary.operand);
-    // movl (%rax), %ecx, load
+    /* movl (%rax), %ecx, load */
     fprintf(out, "\tmovl (%%rax), %%ecx\n");
-    // pushq %rcx, save the original val
+    /* pushq %rcx, save the original val */
     fprintf(out, "\tpushq %%rcx\n");
-    // subl $1, %ecx, decrement
+    /* subl $1, %ecx, decrement */
     fprintf(out, "\tsubl $1, %%ecx\n");
-    // movl %ecx, (%rax), write back
+    /* movl %ecx, (%rax), write back */
     fprintf(out, "\tmovl %%ecx, (%%rax)\n");
-    // popq %rax, result
+    /* popq %rax, result */
     fprintf(out, "\tpopq %%rax\n");
     break;
   default:
@@ -250,9 +254,11 @@ static void codegen_expr(AstNode *expr) {
   return;
 }
 
-// break_label and continue_label are the label_seq values of the enclosing
-// loop's .L.end.N and .L.continue.N labels, or -1 outside any loop (the
-// parser rejects break/continue there, so -1 is defensive).
+/*
+ * break_label and continue_label are the label_seq values of the enclosing
+ * loop's .L.end.N and .L.continue.N labels, or -1 outside any loop (the
+ * parser rejects break/continue there, so -1 is defensive).
+ */
 static void codegen_stmt(AstNode *stmt, int break_label, int continue_label) {
   switch (stmt->type) {
   case AST_RETURN:
@@ -276,7 +282,7 @@ static void codegen_stmt(AstNode *stmt, int break_label, int continue_label) {
   case AST_IF: {
     int seq = label_seq++;
 
-    // Jump to the else branch when the condition is zero.
+    /* Jump to the else branch when the condition is zero. */
     codegen_expr(stmt->d.if_stmt.cond);
     fprintf(out, "\tcmpl $0, %%eax\n");
     fprintf(out, "\tje .L.else.%d\n", seq);
@@ -291,8 +297,10 @@ static void codegen_stmt(AstNode *stmt, int break_label, int continue_label) {
   case AST_WHILE: {
     int seq = label_seq++;
 
-    // .L.continue.N coincides with the head: 'continue' re-tests the
-    // condition.
+    /*
+     * .L.continue.N coincides with the head: 'continue' re-tests the
+     * condition.
+     */
     fprintf(out, ".L.begin.%d:\n", seq);
     fprintf(out, ".L.continue.%d:\n", seq);
     codegen_expr(stmt->d.while_stmt.cond);
@@ -310,13 +318,13 @@ static void codegen_stmt(AstNode *stmt, int break_label, int continue_label) {
       codegen_stmt(stmt->d.for_stmt.init, break_label, continue_label);
     fprintf(out, ".L.begin.%d:\n", seq);
     if (stmt->d.for_stmt.cond) {
-      // An omitted condition is a nonzero constant: skip the test.
+      /* An omitted condition is a nonzero constant: skip the test. */
       codegen_expr(stmt->d.for_stmt.cond);
       fprintf(out, "\tcmpl $0, %%eax\n");
       fprintf(out, "\tje .L.end.%d\n", seq);
     }
     codegen_stmt(stmt->d.for_stmt.body, seq, seq);
-    // 'continue' must skip to the post expression, not the condition.
+    /* 'continue' must skip to the post expression, not the condition. */
     fprintf(out, ".L.continue.%d:\n", seq);
     if (stmt->d.for_stmt.post)
       codegen_expr(stmt->d.for_stmt.post);
@@ -327,8 +335,10 @@ static void codegen_stmt(AstNode *stmt, int break_label, int continue_label) {
   case AST_DO: {
     int seq = label_seq++;
 
-    // The test sits after the body, so the loop always runs at least once;
-    // 'continue' jumps to the test and 'break' to the end label.
+    /*
+     * The test sits after the body, so the loop always runs at least once;
+     * 'continue' jumps to the test and 'break' to the end label.
+     */
     fprintf(out, ".L.begin.%d:\n", seq);
     codegen_stmt(stmt->d.do_stmt.body, seq, seq);
     fprintf(out, ".L.continue.%d:\n", seq);
@@ -339,8 +349,10 @@ static void codegen_stmt(AstNode *stmt, int break_label, int continue_label) {
     break;
   }
   case AST_GOTO:
-    // User labels are C identifiers, so '.L<name>' cannot collide with
-    // the generated '.L.begin.N' family (identifiers contain no dots).
+    /*
+     * User labels are C identifiers, so '.L<name>' cannot collide with
+     * the generated '.L.begin.N' family (identifiers contain no dots).
+     */
     fprintf(out, "\tjmp .L%.*s\n", stmt->d.goto_stmt.name.len,
             stmt->d.goto_stmt.name.start);
     break;
@@ -354,9 +366,11 @@ static void codegen_stmt(AstNode *stmt, int break_label, int continue_label) {
     CaseList *cl;
     AstNode *default_node = NULL;
 
-    // Dispatch is a chain of compares and jumps over the cases collected
-    // by the parser; a jump table can replace it once case densities make
-    // that worthwhile.
+    /*
+     * Dispatch is a chain of compares and jumps over the cases collected
+     * by the parser; a jump table can replace it once case densities make
+     * that worthwhile.
+     */
     codegen_expr(stmt->d.switch_stmt.cond);
     for (cl = stmt->d.switch_stmt.cases; cl; cl = cl->next) {
       cl->node->d.case_stmt.label = label_seq++;
@@ -371,7 +385,7 @@ static void codegen_stmt(AstNode *stmt, int break_label, int continue_label) {
       fprintf(out, "\tjmp .L.default.%d\n", default_node->d.case_stmt.label);
     fprintf(out, "\tjmp .L.end.%d\n", seq);
 
-    // 'break' inside the body exits this switch, not any outer loop.
+    /* 'break' inside the body exits this switch, not any outer loop. */
     codegen_stmt(stmt->d.switch_stmt.body, seq, continue_label);
 
     fprintf(out, ".L.end.%d:\n", seq);
@@ -427,7 +441,7 @@ void codegen(AstNode *ast, FILE *out_file) {
     fprintf(out, "\tsubq $%d, %%rsp\n", stack_size);
   codegen_stmt(ast->d.function.body, -1, -1);
 
-  // Reaching the end of main returns zero.
+  /* Reaching the end of main returns zero. */
   fprintf(out, "\tmovl $0, %%eax\n");
   fprintf(out, ".Lreturn:\n");
   fprintf(out, "\tmovq %%rbp, %%rsp\n");

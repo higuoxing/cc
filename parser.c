@@ -80,7 +80,7 @@ static LocalVar *declare_local_var(Parser *p, Token name) {
     parse_error(p, "out of memory");
   var->name = name;
   var->scope_depth = p->scope_depth;
-  p->stack_size += 4; // All locals are 32-bit int for now.
+  p->stack_size += 4; /* All locals are 32-bit int for now. */
   var->offset = p->stack_size;
   var->next = p->locals;
   p->locals = var;
@@ -181,7 +181,7 @@ static AstNode *parse_unary(Parser *p) {
       exit(1);
     }
 
-    // Consume '-' or '~' or '!' or '++' or '--'
+    /* Consume '-' or '~' or '!' or '++' or '--' */
     op_tok = p->current;
     parser_advance(p);
     node = new_ast_node(p, op);
@@ -189,7 +189,7 @@ static AstNode *parse_unary(Parser *p) {
 
     if ((op == AST_PRE_INCREMENT || op == AST_PRE_DECREMENT) &&
         !is_lvalue(node->d.unary.operand->type)) {
-      // Report at the operator, not at the token after the operand.
+      /* Report at the operator, not at the token after the operand. */
       p->current = op_tok;
       parse_error(p, "invalid %s target",
                   is_increment_op(op) ? "increment" : "decrement");
@@ -228,7 +228,7 @@ static AstNode *parse_postfix(Parser *p) {
       parse_error(p, "invalid %s target",
                   is_increment_op(ty) ? "increment" : "decrement");
 
-    // Consume '++' or '--'
+    /* Consume '++' or '--' */
     parser_advance(p);
     postfixed = new_ast_node(p, ty);
     postfixed->d.unary.operand = left;
@@ -249,14 +249,14 @@ static AstNode *parse_primary(Parser *p) {
     expr = new_ast_node(p, AST_INT_LITERAL);
     expr->d.int_literal.val = p->current.int_literal_val;
 
-    // Consume integer literal
+    /* Consume integer literal */
     parser_advance(p);
     return expr;
   }
 
   if (p->current.type == TOKEN_LPAREN) {
     AstNode *expr;
-    // Consume '('
+    /* Consume '(' */
     parser_advance(p);
     expr = parse_expr(p);
     parse_expect(p, TOKEN_RPAREN, "expect ')'");
@@ -270,7 +270,7 @@ static AstNode *parse_primary(Parser *p) {
       parse_error(p, "undeclared identifier");
     expr = new_ast_node(p, AST_VAR);
     expr->d.variable.var = var;
-    // Consume identifier.
+    /* Consume identifier. */
     parser_advance(p);
     return expr;
   }
@@ -295,11 +295,11 @@ static AstNode *parse_decl(Parser *p) {
   name = p->current;
   decl = new_ast_node(p, AST_DECL);
   decl->d.decl.var = declare_local_var(p, name);
-  // Consume variable name.
+  /* Consume variable name. */
   parser_advance(p);
 
   if (p->current.type == TOKEN_ASSIGN) {
-    // Consume '='
+    /* Consume '=' */
     parser_advance(p);
     decl->d.decl.init = parse_expr(p);
   }
@@ -329,7 +329,7 @@ static AstNode *parse_multiplicative(Parser *p) {
     AstNode *node;
 
     op = p->current.type;
-    // Consume '*' or '/' or '%'
+    /* Consume '*' or '/' or '%' */
     parser_advance(p);
 
     right = parse_unary(p);
@@ -363,7 +363,7 @@ static AstNode *parse_additive(Parser *p) {
     AstNode *node;
 
     op = p->current.type;
-    // Consume '+' or '-'
+    /* Consume '+' or '-' */
     parser_advance(p);
     right = parse_multiplicative(p);
 
@@ -395,7 +395,7 @@ static AstNode *parse_shift(Parser *p) {
     AstNode *node;
 
     op = p->current.type;
-    // Consume '<<' or '>>'
+    /* Consume '<<' or '>>' */
     parser_advance(p);
 
     right = parse_additive(p);
@@ -448,7 +448,7 @@ static AstNode *parse_relational(Parser *p) {
       exit(1);
     }
 
-    // Consume '<' or '>' or '<=' or '>='
+    /* Consume '<' or '>' or '<=' or '>=' */
     parser_advance(p);
 
     right = parse_shift(p);
@@ -480,7 +480,7 @@ static AstNode *parse_equality(Parser *p) {
     AstNode *node;
 
     op = p->current.type;
-    // Consume '==' or '!='
+    /* Consume '==' or '!=' */
     parser_advance(p);
 
     right = parse_relational(p);
@@ -509,7 +509,7 @@ static AstNode *parse_bitwise_and(Parser *p) {
     AstNode *right;
     AstNode *node;
 
-    // Consume '&'
+    /* Consume '&' */
     parser_advance(p);
 
     right = parse_equality(p);
@@ -538,7 +538,7 @@ static AstNode *parse_bitwise_xor(Parser *p) {
     AstNode *right;
     AstNode *node;
 
-    // Consume '^'
+    /* Consume '^' */
     parser_advance(p);
 
     right = parse_bitwise_and(p);
@@ -567,7 +567,7 @@ static AstNode *parse_bitwise_or(Parser *p) {
     AstNode *right;
     AstNode *node;
 
-    // Consume '|'
+    /* Consume '|' */
     parser_advance(p);
 
     right = parse_bitwise_xor(p);
@@ -596,7 +596,7 @@ static AstNode *parse_logical_and(Parser *p) {
     AstNode *right;
     AstNode *node;
 
-    // Consume '&&'
+    /* Consume '&&' */
     parser_advance(p);
 
     right = parse_bitwise_or(p);
@@ -625,7 +625,7 @@ static AstNode *parse_logical_or(Parser *p) {
     AstNode *right;
     AstNode *node;
 
-    // Consume '||'
+    /* Consume '||' */
     parser_advance(p);
 
     right = parse_logical_and(p);
@@ -668,7 +668,7 @@ static AstNode *parse_expr(Parser *p) {
       parse_error(p, "invalid assignment target");
 
     op = p->current.type;
-    // Consume the assignment operator
+    /* Consume the assignment operator */
     parser_advance(p);
 
     rhs = parse_expr(p);
@@ -792,8 +792,10 @@ static AstNode *parse_block(Parser *p) {
  *   'int' identifier '(' ')' compound-statement
  * (C11 6.9.1, restricted to int return type and no parameters)
  */
-// Every 'goto' must refer to a label declared somewhere in the function;
-// labels have function scope and may be declared after the goto.
+/*
+ * Every 'goto' must refer to a label declared somewhere in the function;
+ * labels have function scope and may be declared after the goto.
+ */
 static void check_gotos(Parser *p) {
   GotoRef *ref;
 
@@ -820,7 +822,7 @@ static AstNode *parse_function(Parser *p) {
     parse_error(p, "expect function name");
 
   fn->d.function.name = p->current;
-  // Consume <function_name>
+  /* Consume <function_name> */
   parser_advance(p);
 
   parse_expect(p, TOKEN_LPAREN, "expect '('");
@@ -848,7 +850,7 @@ static AstNode *parse_if_stmt(Parser *p) {
   parse_expect(p, TOKEN_RPAREN, "expect ')'");
   if_node->d.if_stmt.then_stmt = parse_stmt(p);
   if (p->current.type == TOKEN_ELSE) {
-    // Consume 'else'
+    /* Consume 'else' */
     parser_advance(p);
     if_node->d.if_stmt.else_stmt = parse_stmt(p);
   }
@@ -891,15 +893,15 @@ static AstNode *parse_for_stmt(Parser *p) {
 
   for_node = new_ast_node(p, AST_FOR);
 
-  // A declaration in the init clause is scoped to the whole loop.
+  /* A declaration in the init clause is scoped to the whole loop. */
   outer_locals = p->locals;
   ++p->scope_depth;
 
   if (p->current.type == TOKEN_INT) {
-    // parse_decl consumes the declaration's own ';'.
+    /* parse_decl consumes the declaration's own ';'. */
     for_node->d.for_stmt.init = parse_decl(p);
   } else if (p->current.type == TOKEN_SEMICOLON) {
-    // Omitted init clause; consume the ';'.
+    /* Omitted init clause; consume the ';'. */
     parser_advance(p);
   } else {
     AstNode *init = new_ast_node(p, AST_EXPR_STMT);
@@ -942,7 +944,7 @@ static AstNode *parse_do_stmt(Parser *p) {
   parse_expect(p, TOKEN_LPAREN, "expect '('");
   do_node->d.do_stmt.cond = parse_expr(p);
   parse_expect(p, TOKEN_RPAREN, "expect ')'");
-  // The trailing ';' is part of the do-statement itself.
+  /* The trailing ';' is part of the do-statement itself. */
   parse_expect(p, TOKEN_SEMICOLON, "expect ';'");
   return do_node;
 }
@@ -953,7 +955,7 @@ static AstNode *parse_do_stmt(Parser *p) {
  * (C11 6.8.6.3, valid only within a loop)
  */
 static AstNode *parse_break_stmt(Parser *p) {
-  // Check before consuming so the error lands on 'break' itself.
+  /* Check before consuming so the error lands on 'break' itself. */
   if (p->loop_depth == 0 && !p->current_switch)
     parse_error(p, "break statement not within loop or switch");
   parse_expect(p, TOKEN_BREAK, "expect 'break'");
@@ -967,7 +969,7 @@ static AstNode *parse_break_stmt(Parser *p) {
  * (C11 6.8.6.2, valid only within a loop)
  */
 static AstNode *parse_continue_stmt(Parser *p) {
-  // Check before consuming so the error lands on 'continue' itself.
+  /* Check before consuming so the error lands on 'continue' itself. */
   if (p->loop_depth == 0)
     parse_error(p, "continue statement not within loop");
   parse_expect(p, TOKEN_CONTINUE, "expect 'continue'");
@@ -1001,7 +1003,7 @@ static AstNode *parse_goto_stmt(Parser *p) {
 
   goto_node = new_ast_node(p, AST_GOTO);
   goto_node->d.goto_stmt.name = p->current;
-  // Consume the label name.
+  /* Consume the label name. */
   parser_advance(p);
   parse_expect(p, TOKEN_SEMICOLON, "expect ';'");
   return goto_node;
@@ -1018,13 +1020,15 @@ static AstNode *parse_label_stmt(Parser *p) {
   Label *label;
   Token name = p->current;
 
-  // The duplicate check runs while 'current' is still the label itself,
-  // so the error lands on it.
+  /*
+   * The duplicate check runs while 'current' is still the label itself,
+   * so the error lands on it.
+   */
   for (label = p->labels; label; label = label->next)
     if (same_identifier(label->name, name))
       parse_error(p, "duplicate label");
 
-  // Consume the identifier and ':'.
+  /* Consume the identifier and ':'. */
   parser_advance(p);
   parse_expect(p, TOKEN_COLON, "expect ':'");
 
@@ -1041,7 +1045,7 @@ static AstNode *parse_label_stmt(Parser *p) {
   return label_node;
 }
 
-// Evaluate an integer constant expression (C11 6.6), used for case labels.
+/* Evaluate an integer constant expression (C11 6.6), used for case labels. */
 static int64_t eval_const_expr(Parser *p, AstNode *expr) {
   switch (expr->type) {
   case AST_INT_LITERAL:
@@ -1103,7 +1107,7 @@ static int64_t eval_const_expr(Parser *p, AstNode *expr) {
     return eval_const_expr(p, expr->d.binary.lhs) |
            eval_const_expr(p, expr->d.binary.rhs);
   case AST_LOGICAL_AND: {
-    // Preserve short-circuit semantics, so 0 && (1 / 0) is valid.
+    /* Preserve short-circuit semantics, so 0 && (1 / 0) is valid. */
     int64_t lhs = eval_const_expr(p, expr->d.binary.lhs);
     return lhs ? eval_const_expr(p, expr->d.binary.rhs) != 0 : 0;
   }
@@ -1112,7 +1116,7 @@ static int64_t eval_const_expr(Parser *p, AstNode *expr) {
     return lhs ? 1 : eval_const_expr(p, expr->d.binary.rhs) != 0;
   }
   default:
-    // AST_VAR, AST_ASSIGN, increments, and so on are not constant.
+    /* AST_VAR, AST_ASSIGN, increments, and so on are not constant. */
     parse_error(p, "case label is not an integer constant");
   }
 }
@@ -1133,8 +1137,10 @@ static AstNode *parse_switch_stmt(Parser *p) {
   switch_node->d.switch_stmt.cond = parse_expr(p);
   parse_expect(p, TOKEN_RPAREN, "expect ')'");
 
-  // Case labels in the body belong to this switch; nested switches save
-  // and restore the pointer to get their own.
+  /*
+   * Case labels in the body belong to this switch; nested switches save
+   * and restore the pointer to get their own.
+   */
   outer_switch = p->current_switch;
   p->current_switch = switch_node;
 
@@ -1156,7 +1162,7 @@ static AstNode *parse_case_stmt(Parser *p) {
   int64_t val;
   Token case_tok;
 
-  // Check before consuming so the error lands on 'case' itself.
+  /* Check before consuming so the error lands on 'case' itself. */
   if (!p->current_switch)
     parse_error(p, "case label not within a switch statement");
 
@@ -1197,7 +1203,7 @@ static AstNode *parse_default_stmt(Parser *p) {
   AstNode *default_node;
   CaseList *entry;
 
-  // Check before consuming so the error lands on 'default' itself.
+  /* Check before consuming so the error lands on 'default' itself. */
   if (!p->current_switch)
     parse_error(p, "default label not within a switch statement");
 

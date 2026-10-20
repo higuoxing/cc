@@ -28,7 +28,7 @@ typedef struct {
   TokenType type;
 } Keyword;
 
-// C11 keywords
+/* C11 keywords */
 #define KW(spelling, kind)                                                     \
   {.name = spelling, .len = sizeof(spelling) - 1, .type = kind}
 
@@ -114,7 +114,7 @@ void lexer_advance(Lexer *l) {
   l->cursor++;
 
   if (c == '\r' || c == '\n') {
-    // Handle \r\n
+    /* Handle \r\n */
     if (c == '\r' && *l->cursor == '\n') {
       l->cursor++;
     }
@@ -124,8 +124,10 @@ void lexer_advance(Lexer *l) {
   }
 }
 
-// Skip whitespace and comments (C11 6.4.9: each comment is replaced by one
-// space character).
+/*
+ * Skip whitespace and comments (C11 6.4.9: each comment is replaced by one
+ * space character).
+ */
 void skip_whitespace(Lexer *l) {
   for (;;) {
     if (*l->cursor == ' ' || *l->cursor == '\t' || *l->cursor == '\n' ||
@@ -135,14 +137,14 @@ void skip_whitespace(Lexer *l) {
     }
 
     if (*l->cursor == '/' && l->cursor[1] == '/') {
-      // Line comment: skip to the end of the line.
+      /* Line comment: skip to the end of the line. */
       while (*l->cursor != '\0' && *l->cursor != '\n')
         lexer_advance(l);
       continue;
     }
 
     if (*l->cursor == '/' && l->cursor[1] == '*') {
-      // Block comment: skip to the closing '*/'.
+      /* Block comment: skip to the closing delimiter. */
       lexer_advance(l);
       lexer_advance(l);
       for (;;) {

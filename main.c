@@ -63,8 +63,10 @@ static void usage(const char *prog) {
   exit(1);
 }
 
-// Derive the assembly file name from the input one, mirroring 'gcc -S':
-// 'foo.c' becomes 'foo.s', and a name without a dot gets '.s' appended.
+/*
+ * Derive the assembly file name from the input one, mirroring 'gcc -S':
+ * 'foo.c' becomes 'foo.s', and a name without a dot gets '.s' appended.
+ */
 static char *derive_output_path(const char *input) {
   const char *dot = strrchr(input, '.');
   size_t base_len = dot ? (size_t)(dot - input) : strlen(input);
@@ -76,7 +78,7 @@ static char *derive_output_path(const char *input) {
     exit(1);
   }
   memcpy(path, input, base_len);
-  memcpy(path + base_len, ".s", 3); // Includes the terminating NUL.
+  memcpy(path + base_len, ".s", 3); /* Includes the terminating NUL. */
   return path;
 }
 
@@ -106,7 +108,7 @@ int main(int argc, char **argv) {
     usage(argv[0]);
 
   if (output && strcmp(output, "-") == 0) {
-    // '-o -' writes assembly to stdout, like gcc and clang.
+    /* '-o -' writes assembly to stdout, like gcc and clang. */
     out_file = stdout;
   } else {
     if (!output)
