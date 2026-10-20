@@ -457,39 +457,30 @@ static AstNode *parse_function(Parser *p) {
  * statement:
  *   jump-statement | compound-statement | declaration
  *   expression-statement | ';'
- * (C11 6.8; the expression-statement forms are dispatched by token,
- *  an approximation of the standard's grammar)
+ * (C11 6.8; as in GCC and Clang, anything not dispatched above is
+ *  attempted as an expression-statement, whose parser diagnoses
+ *  tokens that cannot start an expression)
  */
 static AstNode *parse_stmt(Parser *p) {
-  if (p->current.type == TOKEN_RETURN) {
+  AstNode *stmt;
+
+  switch (p->current.type) {
+  case TOKEN_RETURN:
     return parse_return_stmt(p);
-  }
-
-  if (p->current.type == TOKEN_LBRACE)
+  case TOKEN_LBRACE:
     return parse_block(p);
-
-  if (p->current.type == TOKEN_INT)
+  case TOKEN_INT:
     return parse_decl(p);
-
-  if (p->current.type == TOKEN_SEMICOLON) {
-    AstNode *stmt = new_ast_node(p, AST_EXPR_STMT);
+  case TOKEN_SEMICOLON:
+    stmt = new_ast_node(p, AST_EXPR_STMT);
     parser_advance(p);
     return stmt;
-  }
-
-  if (p->current.type == TOKEN_INT_LITERAL || p->current.type == TOKEN_LPAREN ||
-      p->current.type == TOKEN_MINUS || p->current.type == TOKEN_BANG ||
-      p->current.type == TOKEN_TILDE ||
-      (p->current.type == TOKEN_IDENTIFIER &&
-       (find_local_var(p, p->current) || p->lookahead.type == TOKEN_ASSIGN))) {
-    AstNode *stmt = new_ast_node(p, AST_EXPR_STMT);
+  default:
+    stmt = new_ast_node(p, AST_EXPR_STMT);
     stmt->d.expr_stmt.expr = parse_expr(p);
     parse_expect(p, TOKEN_SEMICOLON, "expect ';'");
     return stmt;
   }
-
-  parse_error(p, "unexpected token after statement");
-  return NULL;
 }
 
 /*

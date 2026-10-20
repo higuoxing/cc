@@ -158,6 +158,9 @@ check 42 'int main() { int a = 41; return ++a; }'
 check 41 'int main() { int a = 41; return a++; }'
 check 42 'int main() { int a = 43; return --a; }'
 check 42 'int main() { int a = 42; return a--; }'
+check 42 'int main() { int a = 41; a++; return a; }'
+check 42 'int main() { int a = 43; --a; return a; }'
+check 42 'int main() { int a = 40; ++a; a++; return a; }'
 
 check_error missing-plus-rhs 'int main() { return 1 +; }' '1:24: error: expect expr'
 check_error missing-sub-rhs 'int main() { return 1 -; }' '1:24: error: expect expr'
@@ -184,8 +187,8 @@ check_error missing-rparen-eof 'int main() { return (1 + 2 }' "1:28: error: expe
 check_error missing-semicolon 'int main() { return 42 }' "1:24: error: expect ';'"
 check_error extra-rparen 'int main() { return (1+2)); }' "1:26: error: expect ';'"
 check_error adjacent-literals 'int main() { return 1 2; }' "1:23: error: expect ';'"
-check_error trailing-identifier 'int main() { return 42; garbage }' "1:25: error: unexpected token after statement"
-check_error trailing-token 'int main() { return 42; @ }' "1:25: error: unexpected token after statement"
+check_error trailing-identifier 'int main() { return 42; garbage }' "1:25: error: undeclared identifier"
+check_error trailing-token 'int main() { return 42; @ }' "1:25: error: expect expr"
 check_error trailing-after-bare-return 'int main() { return; garbage }' '1:20: error: expect return expr'
 check_error empty-input '' "1:1: error: expect 'int'"
 check_error whitespace-only $' \t\n' "2:1: error: expect 'int'"
@@ -236,5 +239,7 @@ check_error invalid-decrement 'int main() { return --1; }' \
 	    '1:21: error: invalid decrement target'
 check_error invalid-postfix-chain 'int main() { int a; return (a++)++; }' \
 	    '1:33: error: invalid increment target'
+check_error undeclared-postfix 'int main() { a++; return 0; }' \
+	    '1:14: error: undeclared identifier'
 
 printf 'All %d tests passed (%d execution, %d rejection).\n' "$((passed + rejected))" "$passed" "$rejected"
