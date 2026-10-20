@@ -448,23 +448,59 @@ static AstNode *parse_equality(Parser *p) {
 /*
  * assignment-expression:
  *   equality-expression
- *   equality-expression '=' assignment-expression
+ *   equality-expression assignment-operator assignment-expression
  * (C11 6.5.16, without conditional or comma expressions; the left
- *  operand must be an lvalue)
+ *  operand must be an lvalue. assignment-operator: = += -= *= /= %=)
  */
 static AstNode *parse_expr(Parser *p) {
   AstNode *left;
 
   left = parse_equality(p);
-  if (p->current.type == TOKEN_ASSIGN) {
+  if (p->current.type == TOKEN_ASSIGN || p->current.type == TOKEN_PLUS_EQ ||
+      p->current.type == TOKEN_MINUS_EQ || p->current.type == TOKEN_STAR_EQ ||
+      p->current.type == TOKEN_SLASH_EQ ||
+      p->current.type == TOKEN_PERCENT_EQ) {
     AstNode *node;
+    AstNode *rhs;
+    TokenType op;
+
     if (!is_lvalue(left->type))
       parse_error(p, "invalid assignment target");
-    // Consume '='
+
+    op = p->current.type;
+    // Consume the assignment operator
     parser_advance(p);
+
+    rhs = parse_expr(p);
+
+    if (op != TOKEN_ASSIGN) {
+      /*
+       * Compound assignment desugars to 'E1 = E1 <op> E2', where E1
+       * is the left operand and E2 the right one (C11 6.5.16.2p3).
+       * The standard requires the lvalue E1 to be evaluated only
+       * once, which holds here because E1 is a plain variable.
+       * lhs_copy is a fresh node: codegen walks a tree and must not
+       * see the same node twice.
+       */
+      AstNode *binop;
+      AstNode *lhs_copy;
+
+      binop = new_ast_node(p, op == TOKEN_PLUS_EQ    ? AST_ADD
+                              : op == TOKEN_MINUS_EQ ? AST_SUB
+                              : op == TOKEN_STAR_EQ  ? AST_MUL
+                              : op == TOKEN_SLASH_EQ ? AST_DIV
+                                                     : AST_MOD);
+      lhs_copy = new_ast_node(p, AST_VAR);
+      lhs_copy->d.variable.var = left->d.variable.var;
+
+      binop->d.binary.lhs = lhs_copy;
+      binop->d.binary.rhs = rhs;
+      rhs = binop;
+    }
+
     node = new_ast_node(p, AST_ASSIGN);
     node->d.binary.lhs = left;
-    node->d.binary.rhs = parse_expr(p);
+    node->d.binary.rhs = rhs;
     return node;
   }
   return left;

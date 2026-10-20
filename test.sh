@@ -182,6 +182,14 @@ check 2 'int main() { return 10 % 4; }'
 check 255 'int main() { return -7 % 3; }'
 check 0 'int main() { return 6 % 2; }'
 check 2 'int main() { return 4 * 3 % 5; }'
+check 42 'int main() { int a = 40; a += 2; return a; }'
+check 42 'int main() { int a = 44; a -= 2; return a; }'
+check 42 'int main() { int a = 14; a *= 3; return a; }'
+check 42 'int main() { int a = 84; a /= 2; return a; }'
+check 42 'int main() { int a = 85; a %= 43; return a; }'
+check 42 'int main() { int a = 40; return a += 2; }'
+check 42 'int main() { int a = 6; int b = 7; a *= b; return a; }'
+check 0 'int main() { int a = 42; a %= 7; return a; }'
 
 check_error missing-plus-rhs 'int main() { return 1 +; }' '1:24: error: expect expr'
 check_error missing-sub-rhs 'int main() { return 1 -; }' '1:24: error: expect expr'
@@ -266,5 +274,9 @@ check_error missing-compare-rhs 'int main() { return 1 <; }' \
 	    '1:24: error: expect expr'
 check_error missing-eq-rhs 'int main() { return 1 ==; }' \
 	    '1:25: error: expect expr'
+check_error compound-assign-literal 'int main() { 1 += 2; return 0; }' \
+	    '1:16: error: invalid assignment target'
+check_error compound-assign-sum 'int main() { int a; a + 1 += 2; }' \
+	    '1:27: error: invalid assignment target'
 
 printf 'All %d tests passed (%d execution, %d rejection).\n' "$((passed + rejected))" "$passed" "$rejected"
