@@ -70,7 +70,7 @@ int main(int argc, char **argv) {
   filename = argv[1];
   source = read_source(filename);
 
-  codegen(parse_program(filename, source));
+  codegen(parse_translation_unit(filename, source));
 
   return 0;
 }

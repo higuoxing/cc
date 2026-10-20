@@ -106,6 +106,6 @@ typedef struct AstNode {
   } d;
 } AstNode;
 
-extern AstNode *parse_program(const char *filename, const char *source);
+extern AstNode *parse_translation_unit(const char *filename, const char *source);
 
 #endif

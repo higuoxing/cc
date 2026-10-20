@@ -117,15 +117,24 @@ static void parse_expect(Parser *p, TokenType t, const char *msg) {
   parser_advance(p);
 }
 
-// Only variables are lvalues. The results of assignment and prefix
-// increment/decrement are not lvalues in C11, so this matches GCC and Clang
-// in C mode.
+/*
+ * Only variables are lvalues. The results of assignment and prefix
+ * increment/decrement are not lvalues in C11, so this matches GCC and Clang
+ * in C mode.
+ */
 static bool is_lvalue(AstType ty) { return ty == AST_VAR; }
 
 static bool is_increment_op(AstType ty) {
   return ty == AST_PRE_INCREMENT || ty == AST_POST_INCREMENT;
 }
 
+/*
+ * unary-expression:
+ *   '-' unary-expression | '~' unary-expression | '!' unary-expression
+ *   '++' unary-expression | '--' unary-expression
+ *   postfix-expression
+ * (C11 6.5.3; '&', '*', sizeof, and _Alignof are not implemented)
+ */
 static AstNode *parse_unary(Parser *p) {
   if (p->current.type == TOKEN_MINUS || p->current.type == TOKEN_TILDE ||
       p->current.type == TOKEN_BANG || p->current.type == TOKEN_PLUS_PLUS ||
@@ -175,6 +184,12 @@ static AstNode *parse_unary(Parser *p) {
   return parse_postfix(p);
 }
 
+/*
+ * postfix-expression:
+ *   primary-expression
+ *   postfix-expression '++' | postfix-expression '--'
+ * (C11 6.5.2; the operand must be a modifiable lvalue, 6.5.2.4)
+ */
 static AstNode *parse_postfix(Parser *p) {
   AstNode *left;
 
@@ -187,9 +202,11 @@ static AstNode *parse_postfix(Parser *p) {
     ty = p->current.type == TOKEN_PLUS_PLUS ? AST_POST_INCREMENT
                                             : AST_POST_DECREMENT;
 
-    // The grammar recurses here, but the operand must still be an lvalue:
-    // (a++)++ is invalid in C. Check before consuming so the error lands
-    // on the operator.
+    /*
+     * The grammar recurses here, but the operand must still be an lvalue:
+     * (a++)++ is invalid in C. Check before consuming so the error lands
+     * on the operator.
+     */
     if (!is_lvalue(left->type))
       parse_error(p, "invalid %s target",
                   is_increment_op(ty) ? "increment" : "decrement");
@@ -204,7 +221,11 @@ static AstNode *parse_postfix(Parser *p) {
   return left;
 }
 
-// Parse integers and parentheses
+/*
+ * primary-expression:
+ *   integer-constant | '(' expression ')' | identifier
+ * (C11 6.5.1; only int literals, no string or character constants)
+ */
 static AstNode *parse_primary(Parser *p) {
   if (p->current.type == TOKEN_INT_LITERAL) {
     AstNode *expr;
@@ -241,6 +262,11 @@ static AstNode *parse_primary(Parser *p) {
   return NULL;
 }
 
+/*
+ * declaration:
+ *   'int' identifier ['=' expression] ';'
+ * (C11 6.7, restricted to int and a single declarator)
+ */
 static AstNode *parse_decl(Parser *p) {
   AstNode *decl;
   Token name;
@@ -266,6 +292,13 @@ static AstNode *parse_decl(Parser *p) {
   return decl;
 }
 
+/*
+ * multiplicative-expression:
+ *   unary-expression
+ *   multiplicative-expression '*' unary-expression
+ *   multiplicative-expression '/' unary-expression
+ * (C11 6.5.5)
+ */
 static AstNode *parse_multiplicative(Parser *p) {
   AstNode *left;
 
@@ -291,7 +324,13 @@ static AstNode *parse_multiplicative(Parser *p) {
   return left;
 }
 
-// Additive expression
+/*
+ * additive-expression:
+ *   multiplicative-expression
+ *   additive-expression '+' multiplicative-expression
+ *   additive-expression '-' multiplicative-expression
+ * (C11 6.5.6)
+ */
 static AstNode *parse_additive(Parser *p) {
   AstNode *left;
 
@@ -317,6 +356,13 @@ static AstNode *parse_additive(Parser *p) {
   return left;
 }
 
+/*
+ * assignment-expression:
+ *   additive-expression
+ *   additive-expression '=' assignment-expression
+ * (C11 6.5.16, without conditional or comma expressions; the left
+ *  operand must be an lvalue)
+ */
 static AstNode *parse_expr(Parser *p) {
   AstNode *left;
 
@@ -335,6 +381,11 @@ static AstNode *parse_expr(Parser *p) {
   return left;
 }
 
+/*
+ * jump-statement:
+ *   'return' expression ';'
+ * (C11 6.8.6.4; bare 'return;' is rejected for now)
+ */
 static AstNode *parse_return_stmt(Parser *p) {
   AstNode *ast;
 
@@ -349,6 +400,11 @@ static AstNode *parse_return_stmt(Parser *p) {
   return ast;
 }
 
+/*
+ * compound-statement:
+ *   '{' statement* '}'
+ * (C11 6.8.2)
+ */
 static AstNode *parse_block(Parser *p) {
   AstNode *block;
   AstNode **tail;
@@ -373,6 +429,11 @@ static AstNode *parse_block(Parser *p) {
   return block;
 }
 
+/*
+ * function-definition:
+ *   'int' identifier '(' ')' compound-statement
+ * (C11 6.9.1, restricted to int return type and no parameters)
+ */
 static AstNode *parse_function(Parser *p) {
   AstNode *fn;
 
@@ -392,6 +453,13 @@ static AstNode *parse_function(Parser *p) {
   return fn;
 }
 
+/*
+ * statement:
+ *   jump-statement | compound-statement | declaration
+ *   expression-statement | ';'
+ * (C11 6.8; the expression-statement forms are dispatched by token,
+ *  an approximation of the standard's grammar)
+ */
 static AstNode *parse_stmt(Parser *p) {
   if (p->current.type == TOKEN_RETURN) {
     return parse_return_stmt(p);
@@ -424,7 +492,12 @@ static AstNode *parse_stmt(Parser *p) {
   return NULL;
 }
 
-AstNode *parse_program(const char *filename, const char *source) {
+/*
+ * translation-unit:
+ *   function-definition EOF
+ * (C11 6.9; only a single function is supported)
+ */
+AstNode *parse_translation_unit(const char *filename, const char *source) {
   Parser p;
   AstNode *ast;
 
