@@ -154,6 +154,10 @@ check 42 'int main() { return 2147483647 - 2147483605; }'
 check 1 'int main() { return 2147483647 / 2147483647; }'
 check 1 'int main() { return - 2147483647 + 2147483647 + 1; }'
 check 7 'int main() { return 000000000000000000000000000000007; }'
+check 42 'int main() { int a = 41; return ++a; }'
+check 41 'int main() { int a = 41; return a++; }'
+check 42 'int main() { int a = 43; return --a; }'
+check 42 'int main() { int a = 42; return a--; }'
 
 check_error missing-plus-rhs 'int main() { return 1 +; }' '1:24: error: expect expr'
 check_error missing-sub-rhs 'int main() { return 1 -; }' '1:24: error: expect expr'
@@ -222,5 +226,15 @@ done
 # TODO: Allow different type of integer literals
 check_error literal-over-int32 'int main() { return 2147483648; }' \
 	    '1:21: error: integer literal out of range for 32-bit int'
+check_error invalid-increment 'int main() { return ++1; }' \
+	    '1:21: error: invalid increment target'
+check_error invalid-increment 'int main() { return 1++; }' \
+	    '1:22: error: invalid increment target'
+check_error invalid-increment 'int main() { int a; return ++(a+1); }' \
+	    '1:28: error: invalid increment target'
+check_error invalid-decrement 'int main() { return --1; }' \
+	    '1:21: error: invalid decrement target'
+check_error invalid-postfix-chain 'int main() { int a; return (a++)++; }' \
+	    '1:33: error: invalid increment target'
 
 printf 'All %d tests passed (%d execution, %d rejection).\n' "$((passed + rejected))" "$passed" "$rejected"

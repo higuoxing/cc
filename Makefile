@@ -5,6 +5,7 @@ TARGET := cc
 
 SRCS := main.c lexer.c parser.c codegen.c
 OBJS := $(SRCS:.c=.o)
+DEPS := $(OBJS:.o=.d)
 
 all: $(TARGET)
 
@@ -12,10 +13,12 @@ $(TARGET): $(OBJS)
 	$(CC) $(CFLAGS) $^ -o $@
 
 %.o: %.c
-	$(CC) $(CFLAGS) -c $< -o $@
+	$(CC) $(CFLAGS) -MMD -MP -c $< -o $@
+
+-include $(DEPS)
 
 clean:
-	rm -f $(OBJS) $(TARGET)
+	rm -f $(OBJS) $(DEPS) $(TARGET)
 
 test: $(TARGET)
 	./test.sh

@@ -54,6 +54,10 @@ typedef enum {
   AST_NEG,
   AST_BITWISE_NOT,
   AST_LOGICAL_NOT,
+  AST_PRE_INCREMENT,
+  AST_POST_INCREMENT,
+  AST_PRE_DECREMENT,
+  AST_POST_DECREMENT,
 } AstType;
 
 typedef struct AstNode {

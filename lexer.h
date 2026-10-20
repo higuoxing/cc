@@ -30,8 +30,10 @@ typedef enum {
   TOKEN_IDENTIFIER,
   TOKEN_INT_LITERAL,
   TOKEN_SEMICOLON,
-  TOKEN_PLUS,   // '+'
-  TOKEN_MINUS,  // '-'
+  TOKEN_PLUS,      // '+'
+  TOKEN_PLUS_PLUS, // '++'
+  TOKEN_MINUS,     // '-'
+  TOKEN_MINUS_MINUS, // '--'
   TOKEN_STAR,   // '*'
   TOKEN_SLASH,  // '/'
   TOKEN_LPAREN, // '('

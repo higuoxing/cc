@@ -1,4 +1,5 @@
 cc
 *.o
+*.d
 .qemu/
 .vmtest.log

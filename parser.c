@@ -16,6 +16,7 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
+#include <stdarg.h>
 #include <stdbool.h>
 #include <stdio.h>
 #include <string.h>
@@ -24,18 +25,21 @@
 #include "parser.h"
 
 static LocalVar *declare_local_var(Parser *p, Token name);
-
 static AstNode *new_ast_node(Parser *p, AstType ty);
 static void parser_advance(Parser *p);
-static void parse_error(Parser *p, const char *errmsg);
+static void parse_error(Parser *p, const char *fmt, ...)
+    __attribute__((format(printf, 2, 3), noreturn));
 static AstNode *parse_expr(Parser *p);
 static AstNode *parse_unary(Parser *p);
+static AstNode *parse_postfix(Parser *p);
 static AstNode *parse_primary(Parser *p);
 static AstNode *parse_decl(Parser *p);
 static AstNode *parse_return_stmt(Parser *p);
 static AstNode *parse_stmt(Parser *p);
 static AstNode *parse_block(Parser *p);
 static AstNode *parse_function(Parser *p);
+static bool is_lvalue(AstType ty);
+static bool is_increment_op(AstType ty);
 
 static bool same_identifier(Token a, Token b) {
   return a.len == b.len && strncmp(a.start, b.start, a.len) == 0;
@@ -93,43 +97,115 @@ static void parser_init(Parser *p, const char *filename, const char *source) {
   p->lookahead = lexer_next_token(&p->lexer);
 }
 
-static void parse_error(Parser *p, const char *errmsg) {
-  fprintf(stderr, "%s:%d:%d: error: %s\n", p->lexer.filename, p->current.line,
-          p->current.col, errmsg);
+static void parse_error(Parser *p, const char *fmt, ...) {
+  va_list ap;
+
+  fprintf(stderr, "%s:%d:%d: error: ", p->lexer.filename, p->current.line,
+          p->current.col);
+  va_start(ap, fmt);
+  vfprintf(stderr, fmt, ap);
+  va_end(ap);
+  fputc('\n', stderr);
   exit(1);
 }
 
 static void parse_expect(Parser *p, TokenType t, const char *msg) {
   if (p->current.type != t) {
-    parse_error(p, msg);
+    parse_error(p, "%s", msg);
   }
 
   parser_advance(p);
 }
 
-AstNode *parse_unary(Parser *p) {
+// Only variables are lvalues. The results of assignment and prefix
+// increment/decrement are not lvalues in C11, so this matches GCC and Clang
+// in C mode.
+static bool is_lvalue(AstType ty) { return ty == AST_VAR; }
+
+static bool is_increment_op(AstType ty) {
+  return ty == AST_PRE_INCREMENT || ty == AST_POST_INCREMENT;
+}
+
+static AstNode *parse_unary(Parser *p) {
   if (p->current.type == TOKEN_MINUS || p->current.type == TOKEN_TILDE ||
-      p->current.type == TOKEN_BANG) {
+      p->current.type == TOKEN_BANG || p->current.type == TOKEN_PLUS_PLUS ||
+      p->current.type == TOKEN_MINUS_MINUS) {
     AstNode *node;
     AstType op;
+    Token op_tok;
 
-    op = p->current.type == TOKEN_MINUS
-             ? AST_NEG
-             : (p->current.type == TOKEN_TILDE ? AST_BITWISE_NOT
-                                               : AST_LOGICAL_NOT);
-    // Consume '-' or '~' or '!'
+    switch (p->current.type) {
+    case TOKEN_MINUS:
+      op = AST_NEG;
+      break;
+    case TOKEN_TILDE:
+      op = AST_BITWISE_NOT;
+      break;
+    case TOKEN_BANG:
+      op = AST_LOGICAL_NOT;
+      break;
+    case TOKEN_PLUS_PLUS:
+      op = AST_PRE_INCREMENT;
+      break;
+    case TOKEN_MINUS_MINUS:
+      op = AST_PRE_DECREMENT;
+      break;
+    default:
+      fprintf(stderr, "unreachable %s:%d", __FILE__, __LINE__);
+      exit(1);
+    }
+
+    // Consume '-' or '~' or '!' or '++' or '--'
+    op_tok = p->current;
     parser_advance(p);
     node = new_ast_node(p, op);
     node->d.unary.operand = parse_unary(p);
 
+    if ((op == AST_PRE_INCREMENT || op == AST_PRE_DECREMENT) &&
+        !is_lvalue(node->d.unary.operand->type)) {
+      // Report at the operator, not at the token after the operand.
+      p->current = op_tok;
+      parse_error(p, "invalid %s target",
+                  is_increment_op(op) ? "increment" : "decrement");
+    }
+
     return node;
   }
 
-  return parse_primary(p);
+  return parse_postfix(p);
+}
+
+static AstNode *parse_postfix(Parser *p) {
+  AstNode *left;
+
+  left = parse_primary(p);
+  while (p->current.type == TOKEN_PLUS_PLUS ||
+         p->current.type == TOKEN_MINUS_MINUS) {
+    AstNode *postfixed;
+    AstType ty;
+
+    ty = p->current.type == TOKEN_PLUS_PLUS ? AST_POST_INCREMENT
+                                            : AST_POST_DECREMENT;
+
+    // The grammar recurses here, but the operand must still be an lvalue:
+    // (a++)++ is invalid in C. Check before consuming so the error lands
+    // on the operator.
+    if (!is_lvalue(left->type))
+      parse_error(p, "invalid %s target",
+                  is_increment_op(ty) ? "increment" : "decrement");
+
+    // Consume '++' or '--'
+    parser_advance(p);
+    postfixed = new_ast_node(p, ty);
+    postfixed->d.unary.operand = left;
+    left = postfixed;
+  }
+
+  return left;
 }
 
 // Parse integers and parentheses
-AstNode *parse_primary(Parser *p) {
+static AstNode *parse_primary(Parser *p) {
   if (p->current.type == TOKEN_INT_LITERAL) {
     AstNode *expr;
     expr = new_ast_node(p, AST_INT_LITERAL);
@@ -190,7 +266,7 @@ static AstNode *parse_decl(Parser *p) {
   return decl;
 }
 
-AstNode *parse_multiplicative(Parser *p) {
+static AstNode *parse_multiplicative(Parser *p) {
   AstNode *left;
 
   left = parse_unary(p);
@@ -247,7 +323,7 @@ static AstNode *parse_expr(Parser *p) {
   left = parse_additive(p);
   if (p->current.type == TOKEN_ASSIGN) {
     AstNode *node;
-    if (left->type != AST_VAR)
+    if (!is_lvalue(left->type))
       parse_error(p, "invalid assignment target");
     // Consume '='
     parser_advance(p);

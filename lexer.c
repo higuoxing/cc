@@ -133,14 +133,26 @@ Token lexer_next_token(Lexer *l) {
     lexer_advance(l);
     return tok;
   case '+':
-    tok.type = TOKEN_PLUS;
-    tok.len = 1;
     lexer_advance(l);
+    if (*l->cursor == '+') {
+      lexer_advance(l);
+      tok.type = TOKEN_PLUS_PLUS;
+      tok.len = 2;
+    } else {
+      tok.type = TOKEN_PLUS;
+      tok.len = 1;
+    }
     return tok;
   case '-':
-    tok.type = TOKEN_MINUS;
-    tok.len = 1;
     lexer_advance(l);
+    if (*l->cursor == '-') {
+      lexer_advance(l);
+      tok.type = TOKEN_MINUS_MINUS;
+      tok.len = 2;
+    } else {
+      tok.type = TOKEN_MINUS;
+      tok.len = 1;
+    }
     return tok;
   case '*':
     tok.type = TOKEN_STAR;

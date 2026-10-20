@@ -24,7 +24,8 @@
 
 static void codegen_addr(AstNode *expr) {
   if (expr->type != AST_VAR) {
-    fprintf(stderr, "invalid address expr in codegen");
+    fprintf(stderr, "invalid address expr in codegen\n");
+    exit(1);
   }
   printf("\tleaq -%d(%%rbp), %%rax\n", expr->d.variable.var->offset);
 }
@@ -91,6 +92,54 @@ static void codegen_expr(AstNode *expr) {
     printf("\tsete %%al\n");
     // Zero-extend %al into %eax
     printf("\tmovzbl %%al, %%eax\n");
+    break;
+  case AST_PRE_INCREMENT:
+    codegen_addr(expr->d.unary.operand);
+    // movl (%rax), %ecx, load
+    printf("\tmovl (%%rax), %%ecx\n");
+    // addl $1, %ecx, increment
+    printf("\taddl $1, %%ecx\n");
+    // movl %eax, (%rax), write back
+    printf("\tmovl %%ecx, (%%rax)\n");
+    // movl %ecx, %eax, result
+    printf("\tmovl %%ecx, %%eax\n");
+    break;
+  case AST_POST_INCREMENT:
+    codegen_addr(expr->d.unary.operand);
+    // movl (%rax), %ecx, load
+    printf("\tmovl (%%rax), %%ecx\n");
+    // pushq %rcx, save the original val
+    printf("\tpushq %%rcx\n");
+    // addl $1, %ecx, increment
+    printf("\taddl $1, %%ecx\n");
+    // movl %ecx, (%rax), write back
+    printf("\tmovl %%ecx, (%%rax)\n");
+    // popq %rax, result
+    printf("\tpopq %%rax\n");
+    break;
+  case AST_PRE_DECREMENT:
+    codegen_addr(expr->d.unary.operand);
+    // movl (%rax), %ecx, load
+    printf("\tmovl (%%rax), %%ecx\n");
+    // subl $1, %ecx, decrement
+    printf("\tsubl $1, %%ecx\n");
+    // movl %eax, (%rax), write back
+    printf("\tmovl %%ecx, (%%rax)\n");
+    // movl %ecx, %eax, result
+    printf("\tmovl %%ecx, %%eax\n");
+    break;
+  case AST_POST_DECREMENT:
+    codegen_addr(expr->d.unary.operand);
+    // movl (%rax), %ecx, load
+    printf("\tmovl (%%rax), %%ecx\n");
+    // pushq %rcx, save the original val
+    printf("\tpushq %%rcx\n");
+    // subl $1, %ecx, decrement
+    printf("\tsubl $1, %%ecx\n");
+    // movl %ecx, (%rax), write back
+    printf("\tmovl %%ecx, (%%rax)\n");
+    // popq %rax, result
+    printf("\tpopq %%rax\n");
     break;
   default:
     fprintf(stderr, "unrecognized ast node\n");
