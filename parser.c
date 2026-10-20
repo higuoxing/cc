@@ -37,6 +37,7 @@ static AstNode *parse_decl(Parser *p);
 static AstNode *parse_return_stmt(Parser *p);
 static AstNode *parse_if_stmt(Parser *p);
 static AstNode *parse_while_stmt(Parser *p);
+static AstNode *parse_for_stmt(Parser *p);
 static AstNode *parse_stmt(Parser *p);
 static AstNode *parse_block(Parser *p);
 static AstNode *parse_function(Parser *p);
@@ -681,6 +682,55 @@ static AstNode *parse_while_stmt(Parser *p) {
 }
 
 /*
+ * iteration-statement:
+ *   'for' '(' expression_opt ';' expression_opt ';' expression_opt ')'
+ *       statement
+ *   'for' '(' declaration expression_opt ';' expression_opt ')' statement
+ * (C11 6.8.5.3; a declaration in the init clause is scoped to the loop,
+ *  and an omitted condition means a nonzero constant)
+ */
+static AstNode *parse_for_stmt(Parser *p) {
+  AstNode *for_node;
+  LocalVar *outer_locals;
+
+  parse_expect(p, TOKEN_FOR, "expect 'for'");
+  parse_expect(p, TOKEN_LPAREN, "expect '('");
+
+  for_node = new_ast_node(p, AST_FOR);
+
+  // A declaration in the init clause is scoped to the whole loop.
+  outer_locals = p->locals;
+  ++p->scope_depth;
+
+  if (p->current.type == TOKEN_INT) {
+    // parse_decl consumes the declaration's own ';'.
+    for_node->d.for_stmt.init = parse_decl(p);
+  } else if (p->current.type == TOKEN_SEMICOLON) {
+    // Omitted init clause; consume the ';'.
+    parser_advance(p);
+  } else {
+    AstNode *init = new_ast_node(p, AST_EXPR_STMT);
+    init->d.expr_stmt.expr = parse_expr(p);
+    parse_expect(p, TOKEN_SEMICOLON, "expect ';'");
+    for_node->d.for_stmt.init = init;
+  }
+
+  if (p->current.type != TOKEN_SEMICOLON)
+    for_node->d.for_stmt.cond = parse_expr(p);
+  parse_expect(p, TOKEN_SEMICOLON, "expect ';'");
+
+  if (p->current.type != TOKEN_RPAREN)
+    for_node->d.for_stmt.post = parse_expr(p);
+  parse_expect(p, TOKEN_RPAREN, "expect ')'");
+
+  for_node->d.for_stmt.body = parse_stmt(p);
+  p->locals = outer_locals;
+  --p->scope_depth;
+
+  return for_node;
+}
+
+/*
  * statement:
  *   jump-statement | selection-statement | iteration-statement
  *   compound-statement | declaration | expression-statement | ';'
@@ -698,6 +748,8 @@ static AstNode *parse_stmt(Parser *p) {
     return parse_if_stmt(p);
   case TOKEN_WHILE:
     return parse_while_stmt(p);
+  case TOKEN_FOR:
+    return parse_for_stmt(p);
   case TOKEN_LBRACE:
     return parse_block(p);
   case TOKEN_INT:

@@ -228,6 +228,14 @@ check 42 'int main() { int i = 5; while (i) { if (i == 2) return 42; i = i - 1; 
 check 4 'int main() { int i = 0; while (i++ < 3) ; return i; }'
 check 0 'int main() { while (0) ; return 0; }'
 check 9 'int main() { int i = 3; int j; int n = 0; while (i) { j = 3; while (j) { n = n + 1; j = j - 1; } i = i - 1; } return n; }'
+check 3 'int main() { int i; for (i = 0; i < 3; i = i + 1) ; return i; }'
+check 6 'int main() { int i; int sum = 0; for (i = 0; i < 4; i = i + 1) sum = sum + i; return sum; }'
+check 42 'int main() { int i; for (i = 0; i < 10; i = i + 1) if (i == 5) return 42; return 0; }'
+check 6 'int main() { int sum = 0; for (int i = 0; i < 4; i = i + 1) sum = sum + i; return sum; }'
+check 42 'int main() { for (int i = 0; i < 3; i = i + 1) ; int i = 42; return i; }'
+check 42 'int main() { int i = 0; for (;;) { i = i + 1; if (i == 42) return i; } }'
+check 1 'int main() { int i = 0; for (; i < 3; i = i + 1) ; return i == 3; }'
+check 9 'int main() { int i; int j; int n = 0; for (i = 0; i < 3; i = i + 1) for (j = 0; j < 3; j = j + 1) n = n + 1; return n; }'
 
 check_error missing-plus-rhs 'int main() { return 1 +; }' '1:24: error: expect expr'
 check_error missing-sub-rhs 'int main() { return 1 -; }' '1:24: error: expect expr'
@@ -336,5 +344,11 @@ check_error missing-while-rparen 'int main() { while (1 return 0; }' \
 	    "1:23: error: expect ')'"
 check_error missing-while-body 'int main() { while (1) }' \
 	    '1:24: error: expect expr'
+check_error missing-for-paren 'int main() { for 1; return 0; }' \
+	    "1:18: error: expect '('"
+check_error missing-for-semi 'int main() { for (1) return 0; }' \
+	    "1:20: error: expect ';'"
+check_error missing-for-rparen 'int main() { for (1; 1; 1 return 0; }' \
+	    "1:27: error: expect ')'"
 
 printf 'All %d tests passed (%d execution, %d rejection).\n' "$((passed + rejected))" "$passed" "$rejected"

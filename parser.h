@@ -43,6 +43,7 @@ typedef enum {
   AST_BLOCK,
   AST_IF,
   AST_WHILE,
+  AST_FOR,
   AST_RETURN,
   AST_DECL,
   AST_EXPR_STMT,
@@ -95,6 +96,13 @@ typedef struct AstNode {
       struct AstNode *cond;
       struct AstNode *body;
     } while_stmt;
+
+    struct {
+      struct AstNode *init; // Decl or expression-statement, NULL if omitted.
+      struct AstNode *cond; // NULL if omitted (a nonzero constant, 6.8.5.3p2).
+      struct AstNode *post; // Expression, NULL if omitted.
+      struct AstNode *body;
+    } for_stmt;
 
     struct {
       struct AstNode *expr;

@@ -236,6 +236,25 @@ static void codegen_stmt(AstNode *stmt) {
     printf(".L.end.%d:\n", seq);
     break;
   }
+  case AST_FOR: {
+    int seq = label_seq++;
+
+    if (stmt->d.for_stmt.init)
+      codegen_stmt(stmt->d.for_stmt.init);
+    printf(".L.begin.%d:\n", seq);
+    if (stmt->d.for_stmt.cond) {
+      // An omitted condition is a nonzero constant: skip the test.
+      codegen_expr(stmt->d.for_stmt.cond);
+      printf("\tcmpl $0, %%eax\n");
+      printf("\tje .L.end.%d\n", seq);
+    }
+    codegen_stmt(stmt->d.for_stmt.body);
+    if (stmt->d.for_stmt.post)
+      codegen_expr(stmt->d.for_stmt.post);
+    printf("\tjmp .L.begin.%d\n", seq);
+    printf(".L.end.%d:\n", seq);
+    break;
+  }
   case AST_DECL:
     if (stmt->d.decl.init) {
       codegen_expr(stmt->d.decl.init);
