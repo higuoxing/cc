@@ -42,6 +42,7 @@ typedef enum {
   TOKEN_INT_LITERAL,
   TOKEN_SEMICOLON,
   TOKEN_COLON, /* ':' */
+  TOKEN_QUESTION, /* '?' */
   TOKEN_COMMA, /* ',' */
   TOKEN_PLUS, /* '+' */
   TOKEN_PLUS_PLUS, /* '++' */

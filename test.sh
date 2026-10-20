@@ -333,6 +333,17 @@ check 42 'int foo(int a); int foo(int a) { return a + 41; } int main() { return 
 check 42 'int foo(int a) { return a + 41; } int foo(int a); int main() { return foo(1); }'
 check 42 'int foo(int a); int foo(int a); int main() { return foo(1); } int foo(int a) { return a + 41; }'
 check 42 'int is_even(int n); int is_odd(int n) { if (n == 0) return 0; return is_even(n - 1); } int is_even(int n) { if (n == 0) return 1; return is_odd(n - 1); } int main() { if (is_even(10)) return 42; return 0; }'
+check 42 'int main() { return 1 ? 42 : 24; }'
+check 24 'int main() { return 0 ? 42 : 24; }'
+check 42 'int main() { return 5 ? 42 : 24; }'
+check 42 'int main() { int a = 42; 1 ? a : (a = 0); return a; }'
+check 42 'int main() { int a = 42; 0 ? (a = 0) : 1; return a; }'
+check 42 'int main() { return 0 ? 24 : 1 ? 42 : 0; }'
+check 42 'int main() { return 1 ? 0 ? 24 : 42 : 0; }'
+check 84 'int main() { return (1 ? 2 : 3) * 42; }'
+check 42 'int main() { if (1 ? 1 : 0) return 42; return 0; }'
+check 42 'int main() { int a = 1; return a++ ? 42 : 24; }'
+check 42 'int one() { return 1; } int main() { return one() ? 42 : 24; }'
 
 check_error missing-plus-rhs 'int main() { return 1 +; }' '1:24: error: expect expr'
 check_error missing-sub-rhs 'int main() { return 1 -; }' '1:24: error: expect expr'
@@ -527,6 +538,14 @@ check_error too-many-params \
 check_error declared-not-defined \
 	    'int foo(int a); int main() { return foo(1); }' \
 	    "1:37: error: function 'foo' declared but never defined"
+check_error missing-conditional-colon 'int main() { return 1 ? 2; }' \
+	    "1:26: error: expect ':'"
+check_error missing-conditional-then 'int main() { return 1 ? : 2; }' \
+	    '1:25: error: expect expr'
+check_error missing-conditional-else 'int main() { return 1 ? 2 : ; }' \
+	    '1:29: error: expect expr'
+check_error question-operand 'int main() { return ? 1; }' \
+	    '1:21: error: expect expr'
 check_error missing-break-semi 'int main() { while (1) break }' \
 	    "1:30: error: expect ';'"
 check_error goto-undefined 'int main() { goto L; }' \

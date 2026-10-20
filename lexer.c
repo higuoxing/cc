@@ -195,6 +195,11 @@ Token lexer_next_token(Lexer *l) {
     tok.len = 1;
     lexer_advance(l);
     return tok;
+  case '?':
+    tok.type = TOKEN_QUESTION;
+    tok.len = 1;
+    lexer_advance(l);
+    return tok;
   case ',':
     tok.type = TOKEN_COMMA;
     tok.len = 1;

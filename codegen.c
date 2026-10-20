@@ -201,6 +201,20 @@ static void codegen_expr(AstNode *expr) {
     fprintf(out, ".L.end.%d:\n", seq);
     break;
   }
+  case AST_CONDITIONAL: {
+    int seq = label_seq++;
+
+    /* Only the selected branch is evaluated. */
+    codegen_expr(expr->d.conditional.cond);
+    fprintf(out, "\tcmpl $0, %%eax\n");
+    fprintf(out, "\tje .L.else.%d\n", seq);
+    codegen_expr(expr->d.conditional.then_expr);
+    fprintf(out, "\tjmp .L.end.%d\n", seq);
+    fprintf(out, ".L.else.%d:\n", seq);
+    codegen_expr(expr->d.conditional.else_expr);
+    fprintf(out, ".L.end.%d:\n", seq);
+    break;
+  }
   case AST_CALL: {
     AstNode *arg;
     int nargs = 0;

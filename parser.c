@@ -31,6 +31,7 @@ static void parser_advance(Parser *p);
 static void parse_error(Parser *p, const char *fmt, ...)
     __attribute__((format(printf, 2, 3), noreturn));
 static AstNode *parse_expr(Parser *p);
+static AstNode *parse_conditional(Parser *p);
 static AstNode *parse_unary(Parser *p);
 static AstNode *parse_call_expr(Parser *p);
 static AstNode *parse_postfix(Parser *p);
@@ -739,17 +740,41 @@ static AstNode *parse_logical_or(Parser *p) {
 }
 
 /*
- * assignment-expression:
+ * conditional-expression:
  *   logical-OR-expression
- *   logical-OR-expression assignment-operator assignment-expression
- * (C11 6.5.16, without conditional or comma expressions; the left
- *  operand must be an lvalue. assignment-operator: = += -= *= /= %=
- *  <<= >>= &= ^= |=)
+ *   logical-OR-expression '?' expression ':' conditional-expression
+ * (C11 6.5.15; the middle operand is a full expression, the third a
+ *  conditional-expression, which makes the operator right-associative)
+ */
+static AstNode *parse_conditional(Parser *p) {
+  AstNode *node;
+
+  node = parse_logical_or(p);
+  if (p->current.type == TOKEN_QUESTION) {
+    AstNode *cond = node;
+
+    /* Consume '?' */
+    parser_advance(p);
+    node = new_ast_node(p, AST_CONDITIONAL);
+    node->d.conditional.cond = cond;
+    node->d.conditional.then_expr = parse_expr(p);
+    parse_expect(p, TOKEN_COLON, "expect ':'");
+    node->d.conditional.else_expr = parse_conditional(p);
+  }
+  return node;
+}
+
+/*
+ * assignment-expression:
+ *   conditional-expression
+ *   conditional-expression assignment-operator assignment-expression
+ * (C11 6.5.16, without comma expressions; the left operand must be an
+ *  lvalue. assignment-operator: = += -= *= /= %= <<= >>= &= ^= |=)
  */
 static AstNode *parse_expr(Parser *p) {
   AstNode *left;
 
-  left = parse_logical_or(p);
+  left = parse_conditional(p);
   if (is_assignment_op(p->current.type)) {
     AstNode *node;
     AstNode *rhs;

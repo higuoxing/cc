@@ -114,6 +114,7 @@ typedef enum {
   AST_SWITCH,
   AST_CASE,
   AST_CALL,
+  AST_CONDITIONAL,
   AST_RETURN,
   AST_DECL,
   AST_EXPR_STMT,
@@ -222,6 +223,12 @@ typedef struct AstNode {
       Token name;
       struct AstNode *args; /* First argument expression; NULL for now. */
     } call;
+
+    struct {
+      struct AstNode *cond;
+      struct AstNode *then_expr;
+      struct AstNode *else_expr;
+    } conditional;
 
     struct {
       struct AstNode *expr;
