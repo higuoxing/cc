@@ -30,7 +30,8 @@ static void reset_function_state(Parser *p);
 static void parser_advance(Parser *p);
 static void parse_error(Parser *p, const char *fmt, ...)
     __attribute__((format(printf, 2, 3), noreturn));
-static AstNode *parse_expr(Parser *p);
+static AstNode *parse_assignment(Parser *p);
+static AstNode *parse_expression(Parser *p);
 static AstNode *parse_conditional(Parser *p);
 static AstNode *parse_unary(Parser *p);
 static AstNode *parse_call_expr(Parser *p);
@@ -276,7 +277,7 @@ static AstNode *parse_call_expr(Parser *p) {
     for (;;) {
       if (nargs == 6)
         parse_error(p, "too many arguments");
-      *tail = parse_expr(p);
+      *tail = parse_assignment(p);
       tail = &(*tail)->next;
       nargs++;
       if (p->current.type == TOKEN_COMMA) {
@@ -358,7 +359,7 @@ static AstNode *parse_primary(Parser *p) {
     AstNode *expr;
     /* Consume '(' */
     parser_advance(p);
-    expr = parse_expr(p);
+    expr = parse_expression(p);
     parse_expect(p, TOKEN_RPAREN, "expect ')'");
     return expr;
   }
@@ -401,7 +402,7 @@ static AstNode *parse_decl(Parser *p) {
   if (p->current.type == TOKEN_ASSIGN) {
     /* Consume '=' */
     parser_advance(p);
-    decl->d.decl.init = parse_expr(p);
+    decl->d.decl.init = parse_assignment(p);
   }
 
   parse_expect(p, TOKEN_SEMICOLON, "expect ';'");
@@ -740,6 +741,32 @@ static AstNode *parse_logical_or(Parser *p) {
 }
 
 /*
+ * expression:
+ *   assignment-expression
+ *   expression ',' assignment-expression
+ * (C11 6.5.17; the left operand is evaluated and its value discarded,
+ *  its side effects kept, before the right operand is evaluated)
+ */
+static AstNode *parse_expression(Parser *p) {
+  AstNode *left;
+
+  left = parse_assignment(p);
+  while (p->current.type == TOKEN_COMMA) {
+    AstNode *right;
+    AstNode *node;
+
+    /* Consume ',' */
+    parser_advance(p);
+    right = parse_assignment(p);
+    node = new_ast_node(p, AST_COMMA);
+    node->d.binary.lhs = left;
+    node->d.binary.rhs = right;
+    left = node;
+  }
+  return left;
+}
+
+/*
  * conditional-expression:
  *   logical-OR-expression
  *   logical-OR-expression '?' expression ':' conditional-expression
@@ -757,7 +784,7 @@ static AstNode *parse_conditional(Parser *p) {
     parser_advance(p);
     node = new_ast_node(p, AST_CONDITIONAL);
     node->d.conditional.cond = cond;
-    node->d.conditional.then_expr = parse_expr(p);
+    node->d.conditional.then_expr = parse_expression(p);
     parse_expect(p, TOKEN_COLON, "expect ':'");
     node->d.conditional.else_expr = parse_conditional(p);
   }
@@ -768,10 +795,10 @@ static AstNode *parse_conditional(Parser *p) {
  * assignment-expression:
  *   conditional-expression
  *   conditional-expression assignment-operator assignment-expression
- * (C11 6.5.16, without comma expressions; the left operand must be an
- *  lvalue. assignment-operator: = += -= *= /= %= <<= >>= &= ^= |=)
+ * (C11 6.5.16; the left operand must be an lvalue. assignment-operator:
+ *  = += -= *= /= %= <<= >>= &= ^= |=)
  */
-static AstNode *parse_expr(Parser *p) {
+static AstNode *parse_assignment(Parser *p) {
   AstNode *left;
 
   left = parse_conditional(p);
@@ -787,7 +814,7 @@ static AstNode *parse_expr(Parser *p) {
     /* Consume the assignment operator */
     parser_advance(p);
 
-    rhs = parse_expr(p);
+    rhs = parse_assignment(p);
 
     if (op != TOKEN_ASSIGN) {
       /*
@@ -868,7 +895,7 @@ static AstNode *parse_return_stmt(Parser *p) {
     parse_error(p, "expect return expr");
 
   ast = new_ast_node(p, AST_RETURN);
-  ast->d.ret.expr = parse_expr(p);
+  ast->d.ret.expr = parse_expression(p);
   parse_expect(p, TOKEN_SEMICOLON, "expect ';'");
 
   return ast;
@@ -1088,7 +1115,7 @@ static AstNode *parse_if_stmt(Parser *p) {
   parse_expect(p, TOKEN_IF, "expect 'if'");
   parse_expect(p, TOKEN_LPAREN, "expect '('");
   if_node = new_ast_node(p, AST_IF);
-  if_node->d.if_stmt.cond = parse_expr(p);
+  if_node->d.if_stmt.cond = parse_expression(p);
   parse_expect(p, TOKEN_RPAREN, "expect ')'");
   if_node->d.if_stmt.then_stmt = parse_stmt(p, /*allow_decl=*/false);
   if (p->current.type == TOKEN_ELSE) {
@@ -1110,7 +1137,7 @@ static AstNode *parse_while_stmt(Parser *p) {
   parse_expect(p, TOKEN_WHILE, "expect 'while'");
   parse_expect(p, TOKEN_LPAREN, "expect '('");
   while_node = new_ast_node(p, AST_WHILE);
-  while_node->d.while_stmt.cond = parse_expr(p);
+  while_node->d.while_stmt.cond = parse_expression(p);
   parse_expect(p, TOKEN_RPAREN, "expect ')'");
   ++p->loop_depth;
   while_node->d.while_stmt.body = parse_stmt(p, /*allow_decl=*/false);
@@ -1147,17 +1174,17 @@ static AstNode *parse_for_stmt(Parser *p) {
     parser_advance(p);
   } else {
     AstNode *init = new_ast_node(p, AST_EXPR_STMT);
-    init->d.expr_stmt.expr = parse_expr(p);
+    init->d.expr_stmt.expr = parse_expression(p);
     parse_expect(p, TOKEN_SEMICOLON, "expect ';'");
     for_node->d.for_stmt.init = init;
   }
 
   if (p->current.type != TOKEN_SEMICOLON)
-    for_node->d.for_stmt.cond = parse_expr(p);
+    for_node->d.for_stmt.cond = parse_expression(p);
   parse_expect(p, TOKEN_SEMICOLON, "expect ';'");
 
   if (p->current.type != TOKEN_RPAREN)
-    for_node->d.for_stmt.post = parse_expr(p);
+    for_node->d.for_stmt.post = parse_expression(p);
   parse_expect(p, TOKEN_RPAREN, "expect ')'");
 
   ++p->loop_depth;
@@ -1184,7 +1211,7 @@ static AstNode *parse_do_stmt(Parser *p) {
   --p->loop_depth;
   parse_expect(p, TOKEN_WHILE, "expect 'while'");
   parse_expect(p, TOKEN_LPAREN, "expect '('");
-  do_node->d.do_stmt.cond = parse_expr(p);
+  do_node->d.do_stmt.cond = parse_expression(p);
   parse_expect(p, TOKEN_RPAREN, "expect ')'");
   /* The trailing ';' is part of the do-statement itself. */
   parse_expect(p, TOKEN_SEMICOLON, "expect ';'");
@@ -1376,7 +1403,7 @@ static AstNode *parse_switch_stmt(Parser *p) {
   parse_expect(p, TOKEN_SWITCH, "expect 'switch'");
   parse_expect(p, TOKEN_LPAREN, "expect '('");
   switch_node = new_ast_node(p, AST_SWITCH);
-  switch_node->d.switch_stmt.cond = parse_expr(p);
+  switch_node->d.switch_stmt.cond = parse_expression(p);
   parse_expect(p, TOKEN_RPAREN, "expect ')'");
 
   /*
@@ -1410,7 +1437,7 @@ static AstNode *parse_case_stmt(Parser *p) {
 
   case_tok = p->current;
   parse_expect(p, TOKEN_CASE, "expect 'case'");
-  val = eval_const_expr(p, parse_expr(p));
+  val = eval_const_expr(p, parse_assignment(p));
 
   for (entry = p->current_switch->d.switch_stmt.cases; entry;
        entry = entry->next)
@@ -1525,7 +1552,7 @@ static AstNode *parse_stmt(Parser *p, bool allow_decl) {
     return stmt;
   default:
     stmt = new_ast_node(p, AST_EXPR_STMT);
-    stmt->d.expr_stmt.expr = parse_expr(p);
+    stmt->d.expr_stmt.expr = parse_expression(p);
     parse_expect(p, TOKEN_SEMICOLON, "expect ';'");
     return stmt;
   }

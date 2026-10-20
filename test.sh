@@ -344,6 +344,14 @@ check 84 'int main() { return (1 ? 2 : 3) * 42; }'
 check 42 'int main() { if (1 ? 1 : 0) return 42; return 0; }'
 check 42 'int main() { int a = 1; return a++ ? 42 : 24; }'
 check 42 'int one() { return 1; } int main() { return one() ? 42 : 24; }'
+check 42 'int main() { return 1, 42; }'
+check 42 'int main() { int a = 0; a = 1, a = a + 41; return a; }'
+check 6 'int main() { int i; int j; int n = 0; for (i = 0, j = 0; i < 3; i = i + 1, j = j + 1) n = n + i + j; return n; }'
+check 1 'int main() { int a = 0; a = 1, 2; return a; }'
+check 42 'int main() { int a = 1; int b = 42; return (a, b); }'
+check 42 'int main() { int a = 0; return 1 ? a = 1, a + 41 : 0; }'
+check 42 'int main() { int a = 0; if (a = 1, a == 1) return 42; return 0; }'
+check 42 'int main() { int a = 0; return a = 41, a + 1; }'
 
 check_error missing-plus-rhs 'int main() { return 1 +; }' '1:24: error: expect expr'
 check_error missing-sub-rhs 'int main() { return 1 -; }' '1:24: error: expect expr'
@@ -546,6 +554,10 @@ check_error missing-conditional-else 'int main() { return 1 ? 2 : ; }' \
 	    '1:29: error: expect expr'
 check_error question-operand 'int main() { return ? 1; }' \
 	    '1:21: error: expect expr'
+check_error comma-assign 'int main() { int a; (a, a) = 1; return 0; }' \
+	    '1:28: error: invalid assignment target'
+check_error case-comma 'int main() { switch (1) { case 1, 2: ; } }' \
+	    "1:33: error: expect ':'"
 check_error missing-break-semi 'int main() { while (1) break }' \
 	    "1:30: error: expect ';'"
 check_error goto-undefined 'int main() { goto L; }' \

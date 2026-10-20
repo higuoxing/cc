@@ -201,6 +201,11 @@ static void codegen_expr(AstNode *expr) {
     fprintf(out, ".L.end.%d:\n", seq);
     break;
   }
+  case AST_COMMA:
+    /* The left operand's value is discarded, its side effects kept. */
+    codegen_expr(expr->d.binary.lhs);
+    codegen_expr(expr->d.binary.rhs);
+    break;
   case AST_CONDITIONAL: {
     int seq = label_seq++;
 
