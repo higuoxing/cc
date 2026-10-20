@@ -36,6 +36,7 @@ static AstNode *parse_primary(Parser *p);
 static AstNode *parse_decl(Parser *p);
 static AstNode *parse_return_stmt(Parser *p);
 static AstNode *parse_if_stmt(Parser *p);
+static AstNode *parse_while_stmt(Parser *p);
 static AstNode *parse_stmt(Parser *p);
 static AstNode *parse_block(Parser *p);
 static AstNode *parse_function(Parser *p);
@@ -663,9 +664,26 @@ static AstNode *parse_if_stmt(Parser *p) {
 }
 
 /*
+ * iteration-statement:
+ *   'while' '(' expression ')' statement
+ * (C11 6.8.5.1)
+ */
+static AstNode *parse_while_stmt(Parser *p) {
+  AstNode *while_node;
+
+  parse_expect(p, TOKEN_WHILE, "expect 'while'");
+  parse_expect(p, TOKEN_LPAREN, "expect '('");
+  while_node = new_ast_node(p, AST_WHILE);
+  while_node->d.while_stmt.cond = parse_expr(p);
+  parse_expect(p, TOKEN_RPAREN, "expect ')'");
+  while_node->d.while_stmt.body = parse_stmt(p);
+  return while_node;
+}
+
+/*
  * statement:
- *   jump-statement | selection-statement | compound-statement
- *   declaration | expression-statement | ';'
+ *   jump-statement | selection-statement | iteration-statement
+ *   compound-statement | declaration | expression-statement | ';'
  * (C11 6.8; as in GCC and Clang, anything not dispatched above is
  *  attempted as an expression-statement, whose parser diagnoses
  *  tokens that cannot start an expression)
@@ -678,6 +696,8 @@ static AstNode *parse_stmt(Parser *p) {
     return parse_return_stmt(p);
   case TOKEN_IF:
     return parse_if_stmt(p);
+  case TOKEN_WHILE:
+    return parse_while_stmt(p);
   case TOKEN_LBRACE:
     return parse_block(p);
   case TOKEN_INT:

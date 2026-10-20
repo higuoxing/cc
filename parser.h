@@ -42,6 +42,7 @@ typedef enum {
   AST_FUNCTION,
   AST_BLOCK,
   AST_IF,
+  AST_WHILE,
   AST_RETURN,
   AST_DECL,
   AST_EXPR_STMT,
@@ -89,6 +90,11 @@ typedef struct AstNode {
       struct AstNode *then_stmt;
       struct AstNode *else_stmt; // NULL if there is no 'else' clause.
     } if_stmt;
+
+    struct {
+      struct AstNode *cond;
+      struct AstNode *body;
+    } while_stmt;
 
     struct {
       struct AstNode *expr;

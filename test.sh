@@ -220,6 +220,14 @@ check 42 'int main() { int a = 1; if (a++) return 42; return 0; }'
 check 1 'int main() { int a = 0; if (a++) return 42; return a; }'
 check 42 'int main() { if (1) { int a = 42; return a; } return 0; }'
 check 42 'int main() { if (0) return 24; else ; return 42; }'
+check 6 'int main() { int i = 3; int sum = 0; while (i) { sum = sum + 2; i = i - 1; } return sum; }'
+check 0 'int main() { int i = 0; int sum = 0; while (i) sum = sum + 1; return sum; }'
+check 3 'int main() { int i = 0; while (i < 3) i = i + 1; return i; }'
+check 0 'int main() { int i = 3; while (i) i = i - 1; return i; }'
+check 42 'int main() { int i = 5; while (i) { if (i == 2) return 42; i = i - 1; } return 0; }'
+check 4 'int main() { int i = 0; while (i++ < 3) ; return i; }'
+check 0 'int main() { while (0) ; return 0; }'
+check 9 'int main() { int i = 3; int j; int n = 0; while (i) { j = 3; while (j) { n = n + 1; j = j - 1; } i = i - 1; } return n; }'
 
 check_error missing-plus-rhs 'int main() { return 1 +; }' '1:24: error: expect expr'
 check_error missing-sub-rhs 'int main() { return 1 -; }' '1:24: error: expect expr'
@@ -320,5 +328,13 @@ check_error missing-if-rparen 'int main() { if (1 return 2; }' \
 	    "1:20: error: expect ')'"
 check_error missing-if-body 'int main() { if (1) }' \
 	    '1:21: error: expect expr'
+check_error missing-while-paren 'int main() { while 1; return 0; }' \
+	    "1:20: error: expect '('"
+check_error missing-while-cond 'int main() { while () return 0; }' \
+	    '1:21: error: expect expr'
+check_error missing-while-rparen 'int main() { while (1 return 0; }' \
+	    "1:23: error: expect ')'"
+check_error missing-while-body 'int main() { while (1) }' \
+	    '1:24: error: expect expr'
 
 printf 'All %d tests passed (%d execution, %d rejection).\n' "$((passed + rejected))" "$passed" "$rejected"

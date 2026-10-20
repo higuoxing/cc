@@ -224,6 +224,18 @@ static void codegen_stmt(AstNode *stmt) {
     printf(".L.end.%d:\n", seq);
     break;
   }
+  case AST_WHILE: {
+    int seq = label_seq++;
+
+    printf(".L.begin.%d:\n", seq);
+    codegen_expr(stmt->d.while_stmt.cond);
+    printf("\tcmpl $0, %%eax\n");
+    printf("\tje .L.end.%d\n", seq);
+    codegen_stmt(stmt->d.while_stmt.body);
+    printf("\tjmp .L.begin.%d\n", seq);
+    printf(".L.end.%d:\n", seq);
+    break;
+  }
   case AST_DECL:
     if (stmt->d.decl.init) {
       codegen_expr(stmt->d.decl.init);
