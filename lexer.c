@@ -102,10 +102,44 @@ void lexer_advance(Lexer *l) {
   }
 }
 
+// Skip whitespace and comments (C11 6.4.9: each comment is replaced by one
+// space character).
 void skip_whitespace(Lexer *l) {
-  while (*l->cursor == ' ' || *l->cursor == '\t' || *l->cursor == '\n' ||
-         *l->cursor == '\r') {
-    lexer_advance(l);
+  for (;;) {
+    if (*l->cursor == ' ' || *l->cursor == '\t' || *l->cursor == '\n' ||
+        *l->cursor == '\r') {
+      lexer_advance(l);
+      continue;
+    }
+
+    if (*l->cursor == '/' && l->cursor[1] == '/') {
+      // Line comment: skip to the end of the line.
+      while (*l->cursor != '\0' && *l->cursor != '\n')
+        lexer_advance(l);
+      continue;
+    }
+
+    if (*l->cursor == '/' && l->cursor[1] == '*') {
+      // Block comment: skip to the closing '*/'.
+      lexer_advance(l);
+      lexer_advance(l);
+      for (;;) {
+        if (*l->cursor == '\0') {
+          fprintf(stderr, "%s:%d:%d: error: unterminated comment\n",
+                  l->filename, l->line, lexer_column(l));
+          exit(1);
+        }
+        if (*l->cursor == '*' && l->cursor[1] == '/') {
+          lexer_advance(l);
+          lexer_advance(l);
+          break;
+        }
+        lexer_advance(l);
+      }
+      continue;
+    }
+
+    return;
   }
 }
 

@@ -277,6 +277,12 @@ check 6 'int main() { int i = 3; int sum = 0; do { sum = sum + i; i = i - 1; } w
 check 4 'int main() { int i = 0; do { i = i + 1; } while (i++ < 3); return i; }'
 check 1 'int main() { int i = 0; do i = i + 1; while (0); return i; }'
 check 9 'int main() { int i = 0; int j; int n = 0; do { j = 0; do { n = n + 1; j = j + 1; } while (j < 3); i = i + 1; } while (i < 3); return n; }'
+check 42 $'int main() { // comment\n return 42; }'
+check 42 'int main() { /* comment */ return 42; }'
+check 42 $'int main() { /* multi\nline\ncomment */ return 42; }'
+check 42 'int main() { return /* inline */ 42; }'
+check 7 'int main() { /* a */ return /* b */ 3 /* c */ + /* d */ 4; }'
+check 0 $'int main() { return 0; } // trailing comment'
 
 check_error missing-plus-rhs 'int main() { return 1 +; }' '1:24: error: expect expr'
 check_error missing-sub-rhs 'int main() { return 1 -; }' '1:24: error: expect expr'
@@ -417,5 +423,7 @@ check_error missing-do-semi 'int main() { do return 0; while (1) }' \
 	    "1:37: error: expect ';'"
 check_error missing-do-body 'int main() { do }' \
 	    '1:17: error: expect expr'
+check_error unterminated-comment 'int main() { /* comment' \
+	    '1:24: error: unterminated comment'
 
 printf 'All %d tests passed (%d execution, %d rejection).\n' "$((passed + rejected))" "$passed" "$rejected"
