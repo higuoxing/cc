@@ -56,6 +56,7 @@ typedef struct GotoRef {
 typedef struct Function {
   Token name;
   int nparams;
+  int is_defined; /* 1 once a definition has been seen. */
   struct Function *next;
 } Function;
 

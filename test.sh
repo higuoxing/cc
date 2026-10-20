@@ -329,6 +329,10 @@ check 120 'int fact(int n) { if (n == 0) return 1; return n * fact(n - 1); } int
 check 55 'int fib(int n) { if (n < 2) return n; return fib(n - 1) + fib(n - 2); } int main() { return fib(10); }'
 check 21 'int sum6(int a, int b, int c, int d, int e, int f) { return a + b + c + d + e + f; } int main() { return sum6(1, 2, 3, 4, 5, 6); }'
 check 42 'int pick(int a, int b) { return b; } int main() { int x = 42; return pick(0, x); }'
+check 42 'int foo(int a); int foo(int a) { return a + 41; } int main() { return foo(1); }'
+check 42 'int foo(int a) { return a + 41; } int foo(int a); int main() { return foo(1); }'
+check 42 'int foo(int a); int foo(int a); int main() { return foo(1); } int foo(int a) { return a + 41; }'
+check 42 'int is_even(int n); int is_odd(int n) { if (n == 0) return 0; return is_even(n - 1); } int is_even(int n) { if (n == 0) return 1; return is_odd(n - 1); } int main() { if (is_even(10)) return 42; return 0; }'
 
 check_error missing-plus-rhs 'int main() { return 1 +; }' '1:24: error: expect expr'
 check_error missing-sub-rhs 'int main() { return 1 -; }' '1:24: error: expect expr'
@@ -520,6 +524,9 @@ check_error too-few-args 'int foo(int a) { return a; } int main() { return foo()
 check_error too-many-params \
 	    'int foo(int a, int b, int c, int d, int e, int f, int g) { return 0; } int main() { return 42; }' \
 	    '1:51: error: too many parameters'
+check_error declared-not-defined \
+	    'int foo(int a); int main() { return foo(1); }' \
+	    "1:37: error: function 'foo' declared but never defined"
 check_error missing-break-semi 'int main() { while (1) break }' \
 	    "1:30: error: expect ';'"
 check_error goto-undefined 'int main() { goto L; }' \
