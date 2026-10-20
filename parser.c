@@ -26,6 +26,7 @@
 
 static LocalVar *declare_local_var(Parser *p, Token name);
 static AstNode *new_ast_node(Parser *p, AstType ty);
+static void reset_function_state(Parser *p);
 static void parser_advance(Parser *p);
 static void parse_error(Parser *p, const char *fmt, ...)
     __attribute__((format(printf, 2, 3), noreturn));
@@ -102,10 +103,30 @@ static void parser_advance(Parser *p) {
   p->lookahead = lexer_next_token(&p->lexer);
 }
 
+/*
+ * Reset the per-function workspace. Function-scoped state (locals, labels,
+ * pending gotos, the stack size, and the nesting counters) must not leak
+ * between functions; only the function table survives the whole translation
+ * unit. Blocks restore the locals list and scope depth by their own
+ * discipline, so this is mostly defensive — except for stack_size, which
+ * accumulates, and the label/goto tables, which are deliberately never
+ * restored when a block ends.
+ */
+static void reset_function_state(Parser *p) {
+  p->locals = NULL;
+  p->labels = NULL;
+  p->goto_refs = NULL;
+  p->current_switch = NULL;
+  p->scope_depth = 0;
+  p->loop_depth = 0;
+  p->stack_size = 0;
+}
+
 static void parser_init(Parser *p, const char *filename, const char *source) {
   p->locals = NULL;
   p->labels = NULL;
   p->goto_refs = NULL;
+  p->functions = NULL;
   p->current_switch = NULL;
   p->scope_depth = 0;
   p->loop_depth = 0;
@@ -817,13 +838,30 @@ static void check_gotos(Parser *p) {
 
 static AstNode *parse_function(Parser *p) {
   AstNode *fn;
+  Function *func;
 
+  reset_function_state(p);
   fn = new_ast_node(p, AST_FUNCTION);
   parse_expect(p, TOKEN_INT, "expect 'int'");
   if (p->current.type != TOKEN_IDENTIFIER)
     parse_error(p, "expect function name");
 
   fn->d.function.name = p->current;
+
+  /* The check runs while 'current' is still the name itself, so the
+   * error lands on it. */
+  for (func = p->functions; func; func = func->next)
+    if (same_identifier(func->name, p->current))
+      parse_error(p, "redefinition of function '%.*s'", p->current.len,
+                  p->current.start);
+
+  func = (Function *)calloc(1, sizeof(Function));
+  if (!func)
+    parse_error(p, "out of memory");
+  func->name = p->current;
+  func->next = p->functions;
+  p->functions = func;
+
   /* Consume <function_name> */
   parser_advance(p);
 
@@ -1293,16 +1331,24 @@ static AstNode *parse_stmt(Parser *p, bool allow_decl) {
 
 /*
  * translation-unit:
- *   function-definition EOF
- * (C11 6.9; only a single function is supported)
+ *   function-definition*
+ * (C11 6.9)
  */
 AstNode *parse_translation_unit(const char *filename, const char *source) {
   Parser p;
-  AstNode *ast;
+  AstNode *head = NULL;
+  AstNode **tail = &head;
 
   parser_init(&p, filename, source);
-  ast = parse_function(&p);
-  parse_expect(&p, TOKEN_EOF, "unexpected token after function");
 
-  return ast;
+  /* Keep the empty-input diagnostics: the loop would just not run. */
+  if (p.current.type == TOKEN_EOF)
+    parse_error(&p, "expect 'int'");
+
+  while (p.current.type != TOKEN_EOF) {
+    *tail = parse_function(&p);
+    tail = &(*tail)->next;
+  }
+
+  return head;
 }

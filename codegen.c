@@ -257,13 +257,17 @@ static void codegen_expr(AstNode *expr) {
 /*
  * break_label and continue_label are the label_seq values of the enclosing
  * loop's .L.end.N and .L.continue.N labels, or -1 outside any loop (the
- * parser rejects break/continue there, so -1 is defensive).
+ * parser rejects break/continue there, so -1 is defensive). ret_label is
+ * this function's .Lreturn.N label: with several functions in one
+ * translation unit, a fixed '.Lreturn' would be defined once per function
+ * and collide.
  */
-static void codegen_stmt(AstNode *stmt, int break_label, int continue_label) {
+static void codegen_stmt(AstNode *stmt, int break_label, int continue_label,
+                         int ret_label) {
   switch (stmt->type) {
   case AST_RETURN:
     codegen_expr(stmt->d.ret.expr);
-    fprintf(out, "\tjmp .Lreturn\n");
+    fprintf(out, "\tjmp .Lreturn.%d\n", ret_label);
     break;
   case AST_BREAK:
     if (break_label < 0) {
@@ -286,11 +290,13 @@ static void codegen_stmt(AstNode *stmt, int break_label, int continue_label) {
     codegen_expr(stmt->d.if_stmt.cond);
     fprintf(out, "\tcmpl $0, %%eax\n");
     fprintf(out, "\tje .L.else.%d\n", seq);
-    codegen_stmt(stmt->d.if_stmt.then_stmt, break_label, continue_label);
+    codegen_stmt(stmt->d.if_stmt.then_stmt, break_label, continue_label,
+                 ret_label);
     fprintf(out, "\tjmp .L.end.%d\n", seq);
     fprintf(out, ".L.else.%d:\n", seq);
     if (stmt->d.if_stmt.else_stmt)
-      codegen_stmt(stmt->d.if_stmt.else_stmt, break_label, continue_label);
+      codegen_stmt(stmt->d.if_stmt.else_stmt, break_label, continue_label,
+                   ret_label);
     fprintf(out, ".L.end.%d:\n", seq);
     break;
   }
@@ -306,7 +312,7 @@ static void codegen_stmt(AstNode *stmt, int break_label, int continue_label) {
     codegen_expr(stmt->d.while_stmt.cond);
     fprintf(out, "\tcmpl $0, %%eax\n");
     fprintf(out, "\tje .L.end.%d\n", seq);
-    codegen_stmt(stmt->d.while_stmt.body, seq, seq);
+    codegen_stmt(stmt->d.while_stmt.body, seq, seq, ret_label);
     fprintf(out, "\tjmp .L.begin.%d\n", seq);
     fprintf(out, ".L.end.%d:\n", seq);
     break;
@@ -315,7 +321,8 @@ static void codegen_stmt(AstNode *stmt, int break_label, int continue_label) {
     int seq = label_seq++;
 
     if (stmt->d.for_stmt.init)
-      codegen_stmt(stmt->d.for_stmt.init, break_label, continue_label);
+      codegen_stmt(stmt->d.for_stmt.init, break_label, continue_label,
+                   ret_label);
     fprintf(out, ".L.begin.%d:\n", seq);
     if (stmt->d.for_stmt.cond) {
       /* An omitted condition is a nonzero constant: skip the test. */
@@ -323,7 +330,7 @@ static void codegen_stmt(AstNode *stmt, int break_label, int continue_label) {
       fprintf(out, "\tcmpl $0, %%eax\n");
       fprintf(out, "\tje .L.end.%d\n", seq);
     }
-    codegen_stmt(stmt->d.for_stmt.body, seq, seq);
+    codegen_stmt(stmt->d.for_stmt.body, seq, seq, ret_label);
     /* 'continue' must skip to the post expression, not the condition. */
     fprintf(out, ".L.continue.%d:\n", seq);
     if (stmt->d.for_stmt.post)
@@ -340,7 +347,7 @@ static void codegen_stmt(AstNode *stmt, int break_label, int continue_label) {
      * 'continue' jumps to the test and 'break' to the end label.
      */
     fprintf(out, ".L.begin.%d:\n", seq);
-    codegen_stmt(stmt->d.do_stmt.body, seq, seq);
+    codegen_stmt(stmt->d.do_stmt.body, seq, seq, ret_label);
     fprintf(out, ".L.continue.%d:\n", seq);
     codegen_expr(stmt->d.do_stmt.cond);
     fprintf(out, "\tcmpl $0, %%eax\n");
@@ -350,16 +357,20 @@ static void codegen_stmt(AstNode *stmt, int break_label, int continue_label) {
   }
   case AST_GOTO:
     /*
-     * User labels are C identifiers, so '.L<name>' cannot collide with
-     * the generated '.L.begin.N' family (identifiers contain no dots).
+     * User labels have function scope, but the assembler's symbol
+     * namespace is file-wide, so the same label name in two functions
+     * would collide. Prefixing with the function's ret_label number
+     * keeps them distinct; the dot then also keeps them clear of the
+     * generated '.L.begin.N' family.
      */
-    fprintf(out, "\tjmp .L%.*s\n", stmt->d.goto_stmt.name.len,
+    fprintf(out, "\tjmp .L%d.%.*s\n", ret_label, stmt->d.goto_stmt.name.len,
             stmt->d.goto_stmt.name.start);
     break;
   case AST_LABEL:
-    fprintf(out, ".L%.*s:\n", stmt->d.label_stmt.name.len,
+    fprintf(out, ".L%d.%.*s:\n", ret_label, stmt->d.label_stmt.name.len,
             stmt->d.label_stmt.name.start);
-    codegen_stmt(stmt->d.label_stmt.stmt, break_label, continue_label);
+    codegen_stmt(stmt->d.label_stmt.stmt, break_label, continue_label,
+                 ret_label);
     break;
   case AST_SWITCH: {
     int seq = label_seq++;
@@ -386,7 +397,7 @@ static void codegen_stmt(AstNode *stmt, int break_label, int continue_label) {
     fprintf(out, "\tjmp .L.end.%d\n", seq);
 
     /* 'break' inside the body exits this switch, not any outer loop. */
-    codegen_stmt(stmt->d.switch_stmt.body, seq, continue_label);
+    codegen_stmt(stmt->d.switch_stmt.body, seq, continue_label, ret_label);
 
     fprintf(out, ".L.end.%d:\n", seq);
     break;
@@ -396,7 +407,8 @@ static void codegen_stmt(AstNode *stmt, int break_label, int continue_label) {
       fprintf(out, ".L.default.%d:\n", stmt->d.case_stmt.label);
     else
       fprintf(out, ".L.case.%d:\n", stmt->d.case_stmt.label);
-    codegen_stmt(stmt->d.case_stmt.stmt, break_label, continue_label);
+    codegen_stmt(stmt->d.case_stmt.stmt, break_label, continue_label,
+                 ret_label);
     break;
   case AST_DECL:
     if (stmt->d.decl.init) {
@@ -411,7 +423,7 @@ static void codegen_stmt(AstNode *stmt, int break_label, int continue_label) {
   case AST_BLOCK: {
     AstNode *cur;
     for (cur = stmt->d.block.first_stmt; cur; cur = cur->next)
-      codegen_stmt(cur, break_label, continue_label);
+      codegen_stmt(cur, break_label, continue_label, ret_label);
     break;
   }
   default:
@@ -421,31 +433,39 @@ static void codegen_stmt(AstNode *stmt, int break_label, int continue_label) {
 }
 
 void codegen(AstNode *ast, FILE *out_file) {
-  Token name;
-  int stack_size;
-
-  if (ast->type != AST_FUNCTION) {
-    fprintf(stderr, "expected function AST\n");
-    exit(1);
-  }
+  AstNode *fn;
 
   out = out_file;
-  name = ast->d.function.name;
-  stack_size = (ast->d.function.stack_size + 15) / 16 * 16;
   fprintf(out, "\t.text\n");
-  fprintf(out, "\t.globl %.*s\n", name.len, name.start);
-  fprintf(out, "%.*s:\n", name.len, name.start);
-  fprintf(out, "\tpushq %%rbp\n");
-  fprintf(out, "\tmovq %%rsp, %%rbp\n");
-  if (stack_size)
-    fprintf(out, "\tsubq $%d, %%rsp\n", stack_size);
-  codegen_stmt(ast->d.function.body, -1, -1);
 
-  /* Reaching the end of main returns zero. */
-  fprintf(out, "\tmovl $0, %%eax\n");
-  fprintf(out, ".Lreturn:\n");
-  fprintf(out, "\tmovq %%rbp, %%rsp\n");
-  fprintf(out, "\tpopq %%rbp\n");
-  fprintf(out, "\tret\n");
+  /* The translation unit is a chain of function definitions. */
+  for (fn = ast; fn; fn = fn->next) {
+    Token name;
+    int stack_size;
+    int ret_label = label_seq++;
+
+    if (fn->type != AST_FUNCTION) {
+      fprintf(stderr, "expected function AST\n");
+      exit(1);
+    }
+
+    name = fn->d.function.name;
+    stack_size = (fn->d.function.stack_size + 15) / 16 * 16;
+    fprintf(out, "\t.globl %.*s\n", name.len, name.start);
+    fprintf(out, "%.*s:\n", name.len, name.start);
+    fprintf(out, "\tpushq %%rbp\n");
+    fprintf(out, "\tmovq %%rsp, %%rbp\n");
+    if (stack_size)
+      fprintf(out, "\tsubq $%d, %%rsp\n", stack_size);
+    codegen_stmt(fn->d.function.body, -1, -1, ret_label);
+
+    /* Reaching the end of the function returns zero. */
+    fprintf(out, "\tmovl $0, %%eax\n");
+    fprintf(out, ".Lreturn.%d:\n", ret_label);
+    fprintf(out, "\tmovq %%rbp, %%rsp\n");
+    fprintf(out, "\tpopq %%rbp\n");
+    fprintf(out, "\tret\n");
+  }
+
   fprintf(out, "\t.section .note.GNU-stack, \"\",@progbits\n");
 }

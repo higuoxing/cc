@@ -311,6 +311,10 @@ check 42 'int main() { int x = -1; switch (x) { case -1: return 42; default: ret
 check 42 'int main() { int i; for (i = 0; i < 3; i = i + 1) { switch (i) { case 0: break; case 1: break; case 2: return 42; } } return 0; }'
 check 42 'int main() { int a = 1; int b = 2; switch (a) { case 1: switch (b) { case 2: return 42; } } return 0; }'
 check 42 'int main() { int x = 2; switch (x) { { case 2: return 42; } } return 0; }'
+check 42 'int foo() { return 24; } int main() { return 42; }'
+check 42 'int main() { return 42; } int foo() { return 24; }'
+check 42 'int foo() { L: ; return 24; } int main() { L: ; return 42; }'
+check 42 'int foo() { int x = 0; while (x < 3) x = x + 1; switch (x) { case 3: return 42; } return 0; } int main() { return 42; }'
 
 check_error missing-plus-rhs 'int main() { return 1 +; }' '1:24: error: expect expr'
 check_error missing-sub-rhs 'int main() { return 1 -; }' '1:24: error: expect expr'
@@ -486,6 +490,9 @@ check_error decl-as-label-body 'int main() { L: int a; }' \
 check_error decl-as-case-body \
 	    'int main() { switch (1) { case 1: int a; } }' \
 	    '1:35: error: expect statement'
+check_error redefinition \
+	    'int foo() { return 0; } int foo() { return 1; } int main() { return 0; }' \
+	    "1:29: error: redefinition of function 'foo'"
 check_error missing-break-semi 'int main() { while (1) break }' \
 	    "1:30: error: expect ';'"
 check_error goto-undefined 'int main() { goto L; }' \

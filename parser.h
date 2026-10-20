@@ -50,6 +50,15 @@ typedef struct GotoRef {
 } GotoRef;
 
 /*
+ * Function definitions seen so far. Unlike the per-function workspace,
+ * this table survives the whole translation unit.
+ */
+typedef struct Function {
+  Token name;
+  struct Function *next;
+} Function;
+
+/*
  * The case labels of one switch, attached to its AST_SWITCH node for
  * codegen's dispatch. Order in the list is not significant.
  */
@@ -66,6 +75,7 @@ typedef struct {
   LocalVar *locals;
   Label *labels;
   GotoRef *goto_refs;
+  Function *functions;
   /*
    * The innermost switch being parsed, or NULL; 'case' and 'default' are
    * valid only inside its body, and 'break' may target it.
