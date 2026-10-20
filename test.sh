@@ -296,6 +296,16 @@ check 6 'int main() { int i = 0; int sum = 0; loop: sum = sum + i; i = i + 1; if
 check 42 'int main() { int i = 0; L: ; i = i + 1; if (i < 2) goto L; return 42; }'
 check 42 'int main() { int i = 0; while (i < 2) { i = i + 1; if (i == 2) goto done; } return 0; done: return 42; }'
 check 42 'int main() { if (1) goto L; return 24; L: return 42; }'
+check 42 'int main() { int x = 2; switch (x) { case 1: return 24; case 2: return 42; case 3: return 0; } return 0; }'
+check 42 'int main() { int x = 9; switch (x) { case 1: return 24; default: return 42; } }'
+check 7 'int main() { int x = 9; switch (x) { case 1: x = 1; case 2: x = 2; } return 7; }'
+check 42 'int main() { int x = 2; switch (x) { case 1: x = 24; break; case 2: x = 42; break; default: x = 0; } return x; }'
+check 42 'int main() { int x = 1; int n = 0; switch (x) { case 1: n = n + 40; case 2: n = n + 2; } return n; }'
+check 42 'int main() { int x = 5; switch (x) { case 2 + 3: return 42; default: return 0; } }'
+check 42 'int main() { int x = -1; switch (x) { case -1: return 42; default: return 0; } }'
+check 42 'int main() { int i; for (i = 0; i < 3; i = i + 1) { switch (i) { case 0: break; case 1: break; case 2: return 42; } } return 0; }'
+check 42 'int main() { int a = 1; int b = 2; switch (a) { case 1: switch (b) { case 2: return 42; } } return 0; }'
+check 42 'int main() { int x = 2; switch (x) { { case 2: return 42; } } return 0; }'
 
 check_error missing-plus-rhs 'int main() { return 1 +; }' '1:24: error: expect expr'
 check_error missing-sub-rhs 'int main() { return 1 -; }' '1:24: error: expect expr'
@@ -439,11 +449,23 @@ check_error missing-do-body 'int main() { do }' \
 check_error unterminated-comment 'int main() { /* comment' \
 	    '1:24: error: unterminated comment'
 check_error break-outside-loop 'int main() { break; }' \
-	    '1:14: error: break statement not within loop'
+	    '1:14: error: break statement not within loop or switch'
 check_error continue-outside-loop 'int main() { continue; }' \
 	    '1:14: error: continue statement not within loop'
 check_error break-after-loop 'int main() { while (1) break; break; }' \
-	    '1:31: error: break statement not within loop'
+	    '1:31: error: break statement not within loop or switch'
+check_error case-outside-switch 'int main() { case 1: ; }' \
+	    '1:14: error: case label not within a switch statement'
+check_error default-outside-switch 'int main() { default: ; }' \
+	    '1:14: error: default label not within a switch statement'
+check_error duplicate-case 'int main() { switch (1) { case 1: ; case 1: ; } }' \
+	    '1:37: error: duplicate case value'
+check_error duplicate-default \
+	    'int main() { switch (1) { default: ; default: ; } }' \
+	    '1:38: error: multiple default labels in one switch'
+check_error case-not-constant \
+	    'int main() { int a; switch (1) { case a: ; } }' \
+	    '1:40: error: case label is not an integer constant'
 check_error missing-break-semi 'int main() { while (1) break }' \
 	    "1:30: error: expect ';'"
 check_error goto-undefined 'int main() { goto L; }' \

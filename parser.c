@@ -43,8 +43,12 @@ static AstNode *parse_break_stmt(Parser *p);
 static AstNode *parse_continue_stmt(Parser *p);
 static AstNode *parse_goto_stmt(Parser *p);
 static AstNode *parse_label_stmt(Parser *p);
+static AstNode *parse_switch_stmt(Parser *p);
+static AstNode *parse_case_stmt(Parser *p);
+static AstNode *parse_default_stmt(Parser *p);
 static AstNode *parse_stmt(Parser *p);
 static void check_gotos(Parser *p);
+static int64_t eval_const_expr(Parser *p, AstNode *expr);
 static AstNode *parse_block(Parser *p);
 static AstNode *parse_function(Parser *p);
 static bool is_lvalue(AstType ty);
@@ -101,6 +105,7 @@ static void parser_init(Parser *p, const char *filename, const char *source) {
   p->locals = NULL;
   p->labels = NULL;
   p->goto_refs = NULL;
+  p->current_switch = NULL;
   p->scope_depth = 0;
   p->loop_depth = 0;
   p->stack_size = 0;
@@ -949,8 +954,8 @@ static AstNode *parse_do_stmt(Parser *p) {
  */
 static AstNode *parse_break_stmt(Parser *p) {
   // Check before consuming so the error lands on 'break' itself.
-  if (p->loop_depth == 0)
-    parse_error(p, "break statement not within loop");
+  if (p->loop_depth == 0 && !p->current_switch)
+    parse_error(p, "break statement not within loop or switch");
   parse_expect(p, TOKEN_BREAK, "expect 'break'");
   parse_expect(p, TOKEN_SEMICOLON, "expect ';'");
   return new_ast_node(p, AST_BREAK);
@@ -1036,6 +1041,188 @@ static AstNode *parse_label_stmt(Parser *p) {
   return label_node;
 }
 
+// Evaluate an integer constant expression (C11 6.6), used for case labels.
+static int64_t eval_const_expr(Parser *p, AstNode *expr) {
+  switch (expr->type) {
+  case AST_INT_LITERAL:
+    return expr->d.int_literal.val;
+  case AST_NEG:
+    return -eval_const_expr(p, expr->d.unary.operand);
+  case AST_BITWISE_NOT:
+    return ~eval_const_expr(p, expr->d.unary.operand);
+  case AST_LOGICAL_NOT:
+    return !eval_const_expr(p, expr->d.unary.operand);
+  case AST_ADD:
+    return eval_const_expr(p, expr->d.binary.lhs) +
+           eval_const_expr(p, expr->d.binary.rhs);
+  case AST_SUB:
+    return eval_const_expr(p, expr->d.binary.lhs) -
+           eval_const_expr(p, expr->d.binary.rhs);
+  case AST_MUL:
+    return eval_const_expr(p, expr->d.binary.lhs) *
+           eval_const_expr(p, expr->d.binary.rhs);
+  case AST_DIV:
+  case AST_MOD: {
+    int64_t lhs = eval_const_expr(p, expr->d.binary.lhs);
+    int64_t rhs = eval_const_expr(p, expr->d.binary.rhs);
+    if (rhs == 0)
+      parse_error(p, "division by zero in constant expression");
+    return expr->type == AST_DIV ? lhs / rhs : lhs % rhs;
+  }
+  case AST_LSHIFT:
+    return eval_const_expr(p, expr->d.binary.lhs)
+           << eval_const_expr(p, expr->d.binary.rhs);
+  case AST_RSHIFT:
+    return eval_const_expr(p, expr->d.binary.lhs) >>
+           eval_const_expr(p, expr->d.binary.rhs);
+  case AST_LT:
+    return eval_const_expr(p, expr->d.binary.lhs) <
+           eval_const_expr(p, expr->d.binary.rhs);
+  case AST_LE:
+    return eval_const_expr(p, expr->d.binary.lhs) <=
+           eval_const_expr(p, expr->d.binary.rhs);
+  case AST_GT:
+    return eval_const_expr(p, expr->d.binary.lhs) >
+           eval_const_expr(p, expr->d.binary.rhs);
+  case AST_GE:
+    return eval_const_expr(p, expr->d.binary.lhs) >=
+           eval_const_expr(p, expr->d.binary.rhs);
+  case AST_EQ:
+    return eval_const_expr(p, expr->d.binary.lhs) ==
+           eval_const_expr(p, expr->d.binary.rhs);
+  case AST_NE:
+    return eval_const_expr(p, expr->d.binary.lhs) !=
+           eval_const_expr(p, expr->d.binary.rhs);
+  case AST_BIT_AND:
+    return eval_const_expr(p, expr->d.binary.lhs) &
+           eval_const_expr(p, expr->d.binary.rhs);
+  case AST_BIT_XOR:
+    return eval_const_expr(p, expr->d.binary.lhs) ^
+           eval_const_expr(p, expr->d.binary.rhs);
+  case AST_BIT_OR:
+    return eval_const_expr(p, expr->d.binary.lhs) |
+           eval_const_expr(p, expr->d.binary.rhs);
+  case AST_LOGICAL_AND: {
+    // Preserve short-circuit semantics, so 0 && (1 / 0) is valid.
+    int64_t lhs = eval_const_expr(p, expr->d.binary.lhs);
+    return lhs ? eval_const_expr(p, expr->d.binary.rhs) != 0 : 0;
+  }
+  case AST_LOGICAL_OR: {
+    int64_t lhs = eval_const_expr(p, expr->d.binary.lhs);
+    return lhs ? 1 : eval_const_expr(p, expr->d.binary.rhs) != 0;
+  }
+  default:
+    // AST_VAR, AST_ASSIGN, increments, and so on are not constant.
+    parse_error(p, "case label is not an integer constant");
+  }
+}
+
+/*
+ * selection-statement:
+ *   'switch' '(' expression ')' statement
+ * (C11 6.8.4.2; 'case' and 'default' are valid only within the body,
+ *  and 'break' exits the switch)
+ */
+static AstNode *parse_switch_stmt(Parser *p) {
+  AstNode *switch_node;
+  AstNode *outer_switch;
+
+  parse_expect(p, TOKEN_SWITCH, "expect 'switch'");
+  parse_expect(p, TOKEN_LPAREN, "expect '('");
+  switch_node = new_ast_node(p, AST_SWITCH);
+  switch_node->d.switch_stmt.cond = parse_expr(p);
+  parse_expect(p, TOKEN_RPAREN, "expect ')'");
+
+  // Case labels in the body belong to this switch; nested switches save
+  // and restore the pointer to get their own.
+  outer_switch = p->current_switch;
+  p->current_switch = switch_node;
+
+  switch_node->d.switch_stmt.body = parse_stmt(p);
+
+  p->current_switch = outer_switch;
+
+  return switch_node;
+}
+
+/*
+ * labeled-statement:
+ *   'case' constant-expression ':' statement
+ * (C11 6.8.4.2, valid only within a switch)
+ */
+static AstNode *parse_case_stmt(Parser *p) {
+  AstNode *case_node;
+  CaseList *entry;
+  int64_t val;
+  Token case_tok;
+
+  // Check before consuming so the error lands on 'case' itself.
+  if (!p->current_switch)
+    parse_error(p, "case label not within a switch statement");
+
+  case_tok = p->current;
+  parse_expect(p, TOKEN_CASE, "expect 'case'");
+  val = eval_const_expr(p, parse_expr(p));
+
+  for (entry = p->current_switch->d.switch_stmt.cases; entry;
+       entry = entry->next)
+    if (entry->node->d.case_stmt.val == val) {
+      p->current = case_tok;
+      parse_error(p, "duplicate case value");
+    }
+
+  parse_expect(p, TOKEN_COLON, "expect ':'");
+
+  case_node = new_ast_node(p, AST_CASE);
+  case_node->d.case_stmt.val = val;
+
+  entry = (CaseList *)calloc(1, sizeof(CaseList));
+  if (!entry)
+    parse_error(p, "out of memory");
+  entry->node = case_node;
+  entry->next = p->current_switch->d.switch_stmt.cases;
+  p->current_switch->d.switch_stmt.cases = entry;
+
+  case_node->d.case_stmt.stmt = parse_stmt(p);
+  return case_node;
+}
+
+/*
+ * labeled-statement:
+ *   'default' ':' statement
+ * (C11 6.8.4.2, valid only within a switch; represented as an AST_CASE
+ *  with is_default set, like GCC's CASE_LABEL_EXPR)
+ */
+static AstNode *parse_default_stmt(Parser *p) {
+  AstNode *default_node;
+  CaseList *entry;
+
+  // Check before consuming so the error lands on 'default' itself.
+  if (!p->current_switch)
+    parse_error(p, "default label not within a switch statement");
+
+  for (entry = p->current_switch->d.switch_stmt.cases; entry;
+       entry = entry->next)
+    if (entry->node->d.case_stmt.is_default)
+      parse_error(p, "multiple default labels in one switch");
+
+  parse_expect(p, TOKEN_DEFAULT, "expect 'default'");
+  parse_expect(p, TOKEN_COLON, "expect ':'");
+
+  default_node = new_ast_node(p, AST_CASE);
+  default_node->d.case_stmt.is_default = 1;
+
+  entry = (CaseList *)calloc(1, sizeof(CaseList));
+  if (!entry)
+    parse_error(p, "out of memory");
+  entry->node = default_node;
+  entry->next = p->current_switch->d.switch_stmt.cases;
+  p->current_switch->d.switch_stmt.cases = entry;
+
+  default_node->d.case_stmt.stmt = parse_stmt(p);
+  return default_node;
+}
+
 /*
  * statement:
  *   jump-statement | selection-statement | iteration-statement
@@ -1068,6 +1255,12 @@ static AstNode *parse_stmt(Parser *p) {
     return parse_continue_stmt(p);
   case TOKEN_GOTO:
     return parse_goto_stmt(p);
+  case TOKEN_SWITCH:
+    return parse_switch_stmt(p);
+  case TOKEN_CASE:
+    return parse_case_stmt(p);
+  case TOKEN_DEFAULT:
+    return parse_default_stmt(p);
   case TOKEN_LBRACE:
     return parse_block(p);
   case TOKEN_INT:

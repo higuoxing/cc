@@ -349,6 +349,41 @@ static void codegen_stmt(AstNode *stmt, int break_label, int continue_label) {
             stmt->d.label_stmt.name.start);
     codegen_stmt(stmt->d.label_stmt.stmt, break_label, continue_label);
     break;
+  case AST_SWITCH: {
+    int seq = label_seq++;
+    CaseList *cl;
+    AstNode *default_node = NULL;
+
+    // Dispatch is a chain of compares and jumps over the cases collected
+    // by the parser; a jump table can replace it once case densities make
+    // that worthwhile.
+    codegen_expr(stmt->d.switch_stmt.cond);
+    for (cl = stmt->d.switch_stmt.cases; cl; cl = cl->next) {
+      cl->node->d.case_stmt.label = label_seq++;
+      if (cl->node->d.case_stmt.is_default) {
+        default_node = cl->node;
+        continue;
+      }
+      fprintf(out, "\tcmpl $%" PRId64 ", %%eax\n", cl->node->d.case_stmt.val);
+      fprintf(out, "\tje .L.case.%d\n", cl->node->d.case_stmt.label);
+    }
+    if (default_node)
+      fprintf(out, "\tjmp .L.default.%d\n", default_node->d.case_stmt.label);
+    fprintf(out, "\tjmp .L.end.%d\n", seq);
+
+    // 'break' inside the body exits this switch, not any outer loop.
+    codegen_stmt(stmt->d.switch_stmt.body, seq, continue_label);
+
+    fprintf(out, ".L.end.%d:\n", seq);
+    break;
+  }
+  case AST_CASE:
+    if (stmt->d.case_stmt.is_default)
+      fprintf(out, ".L.default.%d:\n", stmt->d.case_stmt.label);
+    else
+      fprintf(out, ".L.case.%d:\n", stmt->d.case_stmt.label);
+    codegen_stmt(stmt->d.case_stmt.stmt, break_label, continue_label);
+    break;
   case AST_DECL:
     if (stmt->d.decl.init) {
       codegen_expr(stmt->d.decl.init);

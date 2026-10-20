@@ -21,6 +21,8 @@
 
 #include "lexer.h"
 
+typedef struct AstNode AstNode;
+
 typedef struct LocalVar {
   Token name;
   int offset; // Positive distance below %rbp
@@ -43,6 +45,13 @@ typedef struct GotoRef {
   struct GotoRef *next;
 } GotoRef;
 
+// The case labels of one switch, attached to its AST_SWITCH node for
+// codegen's dispatch. Order in the list is not significant.
+typedef struct CaseList {
+  struct AstNode *node; // AST_CASE
+  struct CaseList *next;
+} CaseList;
+
 typedef struct {
   Lexer lexer;
   Token current;
@@ -51,6 +60,9 @@ typedef struct {
   LocalVar *locals;
   Label *labels;
   GotoRef *goto_refs;
+  // The innermost switch being parsed, or NULL; 'case' and 'default' are
+  // valid only inside its body, and 'break' may target it.
+  AstNode *current_switch;
   int scope_depth;
   int loop_depth;
   int stack_size;
@@ -67,6 +79,8 @@ typedef enum {
   AST_CONTINUE,
   AST_GOTO,
   AST_LABEL,
+  AST_SWITCH,
+  AST_CASE,
   AST_RETURN,
   AST_DECL,
   AST_EXPR_STMT,
@@ -145,6 +159,23 @@ typedef struct AstNode {
       Token name;
       struct AstNode *stmt;
     } label_stmt;
+
+    struct {
+      struct AstNode *cond;
+      struct AstNode *body;
+      // The case and default nodes still sit in the body's statement
+      // chain (their position matters for fallthrough); this list is for
+      // codegen's dispatch. The default case, if any, is the entry whose
+      // node has is_default set.
+      struct CaseList *cases;
+    } switch_stmt;
+
+    struct {
+      int64_t val; // Meaningless when is_default is set.
+      struct AstNode *stmt;
+      int label;      // Dispatch label number, assigned by codegen.
+      int is_default; // 1 for 'default:', 0 for 'case'.
+    } case_stmt;
 
     struct {
       struct AstNode *expr;
