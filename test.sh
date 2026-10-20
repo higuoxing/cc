@@ -190,6 +190,18 @@ check 42 'int main() { int a = 85; a %= 43; return a; }'
 check 42 'int main() { int a = 40; return a += 2; }'
 check 42 'int main() { int a = 6; int b = 7; a *= b; return a; }'
 check 0 'int main() { int a = 42; a %= 7; return a; }'
+check 8 'int main() { return 1 << 3; }'
+check 2 'int main() { return 8 >> 2; }'
+check 32 'int main() { return 1 << 2 + 3; }'
+check 2 'int main() { return 16 >> 3; }'
+check 8 'int main() { return 8 >> 1 << 1; }'
+check 252 'int main() { return -8 >> 1; }'
+check 1 'int main() { return 1 << 0; }'
+check 21 'int main() { return 42 >> 1; }'
+check 42 'int main() { int a = 42; return a << 2 >> 2; }'
+check 40 'int main() { int a = 5; a <<= 3; return a; }'
+check 10 'int main() { int a = 40; a >>= 2; return a; }'
+check 16 'int main() { int a = 1; return a <<= 4; }'
 
 check_error missing-plus-rhs 'int main() { return 1 +; }' '1:24: error: expect expr'
 check_error missing-sub-rhs 'int main() { return 1 -; }' '1:24: error: expect expr'
@@ -278,5 +290,9 @@ check_error compound-assign-literal 'int main() { 1 += 2; return 0; }' \
 	    '1:16: error: invalid assignment target'
 check_error compound-assign-sum 'int main() { int a; a + 1 += 2; }' \
 	    '1:27: error: invalid assignment target'
+check_error missing-shift-rhs 'int main() { return 1 <<; }' \
+	    '1:25: error: expect expr'
+check_error shift-assign-literal 'int main() { 1 <<= 2; return 0; }' \
+	    '1:16: error: invalid assignment target'
 
 printf 'All %d tests passed (%d execution, %d rejection).\n' "$((passed + rejected))" "$passed" "$rejected"

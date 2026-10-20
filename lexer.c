@@ -233,7 +233,17 @@ Token lexer_next_token(Lexer *l) {
     return tok;
   case '<':
     lexer_advance(l);
-    if (*l->cursor == '=') {
+    if (*l->cursor == '<') {
+      lexer_advance(l);
+      if (*l->cursor == '=') {
+        lexer_advance(l);
+        tok.type = TOKEN_LSHIFT_EQ;
+        tok.len = 3;
+      } else {
+        tok.type = TOKEN_LSHIFT;
+        tok.len = 2;
+      }
+    } else if (*l->cursor == '=') {
       lexer_advance(l);
       tok.type = TOKEN_LESS_EQ;
       tok.len = 2;
@@ -244,7 +254,17 @@ Token lexer_next_token(Lexer *l) {
     return tok;
   case '>':
     lexer_advance(l);
-    if (*l->cursor == '=') {
+    if (*l->cursor == '>') {
+      lexer_advance(l);
+      if (*l->cursor == '=') {
+        lexer_advance(l);
+        tok.type = TOKEN_RSHIFT_EQ;
+        tok.len = 3;
+      } else {
+        tok.type = TOKEN_RSHIFT;
+        tok.len = 2;
+      }
+    } else if (*l->cursor == '=') {
       lexer_advance(l);
       tok.type = TOKEN_GREATER_EQ;
       tok.len = 2;

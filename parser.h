@@ -52,6 +52,8 @@ typedef enum {
   AST_MUL,
   AST_DIV,
   AST_MOD,
+  AST_LSHIFT,
+  AST_RSHIFT,
   AST_LT,
   AST_LE,
   AST_GT,

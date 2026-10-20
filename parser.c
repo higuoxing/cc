@@ -361,18 +361,50 @@ static AstNode *parse_additive(Parser *p) {
 }
 
 /*
- * relational-expression:
+ * shift-expression:
  *   additive-expression
- *   relational-expression '<' additive-expression
- *   relational-expression '>' additive-expression
- *   relational-expression '<=' additive-expression
- *   relational-expression '>=' additive-expression
+ *   shift-expression '<<' additive-expression
+ *   shift-expression '>>' additive-expression
+ * (C11 6.5.7)
+ */
+static AstNode *parse_shift(Parser *p) {
+  AstNode *left;
+
+  left = parse_additive(p);
+
+  while (p->current.type == TOKEN_LSHIFT || p->current.type == TOKEN_RSHIFT) {
+    TokenType op;
+    AstNode *right;
+    AstNode *node;
+
+    op = p->current.type;
+    // Consume '<<' or '>>'
+    parser_advance(p);
+
+    right = parse_additive(p);
+    node = new_ast_node(p, op == TOKEN_LSHIFT ? AST_LSHIFT : AST_RSHIFT);
+    node->d.binary.lhs = left;
+    node->d.binary.rhs = right;
+
+    left = node;
+  }
+
+  return left;
+}
+
+/*
+ * relational-expression:
+ *   shift-expression
+ *   relational-expression '<' shift-expression
+ *   relational-expression '>' shift-expression
+ *   relational-expression '<=' shift-expression
+ *   relational-expression '>=' shift-expression
  * (C11 6.5.8)
  */
 static AstNode *parse_relational(Parser *p) {
   AstNode *left;
 
-  left = parse_additive(p);
+  left = parse_shift(p);
 
   while (p->current.type == TOKEN_LESS || p->current.type == TOKEN_GREATER ||
          p->current.type == TOKEN_LESS_EQ ||
@@ -402,7 +434,7 @@ static AstNode *parse_relational(Parser *p) {
     // Consume '<' or '>' or '<=' or '>='
     parser_advance(p);
 
-    right = parse_additive(p);
+    right = parse_shift(p);
     node = new_ast_node(p, ty);
     node->d.binary.lhs = left;
     node->d.binary.rhs = right;
@@ -450,7 +482,8 @@ static AstNode *parse_equality(Parser *p) {
  *   equality-expression
  *   equality-expression assignment-operator assignment-expression
  * (C11 6.5.16, without conditional or comma expressions; the left
- *  operand must be an lvalue. assignment-operator: = += -= *= /= %=)
+ *  operand must be an lvalue. assignment-operator: = += -= *= /= %=
+ *  <<= >>=)
  */
 static AstNode *parse_expr(Parser *p) {
   AstNode *left;
@@ -458,8 +491,9 @@ static AstNode *parse_expr(Parser *p) {
   left = parse_equality(p);
   if (p->current.type == TOKEN_ASSIGN || p->current.type == TOKEN_PLUS_EQ ||
       p->current.type == TOKEN_MINUS_EQ || p->current.type == TOKEN_STAR_EQ ||
-      p->current.type == TOKEN_SLASH_EQ ||
-      p->current.type == TOKEN_PERCENT_EQ) {
+      p->current.type == TOKEN_SLASH_EQ || p->current.type == TOKEN_PERCENT_EQ ||
+      p->current.type == TOKEN_LSHIFT_EQ ||
+      p->current.type == TOKEN_RSHIFT_EQ) {
     AstNode *node;
     AstNode *rhs;
     TokenType op;
@@ -484,12 +518,36 @@ static AstNode *parse_expr(Parser *p) {
        */
       AstNode *binop;
       AstNode *lhs_copy;
+      AstType binop_ty;
 
-      binop = new_ast_node(p, op == TOKEN_PLUS_EQ    ? AST_ADD
-                              : op == TOKEN_MINUS_EQ ? AST_SUB
-                              : op == TOKEN_STAR_EQ  ? AST_MUL
-                              : op == TOKEN_SLASH_EQ ? AST_DIV
-                                                     : AST_MOD);
+      switch (op) {
+      case TOKEN_PLUS_EQ:
+        binop_ty = AST_ADD;
+        break;
+      case TOKEN_MINUS_EQ:
+        binop_ty = AST_SUB;
+        break;
+      case TOKEN_STAR_EQ:
+        binop_ty = AST_MUL;
+        break;
+      case TOKEN_SLASH_EQ:
+        binop_ty = AST_DIV;
+        break;
+      case TOKEN_PERCENT_EQ:
+        binop_ty = AST_MOD;
+        break;
+      case TOKEN_LSHIFT_EQ:
+        binop_ty = AST_LSHIFT;
+        break;
+      case TOKEN_RSHIFT_EQ:
+        binop_ty = AST_RSHIFT;
+        break;
+      default:
+        fprintf(stderr, "unreachable %s:%d", __FILE__, __LINE__);
+        exit(1);
+      }
+
+      binop = new_ast_node(p, binop_ty);
       lhs_copy = new_ast_node(p, AST_VAR);
       lhs_copy->d.variable.var = left->d.variable.var;
 

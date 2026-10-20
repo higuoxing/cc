@@ -53,6 +53,8 @@ static void codegen_expr(AstNode *expr) {
   case AST_MUL:
   case AST_DIV:
   case AST_MOD:
+  case AST_LSHIFT:
+  case AST_RSHIFT:
     codegen_expr(expr->d.binary.rhs);
     printf("\tcltq\n");
     printf("\tpushq %%rax\n");
@@ -74,6 +76,12 @@ static void codegen_expr(AstNode *expr) {
       printf("\tidivl %%ecx\n"); // Quotient in %eax, remainder in %edx
       if (expr->type == AST_MOD)
         printf("\tmovl %%edx, %%eax\n"); // Remainder is the result
+    } else if (expr->type == AST_LSHIFT) {
+      // The shift count comes from %cl, the low byte of %ecx.
+      printf("\tsall %%cl, %%eax\n");
+    } else if (expr->type == AST_RSHIFT) {
+      // Arithmetic shift: C requires sign-fill for signed '>>'.
+      printf("\tsarl %%cl, %%eax\n");
     } else {
       fprintf(stderr, "unrecognized binary operator\n");
       exit(1);
