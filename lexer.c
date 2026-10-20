@@ -390,22 +390,32 @@ Token lexer_next_token(Lexer *l) {
     return tok;
   }
 
-  if (isdigit(*l->cursor)) {
+  if (isdigit((unsigned char)*l->cursor)) {
     int64_t int_literal_val;
+    int base;
 
     int_literal_val = 0;
 
-    while (isdigit(*l->cursor)) {
+    /* C11: a leading zero makes an integer constant octal. */
+    base = *l->cursor == '0' ? 8 : 10;
+    while (isdigit((unsigned char)*l->cursor)) {
       int digit;
       digit = *l->cursor - '0';
-      if (int_literal_val > (INT32_MAX - digit) / 10) {
+
+      if (base == 8 && digit >= 8) {
+        fprintf(stderr,
+                "%s:%d:%d: error: invalid digit in octal integer literal\n",
+                l->filename, tok.line, tok.col);
+        exit(1);
+      }
+      if (int_literal_val > (INT32_MAX - digit) / base) {
         fprintf(
             stderr,
             "%s:%d:%d: error: integer literal out of range for 32-bit int\n",
             l->filename, tok.line, tok.col);
         exit(1);
       }
-      int_literal_val = int_literal_val * 10 + digit;
+      int_literal_val = int_literal_val * base + digit;
       lexer_advance(l);
     }
 

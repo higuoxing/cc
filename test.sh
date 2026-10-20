@@ -154,6 +154,11 @@ check 42 'int main() { return 2147483647 - 2147483605; }'
 check 1 'int main() { return 2147483647 / 2147483647; }'
 check 1 'int main() { return - 2147483647 + 2147483647 + 1; }'
 check 7 'int main() { return 000000000000000000000000000000007; }'
+check 0 'int main() { return 0; }' octal-zero
+check 0 'int main() { return 000; }' octal-zeros
+check 7 'int main() { return 07; }' octal-seven
+check 8 'int main() { return 010; }' octal-ten
+check 42 'int main() { return 052; }' octal-fifty-two
 check 42 'int main() { int a = 41; return ++a; }'
 check 41 'int main() { int a = 41; return a++; }'
 check 42 'int main() { int a = 43; return --a; }'
@@ -478,5 +483,6 @@ check_error goto-missing-name 'int main() { goto 1; }' \
 	    '1:19: error: expect label name'
 check_error goto-missing-semi 'int main() { L: ; goto L }' \
 	    "1:26: error: expect ';'"
+check_error octal-invalid-eight 'int main() { return 08; }' '1:21: error: invalid digit in octal integer literal'
 
 printf 'All %d tests passed (%d execution, %d rejection).\n' "$((passed + rejected))" "$passed" "$rejected"
