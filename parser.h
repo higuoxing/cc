@@ -28,12 +28,29 @@ typedef struct LocalVar {
   struct LocalVar *next;
 } LocalVar;
 
+// Labels have function scope (C11 6.2.1), so this table is not restored
+// when a block ends, unlike the locals list.
+typedef struct Label {
+  Token name;
+  struct Label *next;
+} Label;
+
+// A 'goto' whose target is validated after the function body is parsed,
+// since labels may be declared after the goto that uses them.
+typedef struct GotoRef {
+  Token name; // Target label.
+  Token loc;  // The 'goto' keyword, for diagnostics.
+  struct GotoRef *next;
+} GotoRef;
+
 typedef struct {
   Lexer lexer;
   Token current;
   Token lookahead;
 
   LocalVar *locals;
+  Label *labels;
+  GotoRef *goto_refs;
   int scope_depth;
   int loop_depth;
   int stack_size;
@@ -48,6 +65,8 @@ typedef enum {
   AST_DO,
   AST_BREAK,
   AST_CONTINUE,
+  AST_GOTO,
+  AST_LABEL,
   AST_RETURN,
   AST_DECL,
   AST_EXPR_STMT,
@@ -117,6 +136,15 @@ typedef struct AstNode {
       struct AstNode *body;
       struct AstNode *cond;
     } do_stmt;
+
+    struct {
+      Token name;
+    } goto_stmt;
+
+    struct {
+      Token name;
+      struct AstNode *stmt;
+    } label_stmt;
 
     struct {
       struct AstNode *expr;

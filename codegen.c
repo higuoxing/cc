@@ -338,6 +338,17 @@ static void codegen_stmt(AstNode *stmt, int break_label, int continue_label) {
     fprintf(out, ".L.end.%d:\n", seq);
     break;
   }
+  case AST_GOTO:
+    // User labels are C identifiers, so '.L<name>' cannot collide with
+    // the generated '.L.begin.N' family (identifiers contain no dots).
+    fprintf(out, "\tjmp .L%.*s\n", stmt->d.goto_stmt.name.len,
+            stmt->d.goto_stmt.name.start);
+    break;
+  case AST_LABEL:
+    fprintf(out, ".L%.*s:\n", stmt->d.label_stmt.name.len,
+            stmt->d.label_stmt.name.start);
+    codegen_stmt(stmt->d.label_stmt.stmt, break_label, continue_label);
+    break;
   case AST_DECL:
     if (stmt->d.decl.init) {
       codegen_expr(stmt->d.decl.init);

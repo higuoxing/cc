@@ -41,7 +41,10 @@ static AstNode *parse_for_stmt(Parser *p);
 static AstNode *parse_do_stmt(Parser *p);
 static AstNode *parse_break_stmt(Parser *p);
 static AstNode *parse_continue_stmt(Parser *p);
+static AstNode *parse_goto_stmt(Parser *p);
+static AstNode *parse_label_stmt(Parser *p);
 static AstNode *parse_stmt(Parser *p);
+static void check_gotos(Parser *p);
 static AstNode *parse_block(Parser *p);
 static AstNode *parse_function(Parser *p);
 static bool is_lvalue(AstType ty);
@@ -96,6 +99,8 @@ static void parser_advance(Parser *p) {
 
 static void parser_init(Parser *p, const char *filename, const char *source) {
   p->locals = NULL;
+  p->labels = NULL;
+  p->goto_refs = NULL;
   p->scope_depth = 0;
   p->loop_depth = 0;
   p->stack_size = 0;
@@ -782,6 +787,25 @@ static AstNode *parse_block(Parser *p) {
  *   'int' identifier '(' ')' compound-statement
  * (C11 6.9.1, restricted to int return type and no parameters)
  */
+// Every 'goto' must refer to a label declared somewhere in the function;
+// labels have function scope and may be declared after the goto.
+static void check_gotos(Parser *p) {
+  GotoRef *ref;
+
+  for (ref = p->goto_refs; ref; ref = ref->next) {
+    Label *label;
+
+    for (label = p->labels; label; label = label->next)
+      if (same_identifier(label->name, ref->name))
+        break;
+    if (!label) {
+      p->current = ref->loc;
+      parse_error(p, "label '%.*s' not defined", ref->name.len,
+                  ref->name.start);
+    }
+  }
+}
+
 static AstNode *parse_function(Parser *p) {
   AstNode *fn;
 
@@ -797,6 +821,7 @@ static AstNode *parse_function(Parser *p) {
   parse_expect(p, TOKEN_LPAREN, "expect '('");
   parse_expect(p, TOKEN_RPAREN, "expect ')'");
   fn->d.function.body = parse_block(p);
+  check_gotos(p);
   fn->d.function.stack_size = p->stack_size;
   return fn;
 }
@@ -946,15 +971,85 @@ static AstNode *parse_continue_stmt(Parser *p) {
 }
 
 /*
+ * jump-statement:
+ *   'goto' identifier ';'
+ * (C11 6.8.6.1; the target is validated after the function body is
+ *  parsed, since a label may be declared after the goto that uses it)
+ */
+static AstNode *parse_goto_stmt(Parser *p) {
+  AstNode *goto_node;
+  GotoRef *ref;
+  Token goto_tok;
+
+  goto_tok = p->current;
+  parse_expect(p, TOKEN_GOTO, "expect 'goto'");
+  if (p->current.type != TOKEN_IDENTIFIER)
+    parse_error(p, "expect label name");
+
+  ref = (GotoRef *)calloc(1, sizeof(GotoRef));
+  if (!ref)
+    parse_error(p, "out of memory");
+  ref->name = p->current;
+  ref->loc = goto_tok;
+  ref->next = p->goto_refs;
+  p->goto_refs = ref;
+
+  goto_node = new_ast_node(p, AST_GOTO);
+  goto_node->d.goto_stmt.name = p->current;
+  // Consume the label name.
+  parser_advance(p);
+  parse_expect(p, TOKEN_SEMICOLON, "expect ';'");
+  return goto_node;
+}
+
+/*
+ * labeled-statement:
+ *   identifier ':' statement
+ * (C11 6.8.1; labels have function scope, so the label table survives
+ *  block exit, unlike the locals list)
+ */
+static AstNode *parse_label_stmt(Parser *p) {
+  AstNode *label_node;
+  Label *label;
+  Token name = p->current;
+
+  // The duplicate check runs while 'current' is still the label itself,
+  // so the error lands on it.
+  for (label = p->labels; label; label = label->next)
+    if (same_identifier(label->name, name))
+      parse_error(p, "duplicate label");
+
+  // Consume the identifier and ':'.
+  parser_advance(p);
+  parse_expect(p, TOKEN_COLON, "expect ':'");
+
+  label = (Label *)calloc(1, sizeof(Label));
+  if (!label)
+    parse_error(p, "out of memory");
+  label->name = name;
+  label->next = p->labels;
+  p->labels = label;
+
+  label_node = new_ast_node(p, AST_LABEL);
+  label_node->d.label_stmt.name = name;
+  label_node->d.label_stmt.stmt = parse_stmt(p);
+  return label_node;
+}
+
+/*
  * statement:
  *   jump-statement | selection-statement | iteration-statement
- *   compound-statement | declaration | expression-statement | ';'
+ *   labeled-statement | compound-statement | declaration
+ *   expression-statement | ';'
  * (C11 6.8; as in GCC and Clang, anything not dispatched above is
  *  attempted as an expression-statement, whose parser diagnoses
  *  tokens that cannot start an expression)
  */
 static AstNode *parse_stmt(Parser *p) {
   AstNode *stmt;
+
+  if (p->current.type == TOKEN_IDENTIFIER && p->lookahead.type == TOKEN_COLON)
+    return parse_label_stmt(p);
 
   switch (p->current.type) {
   case TOKEN_RETURN:
@@ -971,6 +1066,8 @@ static AstNode *parse_stmt(Parser *p) {
     return parse_break_stmt(p);
   case TOKEN_CONTINUE:
     return parse_continue_stmt(p);
+  case TOKEN_GOTO:
+    return parse_goto_stmt(p);
   case TOKEN_LBRACE:
     return parse_block(p);
   case TOKEN_INT:

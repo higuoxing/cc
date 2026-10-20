@@ -291,6 +291,11 @@ check 5 'int main() { int i = 0; int n = 0; do { i = i + 1; if (i % 2) continue;
 check 3 'int main() { int i = 0; do { i = i + 1; if (i == 3) break; } while (1); return i; }'
 check 9 'int main() { int i; int j; int n = 0; for (i = 0; i < 3; i = i + 1) for (j = 0; j < 10; j = j + 1) { if (j == 3) break; n = n + 1; } return n; }'
 check 6 'int main() { int i; int j; int n = 0; for (i = 0; i < 3; i = i + 1) for (j = 0; j < 3; j = j + 1) { if (j == 1) continue; n = n + 1; } return n; }'
+check 42 'int main() { goto end; return 24; end: return 42; }'
+check 6 'int main() { int i = 0; int sum = 0; loop: sum = sum + i; i = i + 1; if (i <= 3) goto loop; return sum; }'
+check 42 'int main() { int i = 0; L: ; i = i + 1; if (i < 2) goto L; return 42; }'
+check 42 'int main() { int i = 0; while (i < 2) { i = i + 1; if (i == 2) goto done; } return 0; done: return 42; }'
+check 42 'int main() { if (1) goto L; return 24; L: return 42; }'
 
 check_error missing-plus-rhs 'int main() { return 1 +; }' '1:24: error: expect expr'
 check_error missing-sub-rhs 'int main() { return 1 -; }' '1:24: error: expect expr'
@@ -441,5 +446,15 @@ check_error break-after-loop 'int main() { while (1) break; break; }' \
 	    '1:31: error: break statement not within loop'
 check_error missing-break-semi 'int main() { while (1) break }' \
 	    "1:30: error: expect ';'"
+check_error goto-undefined 'int main() { goto L; }' \
+	    "1:14: error: label 'L' not defined"
+check_error duplicate-label 'int main() { L: ; L: ; }' \
+	    '1:19: error: duplicate label'
+check_error duplicate-label-scope 'int main() { { L: ; } L: ; }' \
+	    '1:23: error: duplicate label'
+check_error goto-missing-name 'int main() { goto 1; }' \
+	    '1:19: error: expect label name'
+check_error goto-missing-semi 'int main() { L: ; goto L }' \
+	    "1:26: error: expect ';'"
 
 printf 'All %d tests passed (%d execution, %d rejection).\n' "$((passed + rejected))" "$passed" "$rejected"

@@ -34,9 +34,14 @@ typedef enum {
   TOKEN_DO,    // 'do'
   TOKEN_BREAK,    // 'break'
   TOKEN_CONTINUE, // 'continue'
+  TOKEN_SWITCH, // 'switch'
+  TOKEN_CASE,   // 'case'
+  TOKEN_DEFAULT, // 'default'
+  TOKEN_GOTO,   // 'goto'
   TOKEN_IDENTIFIER,
   TOKEN_INT_LITERAL,
   TOKEN_SEMICOLON,
+  TOKEN_COLON, // ':'
   TOKEN_PLUS,      // '+'
   TOKEN_PLUS_PLUS, // '++'
   TOKEN_MINUS,     // '-'

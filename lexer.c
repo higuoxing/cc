@@ -33,28 +33,50 @@ typedef struct {
   {.name = spelling, .len = sizeof(spelling) - 1, .type = kind}
 
 static const Keyword keywords[] = {
-    KW("_Alignas", TOKEN_RESERVED),       KW("_Alignof", TOKEN_RESERVED),
-    KW("_Atomic", TOKEN_RESERVED),        KW("_Bool", TOKEN_RESERVED),
-    KW("_Complex", TOKEN_RESERVED),       KW("_Generic", TOKEN_RESERVED),
-    KW("_Imaginary", TOKEN_RESERVED),     KW("_Noreturn", TOKEN_RESERVED),
-    KW("_Static_assert", TOKEN_RESERVED), KW("_Thread_local", TOKEN_RESERVED),
-    KW("auto", TOKEN_RESERVED),           KW("break", TOKEN_BREAK),
-    KW("case", TOKEN_RESERVED),           KW("char", TOKEN_RESERVED),
-    KW("const", TOKEN_RESERVED),          KW("continue", TOKEN_CONTINUE),
-    KW("default", TOKEN_RESERVED),        KW("do", TOKEN_DO),
-    KW("double", TOKEN_RESERVED),         KW("else", TOKEN_ELSE),
-    KW("enum", TOKEN_RESERVED),           KW("extern", TOKEN_RESERVED),
-    KW("float", TOKEN_RESERVED),          KW("for", TOKEN_FOR),
-    KW("goto", TOKEN_RESERVED),           KW("if", TOKEN_IF),
-    KW("inline", TOKEN_RESERVED),         KW("int", TOKEN_INT),
-    KW("long", TOKEN_RESERVED),           KW("register", TOKEN_RESERVED),
-    KW("restrict", TOKEN_RESERVED),       KW("return", TOKEN_RETURN),
-    KW("short", TOKEN_RESERVED),          KW("signed", TOKEN_RESERVED),
-    KW("sizeof", TOKEN_RESERVED),         KW("static", TOKEN_RESERVED),
-    KW("struct", TOKEN_RESERVED),         KW("switch", TOKEN_RESERVED),
-    KW("typedef", TOKEN_RESERVED),        KW("union", TOKEN_RESERVED),
-    KW("unsigned", TOKEN_RESERVED),       KW("void", TOKEN_RESERVED),
-    KW("volatile", TOKEN_RESERVED),       KW("while", TOKEN_WHILE),
+    KW("_Alignas", TOKEN_RESERVED),
+    KW("_Alignof", TOKEN_RESERVED),
+    KW("_Atomic", TOKEN_RESERVED),
+    KW("_Bool", TOKEN_RESERVED),
+    KW("_Complex", TOKEN_RESERVED),
+    KW("_Generic", TOKEN_RESERVED),
+    KW("_Imaginary", TOKEN_RESERVED),
+    KW("_Noreturn", TOKEN_RESERVED),
+    KW("_Static_assert", TOKEN_RESERVED),
+    KW("_Thread_local", TOKEN_RESERVED),
+    KW("auto", TOKEN_RESERVED),
+    KW("break", TOKEN_BREAK),
+    KW("case", TOKEN_CASE),
+    KW("char", TOKEN_RESERVED),
+    KW("const", TOKEN_RESERVED),
+    KW("continue", TOKEN_CONTINUE),
+    KW("default", TOKEN_DEFAULT),
+    KW("do", TOKEN_DO),
+    KW("double", TOKEN_RESERVED),
+    KW("else", TOKEN_ELSE),
+    KW("enum", TOKEN_RESERVED),
+    KW("extern", TOKEN_RESERVED),
+    KW("float", TOKEN_RESERVED),
+    KW("for", TOKEN_FOR),
+    KW("goto", TOKEN_GOTO),
+    KW("if", TOKEN_IF),
+    KW("inline", TOKEN_RESERVED),
+    KW("int", TOKEN_INT),
+    KW("long", TOKEN_RESERVED),
+    KW("register", TOKEN_RESERVED),
+    KW("restrict", TOKEN_RESERVED),
+    KW("return", TOKEN_RETURN),
+    KW("short", TOKEN_RESERVED),
+    KW("signed", TOKEN_RESERVED),
+    KW("sizeof", TOKEN_RESERVED),
+    KW("static", TOKEN_RESERVED),
+    KW("struct", TOKEN_RESERVED),
+    KW("switch", TOKEN_SWITCH),
+    KW("typedef", TOKEN_RESERVED),
+    KW("union", TOKEN_RESERVED),
+    KW("unsigned", TOKEN_RESERVED),
+    KW("void", TOKEN_RESERVED),
+    KW("volatile", TOKEN_RESERVED),
+    KW("while", TOKEN_WHILE),
 };
 
 #undef KW
@@ -163,6 +185,11 @@ Token lexer_next_token(Lexer *l) {
   switch (*l->cursor) {
   case ';':
     tok.type = TOKEN_SEMICOLON;
+    tok.len = 1;
+    lexer_advance(l);
+    return tok;
+  case ':':
+    tok.type = TOKEN_COLON;
     tok.len = 1;
     lexer_advance(l);
     return tok;
