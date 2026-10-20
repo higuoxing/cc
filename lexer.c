@@ -138,6 +138,10 @@ Token lexer_next_token(Lexer *l) {
       lexer_advance(l);
       tok.type = TOKEN_PLUS_PLUS;
       tok.len = 2;
+    } else if (*l->cursor == '=') {
+      lexer_advance(l);
+      tok.type = TOKEN_PLUS_EQ;
+      tok.len = 2;
     } else {
       tok.type = TOKEN_PLUS;
       tok.len = 1;
@@ -149,20 +153,36 @@ Token lexer_next_token(Lexer *l) {
       lexer_advance(l);
       tok.type = TOKEN_MINUS_MINUS;
       tok.len = 2;
+    } else if (*l->cursor == '=') {
+      lexer_advance(l);
+      tok.type = TOKEN_MINUS_EQ;
+      tok.len = 2;
     } else {
       tok.type = TOKEN_MINUS;
       tok.len = 1;
     }
     return tok;
   case '*':
-    tok.type = TOKEN_STAR;
-    tok.len = 1;
     lexer_advance(l);
+    if (*l->cursor == '=') {
+      lexer_advance(l);
+      tok.type = TOKEN_STAR_EQ;
+      tok.len = 2;
+    } else {
+      tok.type = TOKEN_STAR;
+      tok.len = 1;
+    }
     return tok;
   case '/':
-    tok.type = TOKEN_SLASH;
-    tok.len = 1;
     lexer_advance(l);
+    if (*l->cursor == '=') {
+      lexer_advance(l);
+      tok.type = TOKEN_SLASH_EQ;
+      tok.len = 2;
+    } else {
+      tok.type = TOKEN_SLASH;
+      tok.len = 1;
+    }
     return tok;
   case '(':
     tok.type = TOKEN_LPAREN;
@@ -190,14 +210,59 @@ Token lexer_next_token(Lexer *l) {
     lexer_advance(l);
     return tok;
   case '!':
-    tok.type = TOKEN_BANG;
-    tok.len = 1;
     lexer_advance(l);
+    if (*l->cursor == '=') {
+      lexer_advance(l);
+      tok.type = TOKEN_NOT_EQ;
+      tok.len = 2;
+    } else {
+      tok.type = TOKEN_BANG;
+      tok.len = 1;
+    }
     return tok;
   case '=':
-    tok.type = TOKEN_ASSIGN;
-    tok.len = 1;
     lexer_advance(l);
+    if (*l->cursor == '=') {
+      lexer_advance(l);
+      tok.type = TOKEN_EQ_EQ;
+      tok.len = 2;
+    } else {
+      tok.type = TOKEN_ASSIGN;
+      tok.len = 1;
+    }
+    return tok;
+  case '<':
+    lexer_advance(l);
+    if (*l->cursor == '=') {
+      lexer_advance(l);
+      tok.type = TOKEN_LESS_EQ;
+      tok.len = 2;
+    } else {
+      tok.type = TOKEN_LESS;
+      tok.len = 1;
+    }
+    return tok;
+  case '>':
+    lexer_advance(l);
+    if (*l->cursor == '=') {
+      lexer_advance(l);
+      tok.type = TOKEN_GREATER_EQ;
+      tok.len = 2;
+    } else {
+      tok.type = TOKEN_GREATER;
+      tok.len = 1;
+    }
+    return tok;
+  case '%':
+    lexer_advance(l);
+    if (*l->cursor == '=') {
+      lexer_advance(l);
+      tok.type = TOKEN_PERCENT_EQ;
+      tok.len = 2;
+    } else {
+      tok.type = TOKEN_PERCENT;
+      tok.len = 1;
+    }
     return tok;
   }
 

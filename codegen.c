@@ -52,6 +52,7 @@ static void codegen_expr(AstNode *expr) {
   case AST_SUB:
   case AST_MUL:
   case AST_DIV:
+  case AST_MOD:
     codegen_expr(expr->d.binary.rhs);
     printf("\tcltq\n");
     printf("\tpushq %%rax\n");
@@ -67,14 +68,56 @@ static void codegen_expr(AstNode *expr) {
     } else if (expr->type == AST_MUL) {
       // %eax = %eax * %ecx
       printf("\timull %%ecx, %%eax\n");
-    } else if (expr->type == AST_DIV) {
+    } else if (expr->type == AST_DIV || expr->type == AST_MOD) {
       // idivl divides 64-bit value in %edx:%eax by operand (%ecx)
       printf("\tcltd\n");        // Sign-extend %eax into %edx:%eax
       printf("\tidivl %%ecx\n"); // Quotient in %eax, remainder in %edx
+      if (expr->type == AST_MOD)
+        printf("\tmovl %%edx, %%eax\n"); // Remainder is the result
     } else {
       fprintf(stderr, "unrecognized binary operator\n");
       exit(1);
     }
+    break;
+  case AST_LT:
+  case AST_LE:
+  case AST_GT:
+  case AST_GE:
+  case AST_EQ:
+  case AST_NE:
+    codegen_expr(expr->d.binary.rhs);
+    printf("\tcltq\n");
+    printf("\tpushq %%rax\n");
+    codegen_expr(expr->d.binary.lhs);
+    printf("\tpopq %%rcx\n");
+
+    // cmpl computes %eax - %ecx, i.e. lhs - rhs, and sets the flags.
+    printf("\tcmpl %%ecx, %%eax\n");
+    switch (expr->type) {
+    case AST_EQ:
+      printf("\tsete %%al\n");
+      break;
+    case AST_NE:
+      printf("\tsetne %%al\n");
+      break;
+    case AST_LT:
+      printf("\tsetl %%al\n");
+      break;
+    case AST_LE:
+      printf("\tsetle %%al\n");
+      break;
+    case AST_GT:
+      printf("\tsetg %%al\n");
+      break;
+    case AST_GE:
+      printf("\tsetge %%al\n");
+      break;
+    default:
+      fprintf(stderr, "unrecognized comparison operator\n");
+      exit(1);
+    }
+    // Zero-extend %al into %eax.
+    printf("\tmovzbl %%al, %%eax\n");
     break;
   case AST_NEG:
     codegen_expr(expr->d.unary.operand);

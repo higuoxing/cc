@@ -161,6 +161,27 @@ check 42 'int main() { int a = 42; return a--; }'
 check 42 'int main() { int a = 41; a++; return a; }'
 check 42 'int main() { int a = 43; --a; return a; }'
 check 42 'int main() { int a = 40; ++a; a++; return a; }'
+check 1 'int main() { return 1 == 1; }'
+check 0 'int main() { return 1 == 2; }'
+check 1 'int main() { return 1 != 2; }'
+check 0 'int main() { return 1 != 1; }'
+check 1 'int main() { return 1 < 2; }'
+check 0 'int main() { return 2 < 1; }'
+check 1 'int main() { return 1 <= 1; }'
+check 0 'int main() { return 2 <= 1; }'
+check 1 'int main() { return 2 > 1; }'
+check 0 'int main() { return 1 > 2; }'
+check 1 'int main() { return 2 >= 2; }'
+check 0 'int main() { return 1 >= 2; }'
+check 1 'int main() { return 1 < 2 == 1; }'
+check 0 'int main() { return 1 < 2 != 1; }'
+check 1 'int main() { int a = 41; return a + 1 == 42; }'
+check 1 'int main() { return 1 + 1 < 3; }'
+check 1 'int main() { return 7 % 3; }'
+check 2 'int main() { return 10 % 4; }'
+check 255 'int main() { return -7 % 3; }'
+check 0 'int main() { return 6 % 2; }'
+check 2 'int main() { return 4 * 3 % 5; }'
 
 check_error missing-plus-rhs 'int main() { return 1 +; }' '1:24: error: expect expr'
 check_error missing-sub-rhs 'int main() { return 1 -; }' '1:24: error: expect expr'
@@ -215,7 +236,7 @@ check_error declare-keyword 'int main() { int return; return 0; }' '1:18: error:
 check_error use-post-scope-shadow 'int main() { { int x = 1; } x = 42; return 0; }' '1:29: error: undeclared identifier'
 check_error redecl-after-nested 'int main() { int a; { int a; } int a; }' '1:36: error: duplicate local variable'
 check_error unsupported-comma-decl 'int main() { int a, b; return 0; }' "1:19: error: expect ';'"
-check_error unexpected-extra-equals 'int main() { int a; a == 3; }' '1:24: error: expect expr'
+check 42 'int main() { int a = 42; a == 3; return a; }'
 for kw in \
     _Alignas _Alignof _Atomic _Bool _Complex _Generic _Imaginary \
 	     _Noreturn _Static_assert _Thread_local \
@@ -241,5 +262,9 @@ check_error invalid-postfix-chain 'int main() { int a; return (a++)++; }' \
 	    '1:33: error: invalid increment target'
 check_error undeclared-postfix 'int main() { a++; return 0; }' \
 	    '1:14: error: undeclared identifier'
+check_error missing-compare-rhs 'int main() { return 1 <; }' \
+	    '1:24: error: expect expr'
+check_error missing-eq-rhs 'int main() { return 1 ==; }' \
+	    '1:25: error: expect expr'
 
 printf 'All %d tests passed (%d execution, %d rejection).\n' "$((passed + rejected))" "$passed" "$rejected"

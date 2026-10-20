@@ -297,6 +297,7 @@ static AstNode *parse_decl(Parser *p) {
  *   unary-expression
  *   multiplicative-expression '*' unary-expression
  *   multiplicative-expression '/' unary-expression
+ *   multiplicative-expression '%' unary-expression
  * (C11 6.5.5)
  */
 static AstNode *parse_multiplicative(Parser *p) {
@@ -304,17 +305,20 @@ static AstNode *parse_multiplicative(Parser *p) {
 
   left = parse_unary(p);
 
-  while (p->current.type == TOKEN_STAR || p->current.type == TOKEN_SLASH) {
+  while (p->current.type == TOKEN_STAR || p->current.type == TOKEN_SLASH ||
+         p->current.type == TOKEN_PERCENT) {
     TokenType op;
     AstNode *right;
     AstNode *node;
 
     op = p->current.type;
-    // Consume '*' or '/'
+    // Consume '*' or '/' or '%'
     parser_advance(p);
 
     right = parse_unary(p);
-    node = new_ast_node(p, op == TOKEN_STAR ? AST_MUL : AST_DIV);
+    node = new_ast_node(p, op == TOKEN_STAR
+                               ? AST_MUL
+                               : (op == TOKEN_SLASH ? AST_DIV : AST_MOD));
     node->d.binary.lhs = left;
     node->d.binary.rhs = right;
 
@@ -357,16 +361,101 @@ static AstNode *parse_additive(Parser *p) {
 }
 
 /*
- * assignment-expression:
+ * relational-expression:
  *   additive-expression
- *   additive-expression '=' assignment-expression
+ *   relational-expression '<' additive-expression
+ *   relational-expression '>' additive-expression
+ *   relational-expression '<=' additive-expression
+ *   relational-expression '>=' additive-expression
+ * (C11 6.5.8)
+ */
+static AstNode *parse_relational(Parser *p) {
+  AstNode *left;
+
+  left = parse_additive(p);
+
+  while (p->current.type == TOKEN_LESS || p->current.type == TOKEN_GREATER ||
+         p->current.type == TOKEN_LESS_EQ ||
+         p->current.type == TOKEN_GREATER_EQ) {
+    AstType ty;
+    AstNode *right;
+    AstNode *node;
+
+    switch (p->current.type) {
+    case TOKEN_LESS:
+      ty = AST_LT;
+      break;
+    case TOKEN_GREATER:
+      ty = AST_GT;
+      break;
+    case TOKEN_LESS_EQ:
+      ty = AST_LE;
+      break;
+    case TOKEN_GREATER_EQ:
+      ty = AST_GE;
+      break;
+    default:
+      fprintf(stderr, "unreachable %s:%d", __FILE__, __LINE__);
+      exit(1);
+    }
+
+    // Consume '<' or '>' or '<=' or '>='
+    parser_advance(p);
+
+    right = parse_additive(p);
+    node = new_ast_node(p, ty);
+    node->d.binary.lhs = left;
+    node->d.binary.rhs = right;
+
+    left = node;
+  }
+
+  return left;
+}
+
+/*
+ * equality-expression:
+ *   relational-expression
+ *   equality-expression '==' relational-expression
+ *   equality-expression '!=' relational-expression
+ * (C11 6.5.9)
+ */
+static AstNode *parse_equality(Parser *p) {
+  AstNode *left;
+
+  left = parse_relational(p);
+
+  while (p->current.type == TOKEN_EQ_EQ || p->current.type == TOKEN_NOT_EQ) {
+    TokenType op;
+    AstNode *right;
+    AstNode *node;
+
+    op = p->current.type;
+    // Consume '==' or '!='
+    parser_advance(p);
+
+    right = parse_relational(p);
+    node = new_ast_node(p, op == TOKEN_EQ_EQ ? AST_EQ : AST_NE);
+    node->d.binary.lhs = left;
+    node->d.binary.rhs = right;
+
+    left = node;
+  }
+
+  return left;
+}
+
+/*
+ * assignment-expression:
+ *   equality-expression
+ *   equality-expression '=' assignment-expression
  * (C11 6.5.16, without conditional or comma expressions; the left
  *  operand must be an lvalue)
  */
 static AstNode *parse_expr(Parser *p) {
   AstNode *left;
 
-  left = parse_additive(p);
+  left = parse_equality(p);
   if (p->current.type == TOKEN_ASSIGN) {
     AstNode *node;
     if (!is_lvalue(left->type))

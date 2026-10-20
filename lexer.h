@@ -43,6 +43,18 @@ typedef enum {
   TOKEN_TILDE,  // '~'
   TOKEN_BANG,   // '!'
   TOKEN_ASSIGN, // '='
+  TOKEN_EQ_EQ,      // '=='
+  TOKEN_NOT_EQ,     // '!='
+  TOKEN_LESS,       // '<'
+  TOKEN_LESS_EQ,    // '<='
+  TOKEN_GREATER,    // '>'
+  TOKEN_GREATER_EQ, // '>='
+  TOKEN_PERCENT,    // '%'
+  TOKEN_PLUS_EQ,    // '+='
+  TOKEN_MINUS_EQ,   // '-='
+  TOKEN_STAR_EQ,    // '*='
+  TOKEN_SLASH_EQ,   // '/='
+  TOKEN_PERCENT_EQ, // '%='
   TOKEN_RESERVED,
 } TokenType;
 
