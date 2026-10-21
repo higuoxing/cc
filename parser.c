@@ -1009,7 +1009,12 @@ static AstNode *parse_external_declaration(Parser *p) {
 
   parse_expect(p, TOKEN_LPAREN, "expect '('");
 
-  if (p->current.type != TOKEN_RPAREN) {
+  if (p->current.type == TOKEN_VOID) {
+    explicit_params = 1;
+    parser_advance(p);
+    if (p->current.type != TOKEN_RPAREN)
+      parse_error(p, "expect ')' after 'void'");
+  } else if (p->current.type != TOKEN_RPAREN) {
     explicit_params = 1;
     for (;;) {
       LocalVar *param;

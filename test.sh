@@ -580,5 +580,6 @@ check_error case-shift-32 'int main() { switch (0) { case 1 << 32: return 1; def
 check_error case-overflow-mul 'int main() { switch (0) { case 2147483647 * 2147483647: return 1; default: return 0; } }' '1:55: error: integer overflow in constant expression'
 check_error function-no-declaration 'int main() { return missing(); } int missing() { return 1; }' "1:21: error: function 'missing' not declared"
 check_error conflicting-prototypes 'int f(int); int f(int x, int y); int main() { return 0; }' "1:17: error: conflicting declaration of function 'f'"
+check_error void-with-arg 'int f(void); int main(void) { return f(1); } int f(void) { return 42; }' "1:38: error: wrong number of arguments to function 'f'"
 
 printf 'All %d tests passed (%d execution, %d rejection).\n' "$((passed + rejected))" "$passed" "$rejected"
