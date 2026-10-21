@@ -1441,7 +1441,8 @@ static AstNode *parse_case_stmt(Parser *p) {
 
   for (entry = p->current_switch->d.switch_stmt.cases; entry;
        entry = entry->next)
-    if (entry->node->d.case_stmt.val == val) {
+    if (!entry->node->d.case_stmt.is_default &&
+        entry->node->d.case_stmt.val == val) {
       p->current = case_tok;
       parse_error(p, "duplicate case value");
     }
