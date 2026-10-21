@@ -19,6 +19,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
 
 #include "codegen.h"
 #include "parser.h"
@@ -68,9 +69,17 @@ static void usage(const char *prog) {
  * 'foo.c' becomes 'foo.s', and a name without a dot gets '.s' appended.
  */
 static char *derive_output_path(const char *input) {
-  const char *dot = strrchr(input, '.');
-  size_t base_len = dot ? (size_t)(dot - input) : strlen(input);
+  const char *slash;
+  const char *name;
+  const char *dot;
+  size_t base_len;
   char *path;
+
+  slash = strchr(input, '/');
+  name = slash ? slash + 1 : input;
+  dot = strchr(name, '.');
+  /* A leading dot is part of a hidden file name, not an extension. */
+  base_len = dot && dot != name ? (size_t)(dot - input) : strlen(input);
 
   path = malloc(base_len + 3);
   if (!path) {
@@ -87,7 +96,8 @@ int main(int argc, char **argv) {
   const char *output = NULL;
   char *derived = NULL;
   FILE *out_file;
-  const char *source;
+  char *source;
+  const AstNode *ast;
   int i;
 
   for (i = 1; i < argc; ++i) {
@@ -107,12 +117,29 @@ int main(int argc, char **argv) {
   if (!filename)
     usage(argv[0]);
 
+  source = read_source(filename);
+  ast = parse_translation_unit(filename, source);
+
   if (output && strcmp(output, "-") == 0) {
     /* '-o -' writes assembly to stdout, like gcc and clang. */
     out_file = stdout;
   } else {
+    struct stat input_st, output_st;
+
     if (!output)
       output = derived = derive_output_path(filename);
+
+    if (stat(filename, &input_st) != 0) {
+      fprintf(stderr, "failed to stat source file '%s'\n", filename);
+      exit(1);
+    }
+
+    if (stat(output, &output_st) == 0 && input_st.st_dev == output_st.st_dev &&
+        input_st.st_ino == output_st.st_ino) {
+      fprintf(stderr, "refusing to overwrite input file '%s'\n", filename);
+      exit(1);
+    }
+
     out_file = fopen(output, "wb");
     if (!out_file) {
       fprintf(stderr, "failed to open output file '%s'\n", output);
@@ -120,11 +147,14 @@ int main(int argc, char **argv) {
     }
   }
 
-  source = read_source(filename);
-  codegen(parse_translation_unit(filename, source), out_file);
+  codegen(ast, out_file);
 
-  if (out_file != stdout)
-    fclose(out_file);
+  if (out_file != stdout && fclose(out_file) != 0) {
+    fprintf(stderr, "failed to write output file '%s'\n", output);
+    exit(1);
+  }
+
+  free(source);
   free(derived);
 
   return 0;

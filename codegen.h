@@ -23,6 +23,6 @@
 
 #include "parser.h"
 
-extern void codegen(AstNode *ast, FILE *out);
+extern void codegen(const AstNode *ast, FILE *out);
 
 #endif

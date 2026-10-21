@@ -503,8 +503,8 @@ static void codegen_stmt(AstNode *stmt, int break_label, int continue_label,
   }
 }
 
-void codegen(AstNode *ast, FILE *out_file) {
-  AstNode *fn;
+void codegen(const AstNode *ast, FILE *out_file) {
+  const AstNode *fn;
 
   out = out_file;
   fprintf(out, "\t.text\n");
