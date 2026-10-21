@@ -45,7 +45,7 @@ static const char *argregs32[] = {"%edi", "%esi", "%edx",
                                   "%ecx", "%r8d", "%r9d"};
 
 static void codegen_addr(AstNode *expr) {
-  if (expr->type != AST_VAR) {
+  if (expr->kind != AST_VAR) {
     fprintf(stderr, "invalid address expr in codegen\n");
     exit(1);
   }
@@ -56,7 +56,7 @@ static void codegen_addr(AstNode *expr) {
 }
 
 static void codegen_expr(AstNode *expr) {
-  switch (expr->type) {
+  switch (expr->kind) {
   case AST_VAR:
     codegen_addr(expr);
     fprintf(out, "\tmovl (%%rax), %%eax\n");
@@ -93,32 +93,32 @@ static void codegen_expr(AstNode *expr) {
     fprintf(out, "\tpopq %%rcx\n");
     push_depth--;
 
-    if (expr->type == AST_ADD) {
+    if (expr->kind == AST_ADD) {
       /* %eax = %eax + %ecx */
       fprintf(out, "\taddl %%ecx, %%eax\n");
-    } else if (expr->type == AST_SUB) {
+    } else if (expr->kind == AST_SUB) {
       /* %eax = %eax - %ecx */
       fprintf(out, "\tsubl %%ecx, %%eax\n");
-    } else if (expr->type == AST_MUL) {
+    } else if (expr->kind == AST_MUL) {
       /* %eax = %eax * %ecx */
       fprintf(out, "\timull %%ecx, %%eax\n");
-    } else if (expr->type == AST_DIV || expr->type == AST_MOD) {
+    } else if (expr->kind == AST_DIV || expr->kind == AST_MOD) {
       /* idivl divides 64-bit value in %edx:%eax by operand (%ecx) */
       fprintf(out, "\tcltd\n");        /* Sign-extend %eax into %edx:%eax */
       fprintf(out, "\tidivl %%ecx\n"); /* Quotient in %eax, remainder in %edx */
-      if (expr->type == AST_MOD)
+      if (expr->kind == AST_MOD)
         fprintf(out, "\tmovl %%edx, %%eax\n"); /* Remainder is the result */
-    } else if (expr->type == AST_LSHIFT) {
+    } else if (expr->kind == AST_LSHIFT) {
       /* The shift count comes from %cl, the low byte of %ecx. */
       fprintf(out, "\tsall %%cl, %%eax\n");
-    } else if (expr->type == AST_RSHIFT) {
+    } else if (expr->kind == AST_RSHIFT) {
       /* Arithmetic shift: C requires sign-fill for signed '>>'. */
       fprintf(out, "\tsarl %%cl, %%eax\n");
-    } else if (expr->type == AST_BIT_AND) {
+    } else if (expr->kind == AST_BIT_AND) {
       fprintf(out, "\tandl %%ecx, %%eax\n");
-    } else if (expr->type == AST_BIT_XOR) {
+    } else if (expr->kind == AST_BIT_XOR) {
       fprintf(out, "\txorl %%ecx, %%eax\n");
-    } else if (expr->type == AST_BIT_OR) {
+    } else if (expr->kind == AST_BIT_OR) {
       fprintf(out, "\torl %%ecx, %%eax\n");
     } else {
       fprintf(stderr, "unrecognized binary operator\n");
@@ -141,7 +141,7 @@ static void codegen_expr(AstNode *expr) {
 
     /* cmpl computes %eax - %ecx, i.e. lhs - rhs, and sets the flags. */
     fprintf(out, "\tcmpl %%ecx, %%eax\n");
-    switch (expr->type) {
+    switch (expr->kind) {
     case AST_EQ:
       fprintf(out, "\tsete %%al\n");
       break;
@@ -335,7 +335,7 @@ static void codegen_expr(AstNode *expr) {
  */
 static void codegen_stmt(AstNode *stmt, int break_label, int continue_label,
                          int ret_label) {
-  switch (stmt->type) {
+  switch (stmt->kind) {
   case AST_RETURN:
     codegen_expr(stmt->d.ret.expr);
     fprintf(out, "\tjmp .Lreturn.%d\n", ret_label);
@@ -515,7 +515,7 @@ void codegen(const AstNode *ast, FILE *out_file) {
     int stack_size;
     int ret_label = label_seq++;
 
-    if (fn->type != AST_FUNCTION) {
+    if (fn->kind != AST_FUNCTION) {
       fprintf(stderr, "expected function AST\n");
       exit(1);
     }

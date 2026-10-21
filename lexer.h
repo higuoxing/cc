@@ -83,10 +83,10 @@ typedef enum {
   TOKEN_TILDE,    /* '~' */
   TOKEN_VOID, /* 'void' */
   TOKEN_WHILE, /* 'while' */
-} TokenType;
+} TokenKind;
 
 typedef struct {
-  TokenType type;
+  TokenKind kind;
   const char *start;
   int len;
   int line;

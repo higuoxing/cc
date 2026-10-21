@@ -25,7 +25,7 @@
 #include "parser.h"
 
 static LocalVar *declare_local_var(Parser *p, Token name);
-static AstNode *new_ast_node(Parser *p, AstType ty);
+static AstNode *new_ast_node(Parser *p, AstKind kind);
 static void reset_function_state(Parser *p);
 static void parser_advance(Parser *p);
 static void parse_error(Parser *p, const char *fmt, ...)
@@ -56,9 +56,9 @@ static void check_calls(Parser *p);
 static int64_t eval_const_expr(Parser *p, AstNode *expr);
 static AstNode *parse_block(Parser *p);
 static AstNode *parse_external_declaration(Parser *p);
-static bool is_lvalue(AstType ty);
-static bool is_increment_op(AstType ty);
-static bool is_assignment_op(TokenType ty);
+static bool is_lvalue(AstKind kind);
+static bool is_increment_op(AstKind kind);
+static bool is_assignment_op(TokenKind kind);
 
 static bool same_identifier(Token a, Token b) {
   return a.len == b.len && strncmp(a.start, b.start, a.len) == 0;
@@ -110,12 +110,12 @@ static LocalVar *declare_local_var(Parser *p, Token name) {
   return var;
 }
 
-static AstNode *new_ast_node(Parser *p, AstType ty) {
+static AstNode *new_ast_node(Parser *p, AstKind ty) {
   AstNode *node;
   node = calloc(1, sizeof(AstNode));
   if (!node)
     parse_error(p, "out of memory");
-  node->type = ty;
+  node->kind = ty;
   return node;
 }
 
@@ -170,8 +170,8 @@ static void parse_error(Parser *p, const char *fmt, ...) {
   exit(1);
 }
 
-static void parse_expect(Parser *p, TokenType t, const char *msg) {
-  if (p->current.type != t) {
+static void parse_expect(Parser *p, TokenKind t, const char *msg) {
+  if (p->current.kind != t) {
     parse_error(p, "%s", msg);
   }
 
@@ -183,14 +183,14 @@ static void parse_expect(Parser *p, TokenType t, const char *msg) {
  * increment/decrement are not lvalues in C11, so this matches GCC and Clang
  * in C mode.
  */
-static bool is_lvalue(AstType ty) { return ty == AST_VAR; }
+static bool is_lvalue(AstKind ty) { return ty == AST_VAR; }
 
-static bool is_increment_op(AstType ty) {
+static bool is_increment_op(AstKind ty) {
   return ty == AST_PRE_INCREMENT || ty == AST_POST_INCREMENT;
 }
 
 /* assignment-operator: = += -= *= /= %= <<= >>= &= ^= |=  (C11 6.5.16) */
-static bool is_assignment_op(TokenType ty) {
+static bool is_assignment_op(TokenKind ty) {
   return ty == TOKEN_ASSIGN || ty == TOKEN_PLUS_EQ || ty == TOKEN_MINUS_EQ ||
          ty == TOKEN_STAR_EQ || ty == TOKEN_SLASH_EQ ||
          ty == TOKEN_PERCENT_EQ || ty == TOKEN_LSHIFT_EQ ||
@@ -206,14 +206,14 @@ static bool is_assignment_op(TokenType ty) {
  * (C11 6.5.3; '&', '*', sizeof, and _Alignof are not implemented)
  */
 static AstNode *parse_unary(Parser *p) {
-  if (p->current.type == TOKEN_MINUS || p->current.type == TOKEN_TILDE ||
-      p->current.type == TOKEN_BANG || p->current.type == TOKEN_PLUS_PLUS ||
-      p->current.type == TOKEN_MINUS_MINUS) {
+  if (p->current.kind == TOKEN_MINUS || p->current.kind == TOKEN_TILDE ||
+      p->current.kind == TOKEN_BANG || p->current.kind == TOKEN_PLUS_PLUS ||
+      p->current.kind == TOKEN_MINUS_MINUS) {
     AstNode *node;
-    AstType op;
+    AstKind op;
     Token op_tok;
 
-    switch (p->current.type) {
+    switch (p->current.kind) {
     case TOKEN_MINUS:
       op = AST_NEG;
       break;
@@ -241,7 +241,7 @@ static AstNode *parse_unary(Parser *p) {
     node->d.unary.operand = parse_unary(p);
 
     if ((op == AST_PRE_INCREMENT || op == AST_PRE_DECREMENT) &&
-        !is_lvalue(node->d.unary.operand->type)) {
+        !is_lvalue(node->d.unary.operand->kind)) {
       /* Report at the operator, not at the token after the operand. */
       p->current = op_tok;
       parse_error(p, "invalid %s target",
@@ -282,7 +282,7 @@ static AstNode *parse_call_expr(Parser *p) {
   parser_advance(p);
   parse_expect(p, TOKEN_LPAREN, "expect '('");
 
-  if (p->current.type != TOKEN_RPAREN) {
+  if (p->current.kind != TOKEN_RPAREN) {
     AstNode **tail = &call->d.call.args;
 
     for (;;) {
@@ -291,7 +291,7 @@ static AstNode *parse_call_expr(Parser *p) {
       *tail = parse_assignment(p);
       tail = &(*tail)->next;
       nargs++;
-      if (p->current.type == TOKEN_COMMA) {
+      if (p->current.kind == TOKEN_COMMA) {
         parser_advance(p);
         continue;
       }
@@ -314,8 +314,8 @@ static AstNode *parse_call_expr(Parser *p) {
 static AstNode *parse_postfix(Parser *p) {
   AstNode *left;
 
-  if (p->current.type == TOKEN_IDENTIFIER &&
-      p->lookahead.type == TOKEN_LPAREN) {
+  if (p->current.kind == TOKEN_IDENTIFIER &&
+      p->lookahead.kind == TOKEN_LPAREN) {
     if (find_local_var(p, p->current))
       parse_error(p, "called object is not a function");
     left = parse_call_expr(p);
@@ -323,12 +323,12 @@ static AstNode *parse_postfix(Parser *p) {
     left = parse_primary(p);
   }
 
-  while (p->current.type == TOKEN_PLUS_PLUS ||
-         p->current.type == TOKEN_MINUS_MINUS) {
+  while (p->current.kind == TOKEN_PLUS_PLUS ||
+         p->current.kind == TOKEN_MINUS_MINUS) {
     AstNode *postfixed;
-    AstType ty;
+    AstKind ty;
 
-    ty = p->current.type == TOKEN_PLUS_PLUS ? AST_POST_INCREMENT
+    ty = p->current.kind == TOKEN_PLUS_PLUS ? AST_POST_INCREMENT
                                             : AST_POST_DECREMENT;
 
     /*
@@ -336,7 +336,7 @@ static AstNode *parse_postfix(Parser *p) {
      * (a++)++ is invalid in C. Check before consuming so the error lands
      * on the operator.
      */
-    if (!is_lvalue(left->type))
+    if (!is_lvalue(left->kind))
       parse_error(p, "invalid %s target",
                   is_increment_op(ty) ? "increment" : "decrement");
 
@@ -356,7 +356,7 @@ static AstNode *parse_postfix(Parser *p) {
  * (C11 6.5.1; only int literals, no string or character constants)
  */
 static AstNode *parse_primary(Parser *p) {
-  if (p->current.type == TOKEN_INT_LITERAL) {
+  if (p->current.kind == TOKEN_INT_LITERAL) {
     AstNode *expr;
     expr = new_ast_node(p, AST_INT_LITERAL);
     expr->d.int_literal.val = p->current.int_literal_val;
@@ -366,7 +366,7 @@ static AstNode *parse_primary(Parser *p) {
     return expr;
   }
 
-  if (p->current.type == TOKEN_LPAREN) {
+  if (p->current.kind == TOKEN_LPAREN) {
     AstNode *expr;
     /* Consume '(' */
     parser_advance(p);
@@ -375,7 +375,7 @@ static AstNode *parse_primary(Parser *p) {
     return expr;
   }
 
-  if (p->current.type == TOKEN_IDENTIFIER) {
+  if (p->current.kind == TOKEN_IDENTIFIER) {
     AstNode *expr;
     LocalVar *var = find_local_var(p, p->current);
     if (!var)
@@ -401,7 +401,7 @@ static AstNode *parse_decl(Parser *p) {
   Token name;
 
   parse_expect(p, TOKEN_INT, "expect 'int'");
-  if (p->current.type != TOKEN_IDENTIFIER)
+  if (p->current.kind != TOKEN_IDENTIFIER)
     parse_error(p, "expect variable name");
 
   name = p->current;
@@ -410,7 +410,7 @@ static AstNode *parse_decl(Parser *p) {
   /* Consume variable name. */
   parser_advance(p);
 
-  if (p->current.type == TOKEN_ASSIGN) {
+  if (p->current.kind == TOKEN_ASSIGN) {
     /* Consume '=' */
     parser_advance(p);
     decl->d.decl.init = parse_assignment(p);
@@ -434,13 +434,13 @@ static AstNode *parse_multiplicative(Parser *p) {
 
   left = parse_unary(p);
 
-  while (p->current.type == TOKEN_STAR || p->current.type == TOKEN_SLASH ||
-         p->current.type == TOKEN_PERCENT) {
-    TokenType op;
+  while (p->current.kind == TOKEN_STAR || p->current.kind == TOKEN_SLASH ||
+         p->current.kind == TOKEN_PERCENT) {
+    TokenKind op;
     AstNode *right;
     AstNode *node;
 
-    op = p->current.type;
+    op = p->current.kind;
     /* Consume '*' or '/' or '%' */
     parser_advance(p);
 
@@ -469,12 +469,12 @@ static AstNode *parse_additive(Parser *p) {
 
   left = parse_multiplicative(p);
 
-  while (p->current.type == TOKEN_PLUS || p->current.type == TOKEN_MINUS) {
-    TokenType op;
+  while (p->current.kind == TOKEN_PLUS || p->current.kind == TOKEN_MINUS) {
+    TokenKind op;
     AstNode *right;
     AstNode *node;
 
-    op = p->current.type;
+    op = p->current.kind;
     /* Consume '+' or '-' */
     parser_advance(p);
     right = parse_multiplicative(p);
@@ -501,12 +501,12 @@ static AstNode *parse_shift(Parser *p) {
 
   left = parse_additive(p);
 
-  while (p->current.type == TOKEN_LSHIFT || p->current.type == TOKEN_RSHIFT) {
-    TokenType op;
+  while (p->current.kind == TOKEN_LSHIFT || p->current.kind == TOKEN_RSHIFT) {
+    TokenKind op;
     AstNode *right;
     AstNode *node;
 
-    op = p->current.type;
+    op = p->current.kind;
     /* Consume '<<' or '>>' */
     parser_advance(p);
 
@@ -535,14 +535,14 @@ static AstNode *parse_relational(Parser *p) {
 
   left = parse_shift(p);
 
-  while (p->current.type == TOKEN_LESS || p->current.type == TOKEN_GREATER ||
-         p->current.type == TOKEN_LESS_EQ ||
-         p->current.type == TOKEN_GREATER_EQ) {
-    AstType ty;
+  while (p->current.kind == TOKEN_LESS || p->current.kind == TOKEN_GREATER ||
+         p->current.kind == TOKEN_LESS_EQ ||
+         p->current.kind == TOKEN_GREATER_EQ) {
+    AstKind ty;
     AstNode *right;
     AstNode *node;
 
-    switch (p->current.type) {
+    switch (p->current.kind) {
     case TOKEN_LESS:
       ty = AST_LT;
       break;
@@ -586,12 +586,12 @@ static AstNode *parse_equality(Parser *p) {
 
   left = parse_relational(p);
 
-  while (p->current.type == TOKEN_EQ_EQ || p->current.type == TOKEN_NOT_EQ) {
-    TokenType op;
+  while (p->current.kind == TOKEN_EQ_EQ || p->current.kind == TOKEN_NOT_EQ) {
+    TokenKind op;
     AstNode *right;
     AstNode *node;
 
-    op = p->current.type;
+    op = p->current.kind;
     /* Consume '==' or '!=' */
     parser_advance(p);
 
@@ -617,7 +617,7 @@ static AstNode *parse_bitwise_and(Parser *p) {
 
   left = parse_equality(p);
 
-  while (p->current.type == TOKEN_BIT_AND) {
+  while (p->current.kind == TOKEN_BIT_AND) {
     AstNode *right;
     AstNode *node;
 
@@ -646,7 +646,7 @@ static AstNode *parse_bitwise_xor(Parser *p) {
 
   left = parse_bitwise_and(p);
 
-  while (p->current.type == TOKEN_BIT_XOR) {
+  while (p->current.kind == TOKEN_BIT_XOR) {
     AstNode *right;
     AstNode *node;
 
@@ -675,7 +675,7 @@ static AstNode *parse_bitwise_or(Parser *p) {
 
   left = parse_bitwise_xor(p);
 
-  while (p->current.type == TOKEN_BIT_OR) {
+  while (p->current.kind == TOKEN_BIT_OR) {
     AstNode *right;
     AstNode *node;
 
@@ -704,7 +704,7 @@ static AstNode *parse_logical_and(Parser *p) {
 
   left = parse_bitwise_or(p);
 
-  while (p->current.type == TOKEN_AND_AND) {
+  while (p->current.kind == TOKEN_AND_AND) {
     AstNode *right;
     AstNode *node;
 
@@ -733,7 +733,7 @@ static AstNode *parse_logical_or(Parser *p) {
 
   left = parse_logical_and(p);
 
-  while (p->current.type == TOKEN_OR_OR) {
+  while (p->current.kind == TOKEN_OR_OR) {
     AstNode *right;
     AstNode *node;
 
@@ -762,7 +762,7 @@ static AstNode *parse_expression(Parser *p) {
   AstNode *left;
 
   left = parse_assignment(p);
-  while (p->current.type == TOKEN_COMMA) {
+  while (p->current.kind == TOKEN_COMMA) {
     AstNode *right;
     AstNode *node;
 
@@ -788,7 +788,7 @@ static AstNode *parse_conditional(Parser *p) {
   AstNode *node;
 
   node = parse_logical_or(p);
-  if (p->current.type == TOKEN_QUESTION) {
+  if (p->current.kind == TOKEN_QUESTION) {
     AstNode *cond = node;
 
     /* Consume '?' */
@@ -813,15 +813,15 @@ static AstNode *parse_assignment(Parser *p) {
   AstNode *left;
 
   left = parse_conditional(p);
-  if (is_assignment_op(p->current.type)) {
+  if (is_assignment_op(p->current.kind)) {
     AstNode *node;
     AstNode *rhs;
-    TokenType op;
+    TokenKind op;
 
-    if (!is_lvalue(left->type))
+    if (!is_lvalue(left->kind))
       parse_error(p, "invalid assignment target");
 
-    op = p->current.type;
+    op = p->current.kind;
     /* Consume the assignment operator */
     parser_advance(p);
 
@@ -838,7 +838,7 @@ static AstNode *parse_assignment(Parser *p) {
        */
       AstNode *binop;
       AstNode *lhs_copy;
-      AstType binop_ty;
+      AstKind binop_ty;
 
       switch (op) {
       case TOKEN_PLUS_EQ:
@@ -902,7 +902,7 @@ static AstNode *parse_return_stmt(Parser *p) {
   AstNode *ast;
 
   parse_expect(p, TOKEN_RETURN, "expect 'return'");
-  if (p->current.type == TOKEN_SEMICOLON)
+  if (p->current.kind == TOKEN_SEMICOLON)
     parse_error(p, "expect return expr");
 
   ast = new_ast_node(p, AST_RETURN);
@@ -927,8 +927,8 @@ static AstNode *parse_block(Parser *p) {
 
   parse_expect(p, TOKEN_LBRACE, "expect '{'");
   ++p->scope_depth;
-  while (p->current.type != TOKEN_RBRACE) {
-    if (p->current.type == TOKEN_EOF)
+  while (p->current.kind != TOKEN_RBRACE) {
+    if (p->current.kind == TOKEN_EOF)
       parse_error(p, "expect '}'");
 
     *tail = parse_stmt(p, /*allow_decl=*/true);
@@ -999,7 +999,7 @@ static AstNode *parse_external_declaration(Parser *p) {
   reset_function_state(p);
   fn = new_ast_node(p, AST_FUNCTION);
   parse_expect(p, TOKEN_INT, "expect 'int'");
-  if (p->current.type != TOKEN_IDENTIFIER)
+  if (p->current.kind != TOKEN_IDENTIFIER)
     parse_error(p, "expect function name");
 
   fn->d.function.name = p->current;
@@ -1009,12 +1009,12 @@ static AstNode *parse_external_declaration(Parser *p) {
 
   parse_expect(p, TOKEN_LPAREN, "expect '('");
 
-  if (p->current.type == TOKEN_VOID) {
+  if (p->current.kind == TOKEN_VOID) {
     explicit_params = 1;
     parser_advance(p);
-    if (p->current.type != TOKEN_RPAREN)
+    if (p->current.kind != TOKEN_RPAREN)
       parse_error(p, "expect ')' after 'void'");
-  } else if (p->current.type != TOKEN_RPAREN) {
+  } else if (p->current.kind != TOKEN_RPAREN) {
     explicit_params = 1;
     for (;;) {
       LocalVar *param;
@@ -1026,7 +1026,7 @@ static AstNode *parse_external_declaration(Parser *p) {
         parse_error(p, "too many parameters");
       parse_expect(p, TOKEN_INT, "expect 'int'");
 
-      if (p->current.type == TOKEN_IDENTIFIER) {
+      if (p->current.kind == TOKEN_IDENTIFIER) {
         param_name = p->current;
         for (var = p->locals; var && var->scope_depth == 0; var = var->next) {
           if (same_identifier(var->name, param_name))
@@ -1050,7 +1050,7 @@ static AstNode *parse_external_declaration(Parser *p) {
 
       nparams++;
 
-      if (p->current.type == TOKEN_COMMA) {
+      if (p->current.kind == TOKEN_COMMA) {
         parser_advance(p);
         continue;
       }
@@ -1059,10 +1059,10 @@ static AstNode *parse_external_declaration(Parser *p) {
   }
   parse_expect(p, TOKEN_RPAREN, "expect ')'");
 
-  if (p->current.type != TOKEN_SEMICOLON && p->current.type != TOKEN_LBRACE)
+  if (p->current.kind != TOKEN_SEMICOLON && p->current.kind != TOKEN_LBRACE)
     parse_error(p, "expect ';' or '{'");
 
-  definition = p->current.type == TOKEN_LBRACE;
+  definition = p->current.kind == TOKEN_LBRACE;
   if (definition && unamed_param)
     parse_error(p, "expect parameter name in function definition");
 
@@ -1127,7 +1127,7 @@ static AstNode *parse_if_stmt(Parser *p) {
   if_node->d.if_stmt.cond = parse_expression(p);
   parse_expect(p, TOKEN_RPAREN, "expect ')'");
   if_node->d.if_stmt.then_stmt = parse_stmt(p, /*allow_decl=*/false);
-  if (p->current.type == TOKEN_ELSE) {
+  if (p->current.kind == TOKEN_ELSE) {
     /* Consume 'else' */
     parser_advance(p);
     if_node->d.if_stmt.else_stmt = parse_stmt(p, /*allow_decl=*/false);
@@ -1175,10 +1175,10 @@ static AstNode *parse_for_stmt(Parser *p) {
   outer_locals = p->locals;
   ++p->scope_depth;
 
-  if (p->current.type == TOKEN_INT) {
+  if (p->current.kind == TOKEN_INT) {
     /* parse_decl consumes the declaration's own ';'. */
     for_node->d.for_stmt.init = parse_decl(p);
-  } else if (p->current.type == TOKEN_SEMICOLON) {
+  } else if (p->current.kind == TOKEN_SEMICOLON) {
     /* Omitted init clause; consume the ';'. */
     parser_advance(p);
   } else {
@@ -1188,11 +1188,11 @@ static AstNode *parse_for_stmt(Parser *p) {
     for_node->d.for_stmt.init = init;
   }
 
-  if (p->current.type != TOKEN_SEMICOLON)
+  if (p->current.kind != TOKEN_SEMICOLON)
     for_node->d.for_stmt.cond = parse_expression(p);
   parse_expect(p, TOKEN_SEMICOLON, "expect ';'");
 
-  if (p->current.type != TOKEN_RPAREN)
+  if (p->current.kind != TOKEN_RPAREN)
     for_node->d.for_stmt.post = parse_expression(p);
   parse_expect(p, TOKEN_RPAREN, "expect ')'");
 
@@ -1268,7 +1268,7 @@ static AstNode *parse_goto_stmt(Parser *p) {
 
   goto_tok = p->current;
   parse_expect(p, TOKEN_GOTO, "expect 'goto'");
-  if (p->current.type != TOKEN_IDENTIFIER)
+  if (p->current.kind != TOKEN_IDENTIFIER)
     parse_error(p, "expect label name");
 
   ref = (GotoRef *)calloc(1, sizeof(GotoRef));
@@ -1331,7 +1331,7 @@ static int64_t checked_int(Parser *p, int64_t val) {
 }
 static int64_t eval_const_expr(Parser *p, AstNode *expr) {
   int64_t lhs, rhs;
-  switch (expr->type) {
+  switch (expr->kind) {
   case AST_INT_LITERAL:
     return expr->d.int_literal.val;
   case AST_NEG:
@@ -1374,7 +1374,7 @@ static int64_t eval_const_expr(Parser *p, AstNode *expr) {
   lhs = eval_const_expr(p, expr->d.binary.lhs);
   rhs = eval_const_expr(p, expr->d.binary.rhs);
 
-  switch (expr->type) {
+  switch (expr->kind) {
   case AST_ADD:
     return checked_int(p, lhs + rhs);
   case AST_SUB:
@@ -1385,7 +1385,7 @@ static int64_t eval_const_expr(Parser *p, AstNode *expr) {
   case AST_MOD:
     if (rhs == 0)
       parse_error(p, "division by zero in constant expression");
-    return checked_int(p, expr->type == AST_DIV ? lhs / rhs : lhs % rhs);
+    return checked_int(p, expr->kind == AST_DIV ? lhs / rhs : lhs % rhs);
   case AST_LSHIFT:
     if (rhs < 0 || rhs >= 32)
       parse_error(p, "invalid shift count in constant expression");
@@ -1543,10 +1543,10 @@ static AstNode *parse_default_stmt(Parser *p) {
 static AstNode *parse_stmt(Parser *p, bool allow_decl) {
   AstNode *stmt;
 
-  if (p->current.type == TOKEN_IDENTIFIER && p->lookahead.type == TOKEN_COLON)
+  if (p->current.kind == TOKEN_IDENTIFIER && p->lookahead.kind == TOKEN_COLON)
     return parse_label_stmt(p);
 
-  switch (p->current.type) {
+  switch (p->current.kind) {
   case TOKEN_RETURN:
     return parse_return_stmt(p);
   case TOKEN_IF:
@@ -1602,10 +1602,10 @@ AstNode *parse_translation_unit(const char *filename, const char *source) {
   parser_init(&p, filename, source);
 
   /* Keep the empty-input diagnostics: the loop would just not run. */
-  if (p.current.type == TOKEN_EOF)
+  if (p.current.kind == TOKEN_EOF)
     parse_error(&p, "expect 'int'");
 
-  while (p.current.type != TOKEN_EOF) {
+  while (p.current.kind != TOKEN_EOF) {
     /* Declarations return no AST node. */
     AstNode *fn = parse_external_declaration(&p);
     if (fn) {

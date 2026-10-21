@@ -25,12 +25,12 @@
 typedef struct {
   const char *name;
   size_t len;
-  TokenType type;
+  TokenKind kind;
 } Keyword;
 
 /* C11 keywords */
-#define KW(spelling, kind)                                                     \
-  {.name = spelling, .len = sizeof(spelling) - 1, .type = kind}
+#define KW(kw_spelling, kw_kind)                                               \
+  {.name = kw_spelling, .len = sizeof(kw_spelling) - 1, .kind = kw_kind}
 
 static const Keyword keywords[] = {
     KW("_Alignas", TOKEN_RESERVED),
@@ -81,13 +81,13 @@ static const Keyword keywords[] = {
 
 #undef KW
 
-static TokenType kw_token_type(const Token *tok) {
+static TokenKind kw_token_type(const Token *tok) {
   size_t i;
   for (i = 0; i < sizeof(keywords) / sizeof(keywords[0]); ++i) {
     const Keyword *kw = &keywords[i];
     if ((size_t)tok->len == kw->len &&
         memcmp(tok->start, kw->name, kw->len) == 0)
-      return kw->type;
+      return kw->kind;
   }
 
   return TOKEN_IDENTIFIER;
@@ -172,36 +172,36 @@ Token lexer_next_token(Lexer *l) {
 
   skip_whitespace(l);
 
-  tok.type = TOKEN_UNKNOW;
+  tok.kind = TOKEN_UNKNOW;
   tok.start = l->cursor;
   tok.line = l->line;
   tok.col = lexer_column(l);
   tok.len = 1;
 
   if (*l->cursor == '\0') {
-    tok.type = TOKEN_EOF;
+    tok.kind = TOKEN_EOF;
     tok.len = 0;
     return tok;
   }
 
   switch (*l->cursor) {
   case ';':
-    tok.type = TOKEN_SEMICOLON;
+    tok.kind = TOKEN_SEMICOLON;
     tok.len = 1;
     lexer_advance(l);
     return tok;
   case ':':
-    tok.type = TOKEN_COLON;
+    tok.kind = TOKEN_COLON;
     tok.len = 1;
     lexer_advance(l);
     return tok;
   case '?':
-    tok.type = TOKEN_QUESTION;
+    tok.kind = TOKEN_QUESTION;
     tok.len = 1;
     lexer_advance(l);
     return tok;
   case ',':
-    tok.type = TOKEN_COMMA;
+    tok.kind = TOKEN_COMMA;
     tok.len = 1;
     lexer_advance(l);
     return tok;
@@ -209,14 +209,14 @@ Token lexer_next_token(Lexer *l) {
     lexer_advance(l);
     if (*l->cursor == '+') {
       lexer_advance(l);
-      tok.type = TOKEN_PLUS_PLUS;
+      tok.kind = TOKEN_PLUS_PLUS;
       tok.len = 2;
     } else if (*l->cursor == '=') {
       lexer_advance(l);
-      tok.type = TOKEN_PLUS_EQ;
+      tok.kind = TOKEN_PLUS_EQ;
       tok.len = 2;
     } else {
-      tok.type = TOKEN_PLUS;
+      tok.kind = TOKEN_PLUS;
       tok.len = 1;
     }
     return tok;
@@ -224,14 +224,14 @@ Token lexer_next_token(Lexer *l) {
     lexer_advance(l);
     if (*l->cursor == '-') {
       lexer_advance(l);
-      tok.type = TOKEN_MINUS_MINUS;
+      tok.kind = TOKEN_MINUS_MINUS;
       tok.len = 2;
     } else if (*l->cursor == '=') {
       lexer_advance(l);
-      tok.type = TOKEN_MINUS_EQ;
+      tok.kind = TOKEN_MINUS_EQ;
       tok.len = 2;
     } else {
-      tok.type = TOKEN_MINUS;
+      tok.kind = TOKEN_MINUS;
       tok.len = 1;
     }
     return tok;
@@ -239,10 +239,10 @@ Token lexer_next_token(Lexer *l) {
     lexer_advance(l);
     if (*l->cursor == '=') {
       lexer_advance(l);
-      tok.type = TOKEN_STAR_EQ;
+      tok.kind = TOKEN_STAR_EQ;
       tok.len = 2;
     } else {
-      tok.type = TOKEN_STAR;
+      tok.kind = TOKEN_STAR;
       tok.len = 1;
     }
     return tok;
@@ -250,35 +250,35 @@ Token lexer_next_token(Lexer *l) {
     lexer_advance(l);
     if (*l->cursor == '=') {
       lexer_advance(l);
-      tok.type = TOKEN_SLASH_EQ;
+      tok.kind = TOKEN_SLASH_EQ;
       tok.len = 2;
     } else {
-      tok.type = TOKEN_SLASH;
+      tok.kind = TOKEN_SLASH;
       tok.len = 1;
     }
     return tok;
   case '(':
-    tok.type = TOKEN_LPAREN;
+    tok.kind = TOKEN_LPAREN;
     tok.len = 1;
     lexer_advance(l);
     return tok;
   case ')':
-    tok.type = TOKEN_RPAREN;
+    tok.kind = TOKEN_RPAREN;
     tok.len = 1;
     lexer_advance(l);
     return tok;
   case '{':
-    tok.type = TOKEN_LBRACE;
+    tok.kind = TOKEN_LBRACE;
     tok.len = 1;
     lexer_advance(l);
     return tok;
   case '}':
-    tok.type = TOKEN_RBRACE;
+    tok.kind = TOKEN_RBRACE;
     tok.len = 1;
     lexer_advance(l);
     return tok;
   case '~':
-    tok.type = TOKEN_TILDE;
+    tok.kind = TOKEN_TILDE;
     tok.len = 1;
     lexer_advance(l);
     return tok;
@@ -286,10 +286,10 @@ Token lexer_next_token(Lexer *l) {
     lexer_advance(l);
     if (*l->cursor == '=') {
       lexer_advance(l);
-      tok.type = TOKEN_NOT_EQ;
+      tok.kind = TOKEN_NOT_EQ;
       tok.len = 2;
     } else {
-      tok.type = TOKEN_BANG;
+      tok.kind = TOKEN_BANG;
       tok.len = 1;
     }
     return tok;
@@ -297,14 +297,14 @@ Token lexer_next_token(Lexer *l) {
     lexer_advance(l);
     if (*l->cursor == '&') {
       lexer_advance(l);
-      tok.type = TOKEN_AND_AND;
+      tok.kind = TOKEN_AND_AND;
       tok.len = 2;
     } else if (*l->cursor == '=') {
       lexer_advance(l);
-      tok.type = TOKEN_BIT_AND_EQ;
+      tok.kind = TOKEN_BIT_AND_EQ;
       tok.len = 2;
     } else {
-      tok.type = TOKEN_BIT_AND;
+      tok.kind = TOKEN_BIT_AND;
       tok.len = 1;
     }
     return tok;
@@ -312,14 +312,14 @@ Token lexer_next_token(Lexer *l) {
     lexer_advance(l);
     if (*l->cursor == '|') {
       lexer_advance(l);
-      tok.type = TOKEN_OR_OR;
+      tok.kind = TOKEN_OR_OR;
       tok.len = 2;
     } else if (*l->cursor == '=') {
       lexer_advance(l);
-      tok.type = TOKEN_BIT_OR_EQ;
+      tok.kind = TOKEN_BIT_OR_EQ;
       tok.len = 2;
     } else {
-      tok.type = TOKEN_BIT_OR;
+      tok.kind = TOKEN_BIT_OR;
       tok.len = 1;
     }
     return tok;
@@ -327,10 +327,10 @@ Token lexer_next_token(Lexer *l) {
     lexer_advance(l);
     if (*l->cursor == '=') {
       lexer_advance(l);
-      tok.type = TOKEN_BIT_XOR_EQ;
+      tok.kind = TOKEN_BIT_XOR_EQ;
       tok.len = 2;
     } else {
-      tok.type = TOKEN_BIT_XOR;
+      tok.kind = TOKEN_BIT_XOR;
       tok.len = 1;
     }
     return tok;
@@ -338,10 +338,10 @@ Token lexer_next_token(Lexer *l) {
     lexer_advance(l);
     if (*l->cursor == '=') {
       lexer_advance(l);
-      tok.type = TOKEN_EQ_EQ;
+      tok.kind = TOKEN_EQ_EQ;
       tok.len = 2;
     } else {
-      tok.type = TOKEN_ASSIGN;
+      tok.kind = TOKEN_ASSIGN;
       tok.len = 1;
     }
     return tok;
@@ -351,18 +351,18 @@ Token lexer_next_token(Lexer *l) {
       lexer_advance(l);
       if (*l->cursor == '=') {
         lexer_advance(l);
-        tok.type = TOKEN_LSHIFT_EQ;
+        tok.kind = TOKEN_LSHIFT_EQ;
         tok.len = 3;
       } else {
-        tok.type = TOKEN_LSHIFT;
+        tok.kind = TOKEN_LSHIFT;
         tok.len = 2;
       }
     } else if (*l->cursor == '=') {
       lexer_advance(l);
-      tok.type = TOKEN_LESS_EQ;
+      tok.kind = TOKEN_LESS_EQ;
       tok.len = 2;
     } else {
-      tok.type = TOKEN_LESS;
+      tok.kind = TOKEN_LESS;
       tok.len = 1;
     }
     return tok;
@@ -372,18 +372,18 @@ Token lexer_next_token(Lexer *l) {
       lexer_advance(l);
       if (*l->cursor == '=') {
         lexer_advance(l);
-        tok.type = TOKEN_RSHIFT_EQ;
+        tok.kind = TOKEN_RSHIFT_EQ;
         tok.len = 3;
       } else {
-        tok.type = TOKEN_RSHIFT;
+        tok.kind = TOKEN_RSHIFT;
         tok.len = 2;
       }
     } else if (*l->cursor == '=') {
       lexer_advance(l);
-      tok.type = TOKEN_GREATER_EQ;
+      tok.kind = TOKEN_GREATER_EQ;
       tok.len = 2;
     } else {
-      tok.type = TOKEN_GREATER;
+      tok.kind = TOKEN_GREATER;
       tok.len = 1;
     }
     return tok;
@@ -391,10 +391,10 @@ Token lexer_next_token(Lexer *l) {
     lexer_advance(l);
     if (*l->cursor == '=') {
       lexer_advance(l);
-      tok.type = TOKEN_PERCENT_EQ;
+      tok.kind = TOKEN_PERCENT_EQ;
       tok.len = 2;
     } else {
-      tok.type = TOKEN_PERCENT;
+      tok.kind = TOKEN_PERCENT;
       tok.len = 1;
     }
     return tok;
@@ -429,7 +429,7 @@ Token lexer_next_token(Lexer *l) {
       lexer_advance(l);
     }
 
-    tok.type = TOKEN_INT_LITERAL;
+    tok.kind = TOKEN_INT_LITERAL;
     tok.len = (int)(l->cursor - tok.start);
     tok.int_literal_val = int_literal_val;
     return tok;
@@ -440,7 +440,7 @@ Token lexer_next_token(Lexer *l) {
       lexer_advance(l);
     }
     tok.len = (int)(l->cursor - tok.start);
-    tok.type = kw_token_type(&tok);
+    tok.kind = kw_token_type(&tok);
 
     return tok;
   }

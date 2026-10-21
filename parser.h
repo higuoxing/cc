@@ -148,10 +148,10 @@ typedef enum {
   AST_SWITCH,
   AST_VAR,
   AST_WHILE,
-} AstType;
+} AstKind;
 
 typedef struct AstNode {
-  AstType type;
+  AstKind kind;
   struct AstNode *next; /* Linked list of statements inside a block. */
   union {
     struct {
