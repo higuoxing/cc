@@ -131,14 +131,14 @@ void lexer_advance(Lexer *l) {
 void skip_whitespace(Lexer *l) {
   for (;;) {
     if (*l->cursor == ' ' || *l->cursor == '\t' || *l->cursor == '\n' ||
-        *l->cursor == '\r') {
+        *l->cursor == '\r' || *l->cursor == '\f' || *l->cursor == '\v') {
       lexer_advance(l);
       continue;
     }
 
     if (*l->cursor == '/' && l->cursor[1] == '/') {
       /* Line comment: skip to the end of the line. */
-      while (*l->cursor != '\0' && *l->cursor != '\n')
+      while (*l->cursor != '\0' && *l->cursor != '\n' && *l->cursor != '\r')
         lexer_advance(l);
       continue;
     }
@@ -435,8 +435,8 @@ Token lexer_next_token(Lexer *l) {
     return tok;
   }
 
-  if (isalpha(*l->cursor) || *l->cursor == '_') {
-    while (isalnum(*l->cursor) || *l->cursor == '_') {
+  if (isalpha((unsigned char)*l->cursor) || *l->cursor == '_') {
+    while (isalnum((unsigned char)*l->cursor) || *l->cursor == '_') {
       lexer_advance(l);
     }
     tok.len = (int)(l->cursor - tok.start);

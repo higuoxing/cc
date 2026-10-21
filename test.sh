@@ -353,6 +353,10 @@ check 42 'int main() { int a = 0; return 1 ? a = 1, a + 41 : 0; }'
 check 42 'int main() { int a = 0; if (a = 1, a == 1) return 42; return 0; }'
 check 42 'int main() { int a = 0; return a = 41, a + 1; }'
 check 42 'int main() { switch (0) { default: return -1; case 0: return 42; } return -1; }'
+check 42 $'int main() { // comment\r\n return 42; }' comment-crlf
+check 42 $'int main() { // comment\r return 42; }' comment-cr
+check 42 $'int\fmain() { return 42; }' whitespace-ff
+check 42 $'int\vmain() { return 42; }' whitespace-vt
 
 check_error missing-plus-rhs 'int main() { return 1 +; }' '1:24: error: expect expr'
 check_error missing-sub-rhs 'int main() { return 1 -; }' '1:24: error: expect expr'
