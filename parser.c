@@ -1315,66 +1315,22 @@ static AstNode *parse_label_stmt(Parser *p) {
 }
 
 /* Evaluate an integer constant expression (C11 6.6), used for case labels. */
+static int64_t checked_int(Parser *p, int64_t val) {
+  if (val < INT32_MIN || val > INT32_MAX)
+    parse_error(p, "integer overflow in constant expression");
+  return val;
+}
 static int64_t eval_const_expr(Parser *p, AstNode *expr) {
+  int64_t lhs, rhs;
   switch (expr->type) {
   case AST_INT_LITERAL:
     return expr->d.int_literal.val;
   case AST_NEG:
-    return -eval_const_expr(p, expr->d.unary.operand);
+    return checked_int(p, -eval_const_expr(p, expr->d.unary.operand));
   case AST_BITWISE_NOT:
-    return ~eval_const_expr(p, expr->d.unary.operand);
+    return checked_int(p, ~eval_const_expr(p, expr->d.unary.operand));
   case AST_LOGICAL_NOT:
     return !eval_const_expr(p, expr->d.unary.operand);
-  case AST_ADD:
-    return eval_const_expr(p, expr->d.binary.lhs) +
-           eval_const_expr(p, expr->d.binary.rhs);
-  case AST_SUB:
-    return eval_const_expr(p, expr->d.binary.lhs) -
-           eval_const_expr(p, expr->d.binary.rhs);
-  case AST_MUL:
-    return eval_const_expr(p, expr->d.binary.lhs) *
-           eval_const_expr(p, expr->d.binary.rhs);
-  case AST_DIV:
-  case AST_MOD: {
-    int64_t lhs = eval_const_expr(p, expr->d.binary.lhs);
-    int64_t rhs = eval_const_expr(p, expr->d.binary.rhs);
-    if (rhs == 0)
-      parse_error(p, "division by zero in constant expression");
-    return expr->type == AST_DIV ? lhs / rhs : lhs % rhs;
-  }
-  case AST_LSHIFT:
-    return eval_const_expr(p, expr->d.binary.lhs)
-           << eval_const_expr(p, expr->d.binary.rhs);
-  case AST_RSHIFT:
-    return eval_const_expr(p, expr->d.binary.lhs) >>
-           eval_const_expr(p, expr->d.binary.rhs);
-  case AST_LT:
-    return eval_const_expr(p, expr->d.binary.lhs) <
-           eval_const_expr(p, expr->d.binary.rhs);
-  case AST_LE:
-    return eval_const_expr(p, expr->d.binary.lhs) <=
-           eval_const_expr(p, expr->d.binary.rhs);
-  case AST_GT:
-    return eval_const_expr(p, expr->d.binary.lhs) >
-           eval_const_expr(p, expr->d.binary.rhs);
-  case AST_GE:
-    return eval_const_expr(p, expr->d.binary.lhs) >=
-           eval_const_expr(p, expr->d.binary.rhs);
-  case AST_EQ:
-    return eval_const_expr(p, expr->d.binary.lhs) ==
-           eval_const_expr(p, expr->d.binary.rhs);
-  case AST_NE:
-    return eval_const_expr(p, expr->d.binary.lhs) !=
-           eval_const_expr(p, expr->d.binary.rhs);
-  case AST_BIT_AND:
-    return eval_const_expr(p, expr->d.binary.lhs) &
-           eval_const_expr(p, expr->d.binary.rhs);
-  case AST_BIT_XOR:
-    return eval_const_expr(p, expr->d.binary.lhs) ^
-           eval_const_expr(p, expr->d.binary.rhs);
-  case AST_BIT_OR:
-    return eval_const_expr(p, expr->d.binary.lhs) |
-           eval_const_expr(p, expr->d.binary.rhs);
   case AST_LOGICAL_AND: {
     /* Preserve short-circuit semantics, so 0 && (1 / 0) is valid. */
     int64_t lhs = eval_const_expr(p, expr->d.binary.lhs);
@@ -1384,9 +1340,74 @@ static int64_t eval_const_expr(Parser *p, AstNode *expr) {
     int64_t lhs = eval_const_expr(p, expr->d.binary.lhs);
     return lhs ? 1 : eval_const_expr(p, expr->d.binary.rhs) != 0;
   }
+  case AST_ADD:
+  case AST_SUB:
+  case AST_MUL:
+  case AST_DIV:
+  case AST_MOD:
+  case AST_LSHIFT:
+  case AST_RSHIFT:
+  case AST_LT:
+  case AST_LE:
+  case AST_GT:
+  case AST_GE:
+  case AST_EQ:
+  case AST_NE:
+  case AST_BIT_AND:
+  case AST_BIT_XOR:
+  case AST_BIT_OR:
+    break;
   default:
     /* AST_VAR, AST_ASSIGN, increments, and so on are not constant. */
     parse_error(p, "case label is not an integer constant");
+  }
+
+  lhs = eval_const_expr(p, expr->d.binary.lhs);
+  rhs = eval_const_expr(p, expr->d.binary.rhs);
+
+  switch (expr->type) {
+  case AST_ADD:
+    return checked_int(p, lhs + rhs);
+  case AST_SUB:
+    return checked_int(p, lhs - rhs);
+  case AST_MUL:
+    return checked_int(p, lhs * rhs);
+  case AST_DIV:
+  case AST_MOD:
+    if (rhs == 0)
+      parse_error(p, "division by zero in constant expression");
+    return checked_int(p, expr->type == AST_DIV ? lhs / rhs : lhs % rhs);
+  case AST_LSHIFT:
+    if (rhs < 0 || rhs >= 32)
+      parse_error(p, "invalid shift count in constant expression");
+    if (lhs < 0)
+      parse_error(p, "left shift of negative value in constant expression");
+    checked_int(p, lhs);
+    return checked_int(p, lhs << rhs);
+  case AST_RSHIFT:
+    if (rhs < 0 || rhs >= 32)
+      parse_error(p, "invalid shift count in constant expression");
+    return lhs >> rhs;
+  case AST_LT:
+    return lhs < rhs;
+  case AST_LE:
+    return lhs <= rhs;
+  case AST_GT:
+    return lhs > rhs;
+  case AST_GE:
+    return lhs >= rhs;
+  case AST_EQ:
+    return lhs == rhs;
+  case AST_NE:
+    return lhs != rhs;
+  case AST_BIT_AND:
+    return checked_int(p, lhs & rhs);
+  case AST_BIT_XOR:
+    return checked_int(p, lhs ^ rhs);
+  case AST_BIT_OR:
+    return checked_int(p, lhs | rhs);
+  default:
+    parse_error(p, "invalid constant expression");
   }
 }
 
