@@ -50,19 +50,20 @@ typedef struct GotoRef {
 } GotoRef;
 
 /*
- * Function definitions seen so far. Unlike the per-function workspace,
- * this table survives the whole translation unit.
+ * Function declarations and definitions seen so far; persists across the
+ * translation unit. In C11, f() doesn't supply a prototype (6.7.6.3).
  */
 typedef struct Function {
   Token name;
   int nparams;
+  int has_prototype; /* 0 for a declaration with an empty argument list. */
   int is_defined; /* 1 once a definition has been seen. */
   struct Function *next;
 } Function;
 
 /*
- * A function call whose target is validated after the translation unit is
- * parsed, since a function may be called before it is defined.
+ * A function call whose argument count is checked against a visible
+ * prototype or later compatible definition.
  */
 typedef struct CallRef {
   Token name; /* Called function. */

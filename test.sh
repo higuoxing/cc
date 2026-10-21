@@ -320,7 +320,6 @@ check 42 'int foo() { return 40; } int main() { return foo() + 2; }'
 check 42 'int foo() { return 42; } int main() { foo(); return 42; }'
 check 42 'int foo() { return 21; } int main() { return foo() + foo(); }'
 check 42 'int foo() { return 42; } int bar() { return foo(); } int main() { return bar(); }'
-check 42 'int main() { return foo(); } int foo() { return 42; }'
 check 3 'int one() { return 1; } int main() { return one() + one() + one(); }'
 check 127 'int foo() { return 40; } int main() { return 1 + (2 + foo()) * 3; }'
 check 42 'int add(int a, int b) { return a + b; } int main() { return add(40, 2); }'
@@ -357,6 +356,9 @@ check 42 $'int main() { // comment\r\n return 42; }' comment-crlf
 check 42 $'int main() { // comment\r return 42; }' comment-cr
 check 42 $'int\fmain() { return 42; }' whitespace-ff
 check 42 $'int\vmain() { return 42; }' whitespace-vt
+check 42 'int f(int); int f(int x) {return x;} int main() { return f(42); }' prototype-unamed-name
+check 42 'int f(int y); int f(int x) {return x;} int main() { return f(42); }' prototype-different-param-name
+check 42 'int f(); int f(int x) {return x;} int main() {return f(42);}' prototype-unspecified-params
 
 check_error missing-plus-rhs 'int main() { return 1 +; }' '1:24: error: expect expr'
 check_error missing-sub-rhs 'int main() { return 1 -; }' '1:24: error: expect expr'
@@ -536,7 +538,7 @@ check_error redefinition \
 	    'int foo() { return 0; } int foo() { return 1; } int main() { return 0; }' \
 	    "1:29: error: redefinition of function 'foo'"
 check_error call-undefined 'int main() { return foo(); }' \
-	    "1:21: error: function 'foo' not defined"
+	    "1:21: error: function 'foo' not declared"
 check_error call-on-variable 'int main() { int a = 1; return a(); }' \
 	    '1:32: error: called object is not a function'
 check_error param-shadow 'int foo(int a) { int a = 42; return a; } int main() { return foo(24); }' \
@@ -548,9 +550,6 @@ check_error too-few-args 'int foo(int a) { return a; } int main() { return foo()
 check_error too-many-params \
 	    'int foo(int a, int b, int c, int d, int e, int f, int g) { return 0; } int main() { return 42; }' \
 	    '1:51: error: too many parameters'
-check_error declared-not-defined \
-	    'int foo(int a); int main() { return foo(1); }' \
-	    "1:37: error: function 'foo' declared but never defined"
 check_error missing-conditional-colon 'int main() { return 1 ? 2; }' \
 	    "1:26: error: expect ':'"
 check_error missing-conditional-then 'int main() { return 1 ? : 2; }' \
@@ -579,5 +578,7 @@ check_error octal-invalid-eight 'int main() { return 08; }' '1:21: error: invali
 check_error case-shift-negative 'int main() { switch (0) { case 1 << -1: return 1; default: return 0; } }' '1:39: error: invalid shift count in constant expression'
 check_error case-shift-32 'int main() { switch (0) { case 1 << 32: return 1; default: return 0; } }' '1:39: error: invalid shift count in constant expression'
 check_error case-overflow-mul 'int main() { switch (0) { case 2147483647 * 2147483647: return 1; default: return 0; } }' '1:55: error: integer overflow in constant expression'
+check_error function-no-declaration 'int main() { return missing(); } int missing() { return 1; }' "1:21: error: function 'missing' not declared"
+check_error conflicting-prototypes 'int f(int); int f(int x, int y); int main() { return 0; }' "1:17: error: conflicting declaration of function 'f'"
 
 printf 'All %d tests passed (%d execution, %d rejection).\n' "$((passed + rejected))" "$passed" "$rejected"

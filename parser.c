@@ -55,13 +55,22 @@ static void check_gotos(Parser *p);
 static void check_calls(Parser *p);
 static int64_t eval_const_expr(Parser *p, AstNode *expr);
 static AstNode *parse_block(Parser *p);
-static AstNode *parse_function(Parser *p);
+static AstNode *parse_external_declaration(Parser *p);
 static bool is_lvalue(AstType ty);
 static bool is_increment_op(AstType ty);
 static bool is_assignment_op(TokenType ty);
 
 static bool same_identifier(Token a, Token b) {
   return a.len == b.len && strncmp(a.start, b.start, a.len) == 0;
+}
+
+static Function *find_function(Parser *p, Token name) {
+  Function *fn;
+  for (fn = p->functions; fn != NULL; fn = fn->next) {
+    if (same_identifier(fn->name, name))
+      return fn;
+  }
+  return NULL;
 }
 
 static LocalVar *find_local_var(Parser *p, Token name) {
@@ -248,9 +257,7 @@ static AstNode *parse_unary(Parser *p) {
 /*
  * postfix-expression:
  *   identifier '(' argument-expression-list_opt ')'
- * (C11 6.5.2.2; the callee and the argument count are validated after
- *  the translation unit is parsed, since a function may be called before
- *  it is defined. At most six arguments, matching the register ABI.)
+ * (C11 6.5.2.2; a function must be declared before its use.)
  */
 static AstNode *parse_call_expr(Parser *p) {
   AstNode *call;
@@ -264,6 +271,10 @@ static AstNode *parse_call_expr(Parser *p) {
   ref->loc = p->current;
   ref->next = p->call_refs;
   p->call_refs = ref;
+
+  if (find_function(p, ref->name) == NULL)
+    parse_error(p, "function '%.*s' not declared", ref->name.len,
+                ref->name.start);
 
   call = new_ast_node(p, AST_CALL);
   call->d.call.name = p->current;
@@ -931,8 +942,8 @@ static AstNode *parse_block(Parser *p) {
 }
 
 /*
- * Every call must name a function defined somewhere in the translation
- * unit; a function may be called before it is defined.
+ * (C11 6.5.2.2) A function declaration is sufficient for code generation:
+ * definitions may be in another translation unit.
  */
 static void check_calls(Parser *p) {
   CallRef *ref;
@@ -940,20 +951,8 @@ static void check_calls(Parser *p) {
   for (ref = p->call_refs; ref; ref = ref->next) {
     Function *func;
 
-    for (func = p->functions; func; func = func->next)
-      if (same_identifier(func->name, ref->name))
-        break;
-    if (!func) {
-      p->current = ref->loc;
-      parse_error(p, "function '%.*s' not defined", ref->name.len,
-                  ref->name.start);
-    }
-    if (!func->is_defined) {
-      p->current = ref->loc;
-      parse_error(p, "function '%.*s' declared but never defined",
-                  ref->name.len, ref->name.start);
-    }
-    if (ref->nargs != func->nparams) {
+    func = find_function(p, ref->name);
+    if (func && func->has_prototype && ref->nargs != func->nparams) {
       p->current = ref->loc;
       parse_error(p, "wrong number of arguments to function '%.*s'",
                   ref->name.len, ref->name.start);
@@ -983,24 +982,19 @@ static void check_gotos(Parser *p) {
 }
 
 /*
- * function-definition:
- *   'int' identifier '(' parameter-list_opt ')' compound-statement
- * (C11 6.9.1, restricted to int return type and int parameters)
+ * external-declaration:
+ *   function-definition
+ *   declaration
  */
-/*
- * function-definition / function-declaration:
- *   'int' identifier '(' parameter-list_opt ')' compound-statement
- *   'int' identifier '(' parameter-list_opt ')' ';'
- * (C11 6.9.1 / 6.7.6.3, restricted to int return type and int
- *  parameters; a declaration returns no AST node)
- */
-static AstNode *parse_function(Parser *p) {
+static AstNode *parse_external_declaration(Parser *p) {
   AstNode *fn;
   Function *func;
   LocalVar *var;
-  Token name;
+  Token func_name;
   int nparams = 0;
-  int is_definition;
+  int definition = 0;
+  int explicit_params = 0;
+  int unamed_param = 0;
 
   reset_function_state(p);
   fn = new_ast_node(p, AST_FUNCTION);
@@ -1009,13 +1003,14 @@ static AstNode *parse_function(Parser *p) {
     parse_error(p, "expect function name");
 
   fn->d.function.name = p->current;
-  name = p->current;
+  func_name = p->current;
   /* Consume <function_name> */
   parser_advance(p);
 
   parse_expect(p, TOKEN_LPAREN, "expect '('");
 
   if (p->current.type != TOKEN_RPAREN) {
+    explicit_params = 1;
     for (;;) {
       LocalVar *param;
       Token param_name;
@@ -1025,28 +1020,29 @@ static AstNode *parse_function(Parser *p) {
       if (nparams == 6)
         parse_error(p, "too many parameters");
       parse_expect(p, TOKEN_INT, "expect 'int'");
-      if (p->current.type != TOKEN_IDENTIFIER)
-        parse_error(p, "expect parameter name");
 
-      /* The duplicate check runs while 'current' is the name itself. */
-      for (var = p->locals; var && var->scope_depth == 0; var = var->next)
-        if (same_identifier(var->name, p->current))
-          parse_error(p, "duplicate local variable");
+      if (p->current.type == TOKEN_IDENTIFIER) {
+        param_name = p->current;
+        for (var = p->locals; var && var->scope_depth == 0; var = var->next) {
+          if (same_identifier(var->name, param_name))
+            parse_error(p, "duplicate local variable");
+        }
 
-      param_name = p->current;
-      parser_advance(p);
+        /* Consume param name */
+        parser_advance(p);
 
-      param = (LocalVar *)calloc(1, sizeof(LocalVar));
-      if (!param)
-        parse_error(p, "out of memory");
-      param->name = param_name;
-      param->scope_depth = 0;
-      /* The usual offset convention: the slot is at -offset(%rbp).
-       * Parameters occupy the 8-byte slots closest to %rbp, and locals
-       * start below them via stack_size. */
-      param->offset = 8 * (nparams + 1);
-      param->next = p->locals;
-      p->locals = param;
+        param = (LocalVar *)calloc(1, sizeof(LocalVar));
+        if (!param)
+          parse_error(p, "out of memory");
+        param->name = param_name;
+        param->scope_depth = 0;
+        param->offset = 8 * (nparams + 1);
+        param->next = p->locals;
+        p->locals = param;
+      } else {
+        unamed_param = 1;
+      }
+
       nparams++;
 
       if (p->current.type == TOKEN_COMMA) {
@@ -1055,47 +1051,55 @@ static AstNode *parse_function(Parser *p) {
       }
       break;
     }
-
-    /* Snapshot the parameter chain (reversed: last parameter first);
-     * codegen counts and maps registers accordingly. Locals start below
-     * the parameter slots. */
-    fn->d.function.params = p->locals;
-    p->stack_size = 8 * nparams;
   }
   parse_expect(p, TOKEN_RPAREN, "expect ')'");
 
-  /* A ';' makes this a declaration, a '{' makes this a definition. */
-  is_definition = p->current.type == TOKEN_LBRACE;
+  if (p->current.type != TOKEN_SEMICOLON && p->current.type != TOKEN_LBRACE)
+    parse_error(p, "expect ';' or '{'");
 
-  for (func = p->functions; func; func = func->next)
-    if (same_identifier(func->name, name))
-      break;
+  definition = p->current.type == TOKEN_LBRACE;
+  if (definition && unamed_param)
+    parse_error(p, "expect parameter name in function definition");
 
+  func = find_function(p, func_name);
   if (func) {
-    /* A second definition is an error; declarations may precede or
-     * follow the definition freely, like any redeclaration. */
-    if (func->is_defined && is_definition) {
-      p->current = name;
-      parse_error(p, "redefinition of function '%.*s'", name.len, name.start);
+    if (definition && func->is_defined) {
+      p->current = func_name;
+      parse_error(p, "redefinition of function '%.*s'", func_name.len,
+                  func_name.start);
     }
-    if (is_definition)
-      func->is_defined = 1;
+
+    if (func->has_prototype && (explicit_params || definition) &&
+        func->nparams != nparams) {
+      p->current = func_name;
+      parse_error(p, "conflicting declaration of function '%.*s'",
+                  func_name.len, func_name.start);
+    }
+
+    if (explicit_params || definition) {
+      func->nparams = nparams;
+      func->has_prototype = 1;
+    }
   } else {
     func = (Function *)calloc(1, sizeof(Function));
     if (!func)
       parse_error(p, "out of memory");
-    func->name = name;
+    func->name = func_name;
     func->nparams = nparams;
-    func->is_defined = is_definition;
+    func->has_prototype = explicit_params || definition;
     func->next = p->functions;
     p->functions = func;
   }
 
-  if (!is_definition) {
-    parse_expect(p, TOKEN_SEMICOLON, "expect ';'");
+  if (!definition) {
+    /* Consume ';' */
+    parser_advance(p);
     return NULL;
   }
 
+  func->is_defined = 1;
+  fn->d.function.params = p->locals;
+  p->stack_size = 8 * nparams;
   fn->d.function.body = parse_block(p);
   check_gotos(p);
   fn->d.function.stack_size = p->stack_size;
@@ -1582,7 +1586,7 @@ static AstNode *parse_stmt(Parser *p, bool allow_decl) {
 
 /*
  * translation-unit:
- *   function-definition*
+ *   external-definition*
  * (C11 6.9)
  */
 AstNode *parse_translation_unit(const char *filename, const char *source) {
@@ -1598,7 +1602,7 @@ AstNode *parse_translation_unit(const char *filename, const char *source) {
 
   while (p.current.type != TOKEN_EOF) {
     /* Declarations return no AST node. */
-    AstNode *fn = parse_function(&p);
+    AstNode *fn = parse_external_declaration(&p);
     if (fn) {
       *tail = fn;
       tail = &(*tail)->next;
