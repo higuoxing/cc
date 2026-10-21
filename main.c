@@ -36,14 +36,22 @@ char *read_source(const char *path) {
     exit(1);
   }
 
-  fseek(file, 0, SEEK_END);
+  if (fseek(file, 0, SEEK_END) != 0) {
+    fclose(file);
+    fprintf(stderr, "failed to seek file '%s'\n", path);
+    exit(1);
+  }
   len = ftell(file);
   if (len < 0) {
     fclose(file);
     fprintf(stderr, "failed to measure file size '%s'\n", path);
     exit(1);
   }
-  fseek(file, 0, SEEK_SET);
+  if (fseek(file, 0, SEEK_SET) != 0) {
+    fclose(file);
+    fprintf(stderr, "failed to seek file '%s'\n", path);
+    exit(1);
+  }
 
   buf = malloc(len + 1);
   if (!buf) {
@@ -53,6 +61,12 @@ char *read_source(const char *path) {
   }
 
   bytes_read = fread(buf, 1, (size_t)len, file);
+  if (bytes_read != (size_t)len) {
+    fprintf(stderr, "failed to read complete file '%s'\n", path);
+    free(buf);
+    fclose(file);
+    exit(1);
+  }
   buf[bytes_read] = '\0';
 
   fclose(file);
@@ -75,9 +89,9 @@ static char *derive_output_path(const char *input) {
   size_t base_len;
   char *path;
 
-  slash = strchr(input, '/');
+  slash = strrchr(input, '/');
   name = slash ? slash + 1 : input;
-  dot = strchr(name, '.');
+  dot = strrchr(name, '.');
   /* A leading dot is part of a hidden file name, not an extension. */
   base_len = dot && dot != name ? (size_t)(dot - input) : strlen(input);
 
