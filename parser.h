@@ -31,6 +31,7 @@ typedef enum {
 
 typedef struct Type {
   TypeKind kind;
+  int size; /* In bytes. */
   struct Type *base; /* Pointed-to type for TYPE_PTR */
 } Type;
 

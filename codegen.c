@@ -28,8 +28,10 @@
  */
 static int label_seq;
 
-/* Number of unbalanced pushq instructions in the current expression, so
- * that a call site can restore 16-byte stack alignment. */
+/*
+ * Number of unbalanced pushq instructions in the current expression, so
+ * that a call site can restore 16-byte stack alignment.
+ */
 static int push_depth;
 
 /*
@@ -44,22 +46,42 @@ static const char *argregs[] = {"%rdi", "%rsi", "%rdx", "%rcx", "%r8", "%r9"};
 static const char *argregs32[] = {"%edi", "%esi", "%edx",
                                   "%ecx", "%r8d", "%r9d"};
 
+static void codegen_expr(AstNode *expr);
+
 static void codegen_addr(AstNode *expr) {
-  if (expr->kind != AST_VAR) {
+  switch (expr->kind) {
+  case AST_VAR:
+    fprintf(out, "\tleaq -%d(%%rbp), %%rax\n", expr->d.variable.var->offset);
+    break;
+  case AST_DEREF:
+    /* The pointer value is the address. */
+    codegen_expr(expr->d.unary.operand);
+    break;
+  default:
     fprintf(stderr, "invalid address expr in codegen\n");
     exit(1);
   }
-  /* Both locals and parameters use the same convention: the slot is at
-   * -offset(%rbp). Parameters sit in the 8-byte slots closest to %rbp,
-   * locals below them. */
-  fprintf(out, "\tleaq -%d(%%rbp), %%rax\n", expr->d.variable.var->offset);
 }
 
 static void codegen_expr(AstNode *expr) {
   switch (expr->kind) {
   case AST_VAR:
     codegen_addr(expr);
-    fprintf(out, "\tmovl (%%rax), %%eax\n");
+    if (expr->type->kind == TYPE_PTR)
+      fprintf(out, "\tmovq (%%rax), %%rax\n");
+    else
+      fprintf(out, "\tmovl (%%rax), %%eax\n");
+    break;
+  case AST_ADDR:
+    /* The address is the value. */
+    codegen_addr(expr->d.unary.operand);
+    break;
+  case AST_DEREF:
+    codegen_expr(expr->d.unary.operand);
+    if (expr->type->kind == TYPE_PTR)
+      fprintf(out, "\tmovq (%%rax), %%rax\n");
+    else
+      fprintf(out, "\tmovl (%%rax), %%eax\n");
     break;
   case AST_ASSIGN:
     codegen_expr(expr->d.binary.rhs);
@@ -68,8 +90,13 @@ static void codegen_expr(AstNode *expr) {
     codegen_addr(expr->d.binary.lhs);
     fprintf(out, "\tpopq %%rcx\n");
     push_depth--;
-    fprintf(out, "\tmovl %%ecx, (%%rax)\n");
-    fprintf(out, "\tmovl %%ecx, %%eax\n");
+    if (expr->type->kind == TYPE_PTR) {
+      fprintf(out, "\tmovq %%rcx, (%%rax)\n");
+      fprintf(out, "\tmovq %%rcx, %%rax\n");
+    } else {
+      fprintf(out, "\tmovl %%ecx, (%%rax)\n");
+      fprintf(out, "\tmovl %%ecx, %%eax\n");
+    }
     break;
   case AST_INT_LITERAL:
     /* movl $VAL, %eax */

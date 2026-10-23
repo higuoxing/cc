@@ -24,8 +24,8 @@
 #include "lexer.h"
 #include "parser.h"
 
-static Type builtin_type_int = {.kind = TYPE_INT, .base = NULL};
-static Type builtin_type_void = {.kind = TYPE_VOID, .base = NULL};
+static Type builtin_type_int = {.kind = TYPE_INT, .size = 4, .base = NULL};
+static Type builtin_type_void = {.kind = TYPE_VOID, .size = 0, .base = NULL};
 
 static LocalVar *declare_local_var(Parser *p, Token name, Type *type);
 static AstNode *new_ast_node(Parser *p, AstKind kind);
@@ -87,7 +87,7 @@ static LocalVar *find_local_var(Parser *p, Token name) {
   return NULL;
 }
 
-static int type_size(Type *type) { return type->kind == TYPE_PTR ? 8 : 4; }
+static int type_size(Type *type) { return type->size; }
 
 static LocalVar *declare_local_var(Parser *p, Token name, Type *type) {
   LocalVar *var;
@@ -144,6 +144,7 @@ static Type *ptr_type(Parser *p, Type *base) {
   if (!type)
     parse_error(p, "out of memory");
   type->kind = TYPE_PTR;
+  type->size = 8;
   type->base = base;
   return type;
 }
@@ -1091,6 +1092,7 @@ static AstNode *parse_external_declaration(Parser *p) {
         if (!param)
           parse_error(p, "out of memory");
         param->name = param_name;
+        param->type = &builtin_type_int;
         param->scope_depth = 0;
         param->offset = 8 * (nparams + 1);
         param->next = p->locals;
