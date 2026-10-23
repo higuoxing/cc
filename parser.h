@@ -23,8 +23,20 @@
 
 typedef struct AstNode AstNode;
 
+typedef enum {
+  TYPE_INT,
+  TYPE_PTR,
+  TYPE_VOID,
+} TypeKind;
+
+typedef struct Type {
+  TypeKind kind;
+  struct Type *base; /* Pointed-to type for TYPE_PTR */
+} Type;
+
 typedef struct LocalVar {
   Token name;
+  Type *type;
   int offset; /* Positive distance below %rbp */
   int scope_depth;
   struct LocalVar *next;
@@ -56,6 +68,7 @@ typedef struct GotoRef {
 typedef struct Function {
   Token name;
   int nparams;
+  Type *param_types[6];
   int has_prototype; /* 0 for a declaration with an empty argument list. */
   int is_defined; /* 1 once a definition has been seen. */
   struct Function *next;
@@ -103,6 +116,7 @@ typedef struct {
 
 typedef enum {
   AST_ADD,
+  AST_ADDR,
   AST_ASSIGN,
   AST_BIT_AND,
   AST_BIT_OR,
@@ -116,6 +130,7 @@ typedef enum {
   AST_CONDITIONAL,
   AST_CONTINUE,
   AST_DECL,
+  AST_DEREF,
   AST_DIV,
   AST_DO,
   AST_EQ,
@@ -152,6 +167,8 @@ typedef enum {
 
 typedef struct AstNode {
   AstKind kind;
+  Type *type; /* Inferred expression type. */
+  Token loc;
   struct AstNode *next; /* Linked list of statements inside a block. */
   union {
     struct {

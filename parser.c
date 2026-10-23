@@ -24,8 +24,13 @@
 #include "lexer.h"
 #include "parser.h"
 
-static LocalVar *declare_local_var(Parser *p, Token name);
+static Type builtin_type_int = {.kind = TYPE_INT, .base = NULL};
+static Type builtin_type_void = {.kind = TYPE_VOID, .base = NULL};
+
+static LocalVar *declare_local_var(Parser *p, Token name, Type *type);
 static AstNode *new_ast_node(Parser *p, AstKind kind);
+static AstNode *new_expr(Parser *p, AstKind kind, Type *type);
+static Type *ptr_type(Parser *p, Type *base);
 static void reset_function_state(Parser *p);
 static void parser_advance(Parser *p);
 static void parse_error(Parser *p, const char *fmt, ...)
@@ -82,8 +87,13 @@ static LocalVar *find_local_var(Parser *p, Token name) {
   return NULL;
 }
 
-static LocalVar *declare_local_var(Parser *p, Token name) {
+static int type_size(Type *type) { return type->kind == TYPE_PTR ? 8 : 4; }
+
+static LocalVar *declare_local_var(Parser *p, Token name, Type *type) {
   LocalVar *var;
+  int size;
+
+  size = type_size(type);
   for (var = p->locals; var && var->scope_depth == p->scope_depth;
        var = var->next) {
     if (same_identifier(var->name, name))
@@ -102,21 +112,40 @@ static LocalVar *declare_local_var(Parser *p, Token name) {
   if (!var)
     parse_error(p, "out of memory");
   var->name = name;
+  var->type = type;
   var->scope_depth = p->scope_depth;
-  p->stack_size += 4; /* All locals are 32-bit int for now. */
+  p->stack_size = (p->stack_size + size - 1) / size * size + size;
   var->offset = p->stack_size;
   var->next = p->locals;
   p->locals = var;
   return var;
 }
 
-static AstNode *new_ast_node(Parser *p, AstKind ty) {
+static AstNode *new_ast_node(Parser *p, AstKind kind) {
   AstNode *node;
   node = calloc(1, sizeof(AstNode));
   if (!node)
     parse_error(p, "out of memory");
-  node->kind = ty;
+  node->kind = kind;
+  node->loc = p->current;
+  node->type = &builtin_type_void;
   return node;
+}
+
+static AstNode *new_expr(Parser *p, AstKind kind, Type *type) {
+  AstNode *node = new_ast_node(p, kind);
+  node->type = type;
+  return node;
+}
+
+static Type *ptr_type(Parser *p, Type *base) {
+  Type *type;
+  type = (Type *)calloc(1, sizeof(Type));
+  if (!type)
+    parse_error(p, "out of memory");
+  type->kind = TYPE_PTR;
+  type->base = base;
+  return type;
 }
 
 static void parser_advance(Parser *p) {
@@ -124,15 +153,6 @@ static void parser_advance(Parser *p) {
   p->lookahead = lexer_next_token(&p->lexer);
 }
 
-/*
- * Reset the per-function workspace. Function-scoped state (locals, labels,
- * pending gotos, the stack size, and the nesting counters) must not leak
- * between functions; only the function table survives the whole translation
- * unit. Blocks restore the locals list and scope depth by their own
- * discipline, so this is mostly defensive — except for stack_size, which
- * accumulates, and the label/goto tables, which are deliberately never
- * restored when a block ends.
- */
 static void reset_function_state(Parser *p) {
   p->locals = NULL;
   p->labels = NULL;
@@ -178,12 +198,7 @@ static void parse_expect(Parser *p, TokenKind t, const char *msg) {
   parser_advance(p);
 }
 
-/*
- * Only variables are lvalues. The results of assignment and prefix
- * increment/decrement are not lvalues in C11, so this matches GCC and Clang
- * in C mode.
- */
-static bool is_lvalue(AstKind ty) { return ty == AST_VAR; }
+static bool is_lvalue(AstKind ty) { return ty == AST_VAR || ty == AST_DEREF; }
 
 static bool is_increment_op(AstKind ty) {
   return ty == AST_PRE_INCREMENT || ty == AST_POST_INCREMENT;
@@ -202,14 +217,16 @@ static bool is_assignment_op(TokenKind ty) {
  * unary-expression:
  *   '-' unary-expression | '~' unary-expression | '!' unary-expression
  *   '++' unary-expression | '--' unary-expression
+ *   '&' unary-expression | '*' unary-expression
  *   postfix-expression
- * (C11 6.5.3; '&', '*', sizeof, and _Alignof are not implemented)
  */
 static AstNode *parse_unary(Parser *p) {
   if (p->current.kind == TOKEN_MINUS || p->current.kind == TOKEN_TILDE ||
       p->current.kind == TOKEN_BANG || p->current.kind == TOKEN_PLUS_PLUS ||
-      p->current.kind == TOKEN_MINUS_MINUS) {
+      p->current.kind == TOKEN_MINUS_MINUS ||
+      p->current.kind == TOKEN_BIT_AND || p->current.kind == TOKEN_STAR) {
     AstNode *node;
+    AstNode *operand;
     AstKind op;
     Token op_tok;
 
@@ -229,25 +246,45 @@ static AstNode *parse_unary(Parser *p) {
     case TOKEN_MINUS_MINUS:
       op = AST_PRE_DECREMENT;
       break;
+    case TOKEN_BIT_AND:
+      op = AST_ADDR;
+      break;
+    case TOKEN_STAR:
+      op = AST_DEREF;
+      break;
     default:
       fprintf(stderr, "unreachable %s:%d", __FILE__, __LINE__);
       exit(1);
     }
 
-    /* Consume '-' or '~' or '!' or '++' or '--' */
+    /* Consume '-' or '~' or '!' or '++' or '--' or '&' or '*' */
     op_tok = p->current;
     parser_advance(p);
-    node = new_ast_node(p, op);
-    node->d.unary.operand = parse_unary(p);
+    operand = parse_unary(p);
 
-    if ((op == AST_PRE_INCREMENT || op == AST_PRE_DECREMENT) &&
-        !is_lvalue(node->d.unary.operand->kind)) {
+    if (((op == AST_PRE_INCREMENT || op == AST_PRE_DECREMENT) &&
+         !is_lvalue(operand->kind)) ||
+        (op == AST_ADDR && !is_lvalue(operand->kind))) {
       /* Report at the operator, not at the token after the operand. */
       p->current = op_tok;
       parse_error(p, "invalid %s target",
-                  is_increment_op(op) ? "increment" : "decrement");
+                  op == AST_ADDR        ? "address-of"
+                  : is_increment_op(op) ? "increment"
+                                        : "decrement");
     }
 
+    if (op == AST_DEREF && operand->type->kind != TYPE_PTR)
+      parse_error(p, "invalid deref target");
+
+    node = new_expr(p, op,
+                    op == AST_DEREF  ? operand->type->base
+                    : op == AST_ADDR ? ptr_type(p, operand->type)
+                    : op == AST_NEG || op == AST_BITWISE_NOT ||
+                            op == AST_LOGICAL_NOT
+                        ? &builtin_type_int
+                        : operand->type /* pre/post increment */);
+    node->loc = op_tok;
+    node->d.unary.operand = operand;
     return node;
   }
 
@@ -257,7 +294,6 @@ static AstNode *parse_unary(Parser *p) {
 /*
  * postfix-expression:
  *   identifier '(' argument-expression-list_opt ')'
- * (C11 6.5.2.2; a function must be declared before its use.)
  */
 static AstNode *parse_call_expr(Parser *p) {
   AstNode *call;
@@ -276,7 +312,7 @@ static AstNode *parse_call_expr(Parser *p) {
     parse_error(p, "function '%.*s' not declared", ref->name.len,
                 ref->name.start);
 
-  call = new_ast_node(p, AST_CALL);
+  call = new_expr(p, AST_CALL, &builtin_type_int);
   call->d.call.name = p->current;
   /* Consume the function name. */
   parser_advance(p);
@@ -309,7 +345,6 @@ static AstNode *parse_call_expr(Parser *p) {
  *   primary-expression
  *   identifier '(' ')'
  *   postfix-expression '++' | postfix-expression '--'
- * (C11 6.5.2; the increment operand must be a modifiable lvalue, 6.5.2.4)
  */
 static AstNode *parse_postfix(Parser *p) {
   AstNode *left;
@@ -342,7 +377,7 @@ static AstNode *parse_postfix(Parser *p) {
 
     /* Consume '++' or '--' */
     parser_advance(p);
-    postfixed = new_ast_node(p, ty);
+    postfixed = new_expr(p, ty, left->type);
     postfixed->d.unary.operand = left;
     left = postfixed;
   }
@@ -353,12 +388,11 @@ static AstNode *parse_postfix(Parser *p) {
 /*
  * primary-expression:
  *   integer-constant | '(' expression ')' | identifier
- * (C11 6.5.1; only int literals, no string or character constants)
  */
 static AstNode *parse_primary(Parser *p) {
   if (p->current.kind == TOKEN_INT_LITERAL) {
     AstNode *expr;
-    expr = new_ast_node(p, AST_INT_LITERAL);
+    expr = new_expr(p, AST_INT_LITERAL, &builtin_type_int);
     expr->d.int_literal.val = p->current.int_literal_val;
 
     /* Consume integer literal */
@@ -380,7 +414,7 @@ static AstNode *parse_primary(Parser *p) {
     LocalVar *var = find_local_var(p, p->current);
     if (!var)
       parse_error(p, "undeclared identifier");
-    expr = new_ast_node(p, AST_VAR);
+    expr = new_expr(p, AST_VAR, var->type);
     expr->d.variable.var = var;
     /* Consume identifier. */
     parser_advance(p);
@@ -399,14 +433,22 @@ static AstNode *parse_primary(Parser *p) {
 static AstNode *parse_decl(Parser *p) {
   AstNode *decl;
   Token name;
+  Type *type;
 
+  type = &builtin_type_int;
   parse_expect(p, TOKEN_INT, "expect 'int'");
+  while (p->current.kind == TOKEN_STAR) {
+    type = ptr_type(p, type);
+    /* Consume '*' */
+    parser_advance(p);
+  }
+
   if (p->current.kind != TOKEN_IDENTIFIER)
     parse_error(p, "expect variable name");
 
   name = p->current;
   decl = new_ast_node(p, AST_DECL);
-  decl->d.decl.var = declare_local_var(p, name);
+  decl->d.decl.var = declare_local_var(p, name, type);
   /* Consume variable name. */
   parser_advance(p);
 
@@ -445,9 +487,9 @@ static AstNode *parse_multiplicative(Parser *p) {
     parser_advance(p);
 
     right = parse_unary(p);
-    node = new_ast_node(p, op == TOKEN_STAR
-                               ? AST_MUL
-                               : (op == TOKEN_SLASH ? AST_DIV : AST_MOD));
+    node = new_expr(
+        p, op == TOKEN_STAR ? AST_MUL : (op == TOKEN_SLASH ? AST_DIV : AST_MOD),
+        &builtin_type_int);
     node->d.binary.lhs = left;
     node->d.binary.rhs = right;
 
@@ -479,7 +521,7 @@ static AstNode *parse_additive(Parser *p) {
     parser_advance(p);
     right = parse_multiplicative(p);
 
-    node = new_ast_node(p, op == TOKEN_PLUS ? AST_ADD : AST_SUB);
+    node = new_expr(p, op == TOKEN_PLUS ? AST_ADD : AST_SUB, &builtin_type_int);
     node->d.binary.lhs = left;
     node->d.binary.rhs = right;
 
@@ -511,7 +553,8 @@ static AstNode *parse_shift(Parser *p) {
     parser_advance(p);
 
     right = parse_additive(p);
-    node = new_ast_node(p, op == TOKEN_LSHIFT ? AST_LSHIFT : AST_RSHIFT);
+    node = new_expr(p, op == TOKEN_LSHIFT ? AST_LSHIFT : AST_RSHIFT,
+                    &builtin_type_int);
     node->d.binary.lhs = left;
     node->d.binary.rhs = right;
 
@@ -564,7 +607,7 @@ static AstNode *parse_relational(Parser *p) {
     parser_advance(p);
 
     right = parse_shift(p);
-    node = new_ast_node(p, ty);
+    node = new_expr(p, ty, &builtin_type_int);
     node->d.binary.lhs = left;
     node->d.binary.rhs = right;
 
@@ -596,7 +639,7 @@ static AstNode *parse_equality(Parser *p) {
     parser_advance(p);
 
     right = parse_relational(p);
-    node = new_ast_node(p, op == TOKEN_EQ_EQ ? AST_EQ : AST_NE);
+    node = new_expr(p, op == TOKEN_EQ_EQ ? AST_EQ : AST_NE, &builtin_type_int);
     node->d.binary.lhs = left;
     node->d.binary.rhs = right;
 
@@ -625,7 +668,7 @@ static AstNode *parse_bitwise_and(Parser *p) {
     parser_advance(p);
 
     right = parse_equality(p);
-    node = new_ast_node(p, AST_BIT_AND);
+    node = new_expr(p, AST_BIT_AND, &builtin_type_int);
     node->d.binary.lhs = left;
     node->d.binary.rhs = right;
 
@@ -654,7 +697,7 @@ static AstNode *parse_bitwise_xor(Parser *p) {
     parser_advance(p);
 
     right = parse_bitwise_and(p);
-    node = new_ast_node(p, AST_BIT_XOR);
+    node = new_expr(p, AST_BIT_XOR, &builtin_type_int);
     node->d.binary.lhs = left;
     node->d.binary.rhs = right;
 
@@ -683,7 +726,7 @@ static AstNode *parse_bitwise_or(Parser *p) {
     parser_advance(p);
 
     right = parse_bitwise_xor(p);
-    node = new_ast_node(p, AST_BIT_OR);
+    node = new_expr(p, AST_BIT_OR, &builtin_type_int);
     node->d.binary.lhs = left;
     node->d.binary.rhs = right;
 
@@ -712,7 +755,7 @@ static AstNode *parse_logical_and(Parser *p) {
     parser_advance(p);
 
     right = parse_bitwise_or(p);
-    node = new_ast_node(p, AST_LOGICAL_AND);
+    node = new_expr(p, AST_LOGICAL_AND, &builtin_type_int);
     node->d.binary.lhs = left;
     node->d.binary.rhs = right;
 
@@ -741,7 +784,7 @@ static AstNode *parse_logical_or(Parser *p) {
     parser_advance(p);
 
     right = parse_logical_and(p);
-    node = new_ast_node(p, AST_LOGICAL_OR);
+    node = new_expr(p, AST_LOGICAL_OR, &builtin_type_int);
     node->d.binary.lhs = left;
     node->d.binary.rhs = right;
 
@@ -769,7 +812,7 @@ static AstNode *parse_expression(Parser *p) {
     /* Consume ',' */
     parser_advance(p);
     right = parse_assignment(p);
-    node = new_ast_node(p, AST_COMMA);
+    node = new_expr(p, AST_COMMA, right->type);
     node->d.binary.lhs = left;
     node->d.binary.rhs = right;
     left = node;
@@ -790,14 +833,19 @@ static AstNode *parse_conditional(Parser *p) {
   node = parse_logical_or(p);
   if (p->current.kind == TOKEN_QUESTION) {
     AstNode *cond = node;
+    AstNode *then_expr;
+    AstNode *else_expr;
 
     /* Consume '?' */
     parser_advance(p);
-    node = new_ast_node(p, AST_CONDITIONAL);
-    node->d.conditional.cond = cond;
-    node->d.conditional.then_expr = parse_expression(p);
+    then_expr = parse_expression(p);
     parse_expect(p, TOKEN_COLON, "expect ':'");
-    node->d.conditional.else_expr = parse_conditional(p);
+    else_expr = parse_conditional(p);
+
+    node = new_expr(p, AST_CONDITIONAL, then_expr->type);
+    node->d.conditional.cond = cond;
+    node->d.conditional.then_expr = then_expr;
+    node->d.conditional.else_expr = else_expr;
   }
   return node;
 }
@@ -876,8 +924,11 @@ static AstNode *parse_assignment(Parser *p) {
         exit(1);
       }
 
-      binop = new_ast_node(p, binop_ty);
-      lhs_copy = new_ast_node(p, AST_VAR);
+      if (left->kind != AST_VAR)
+        parse_error(p, "compound assignment through pointer not supported");
+
+      binop = new_expr(p, binop_ty, left->type);
+      lhs_copy = new_expr(p, AST_VAR, left->d.variable.var->type);
       lhs_copy->d.variable.var = left->d.variable.var;
 
       binop->d.binary.lhs = lhs_copy;
@@ -885,7 +936,7 @@ static AstNode *parse_assignment(Parser *p) {
       rhs = binop;
     }
 
-    node = new_ast_node(p, AST_ASSIGN);
+    node = new_expr(p, AST_ASSIGN, left->type);
     node->d.binary.lhs = left;
     node->d.binary.rhs = rhs;
     return node;

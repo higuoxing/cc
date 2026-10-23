@@ -372,8 +372,8 @@ check_error empty-parens 'int main() { return (); }' '1:22: error: expect expr'
 check_error nested-empty-parens 'int main() { return (()); }' '1:23: error: expect expr'
 check_error empty-rhs 'int main() { return 1 + (); }' '1:26: error: expect expr'
 check_error empty-lhs 'int main() { return () + 1; }' '1:22: error: expect expr'
-check_error unexpected-mul 'int main() { return * 2; }' '1:21: error: expect expr'
-check_error double-operator 'int main() { return 1 + * 2; }' '1:25: error: expect expr'
+check_error unexpected-mul 'int main() { return * 2; }' '1:24: error: invalid deref target'
+check_error double-operator 'int main() { return 1 + * 2; }' '1:28: error: invalid deref target'
 check_error unknown-operand 'int main() { return @; }' '1:21: error: expect expr'
 check_error keyword-operand 'int main() { return return; }' '1:21: error: expect expr'
 check_error unexpected-close 'int main() { return ); }' '1:21: error: expect expr'
@@ -486,7 +486,7 @@ check_error missing-bitor-rhs 'int main() { return 1 |; }' \
 check_error missing-bitxor-rhs 'int main() { return 1 ^; }' \
 	    '1:24: error: expect expr'
 check_error bitand-operand 'int main() { return & 1; }' \
-	    '1:21: error: expect expr'
+	    '1:21: error: invalid address-of target'
 check_error bitand-assign-literal 'int main() { 1 &= 2; return 0; }' \
 	    '1:16: error: invalid assignment target'
 check_error missing-do-while 'int main() { do return 0; }' \
