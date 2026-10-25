@@ -100,8 +100,10 @@ static LocalVar *declare_local_var(Parser *p, Token name, Type *type) {
       parse_error(p, "duplicate local variable");
   }
 
-  /* The function body's outermost block (depth 1) may not redeclare a
-   * parameter (depth 0); deeper blocks may shadow freely (C11 6.2.1). */
+  /*
+   * The function body's outermost block (depth 1) may not redeclare a
+   * parameter (depth 0); deeper blocks may shadow freely (C11 6.2.1).
+   */
   if (p->scope_depth == 1)
     for (var = p->locals; var && var->scope_depth == 0; var = var->next)
       if (same_identifier(var->name, name))
@@ -516,13 +518,46 @@ static AstNode *parse_additive(Parser *p) {
     TokenKind op;
     AstNode *right;
     AstNode *node;
+    Token op_tok;
 
     op = p->current.kind;
+    op_tok = p->current;
     /* Consume '+' or '-' */
     parser_advance(p);
     right = parse_multiplicative(p);
 
-    node = new_expr(p, op == TOKEN_PLUS ? AST_ADD : AST_SUB, &builtin_type_int);
+    /* 'int + ptr' is 'ptr + int' (C11 6.5.6); normalize the operands. */
+    if (op == TOKEN_PLUS && left->type->kind != TYPE_PTR &&
+        right->type->kind == TYPE_PTR) {
+      AstNode *tmp = left;
+      left = right;
+      right = tmp;
+    }
+
+    /*
+     * The operand types decide the operation once and for all; codegen
+     * maps each kind to instructions without re-checking types.
+     */
+    if (left->type->kind == TYPE_PTR && right->type->kind == TYPE_PTR) {
+      if (op != TOKEN_MINUS) {
+        p->current = op_tok;
+        parse_error(p, "invalid operands to binary +");
+      }
+      /*
+       * Pointer difference: the element count (C11 6.5.6p9: ptrdiff_t,
+       * approximated by int until 'long' exists).
+       */
+      node = new_expr(p, AST_PTR_DIFF, &builtin_type_int);
+    } else if (left->type->kind == TYPE_PTR) {
+      node =
+          new_expr(p, op == TOKEN_PLUS ? AST_PTR_ADD : AST_PTR_SUB, left->type);
+    } else if (right->type->kind == TYPE_PTR) {
+      p->current = op_tok;
+      parse_error(p, "invalid operands to binary -");
+    } else {
+      node =
+          new_expr(p, op == TOKEN_PLUS ? AST_ADD : AST_SUB, &builtin_type_int);
+    }
     node->d.binary.lhs = left;
     node->d.binary.rhs = right;
 
@@ -891,10 +926,11 @@ static AstNode *parse_assignment(Parser *p) {
 
       switch (op) {
       case TOKEN_PLUS_EQ:
-        binop_ty = AST_ADD;
+        /* p += 1 on a pointer steps by the pointee's size. */
+        binop_ty = left->type->kind == TYPE_PTR ? AST_PTR_ADD : AST_ADD;
         break;
       case TOKEN_MINUS_EQ:
-        binop_ty = AST_SUB;
+        binop_ty = left->type->kind == TYPE_PTR ? AST_PTR_SUB : AST_SUB;
         break;
       case TOKEN_STAR_EQ:
         binop_ty = AST_MUL;
@@ -1072,8 +1108,10 @@ static AstNode *parse_external_declaration(Parser *p) {
       LocalVar *param;
       Token param_name;
 
-      /* At most six parameters, matching the register ABI; the call
-       * side enforces the same limit on arguments. */
+      /*
+       * At most six parameters, matching the register ABI; the call
+       * side enforces the same limit on arguments.
+       */
       if (nparams == 6)
         parse_error(p, "too many parameters");
       parse_expect(p, TOKEN_INT, "expect 'int'");
@@ -1627,8 +1665,10 @@ static AstNode *parse_stmt(Parser *p, bool allow_decl) {
   case TOKEN_INT:
     if (allow_decl)
       return parse_decl(p);
-    /* C11 6.8: a declaration is not a statement, so it cannot be the
-       body of if/while/for/do or a label. */
+    /*
+     * C11 6.8: a declaration is not a statement, so it cannot be the
+     * body of if/while/for/do or a label.
+     */
     parse_error(p, "expect statement");
   case TOKEN_SEMICOLON:
     stmt = new_ast_node(p, AST_EXPR_STMT);

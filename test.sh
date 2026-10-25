@@ -352,6 +352,18 @@ check 2 'int main() { int x = 1; int *p; p = &x; *p = *p + 1; return x; }'
 check 42 'int main() { int x = 42; int *p; int **pp; p = &x; pp = &p; return **pp; }'
 check 42 'int main() { int x = 42; int *p; p = &x; return *(&x); }'
 check 42 'int main() { int x = 42; int *p; p = &x; *p = *p; return x; }'
+check 24 'int main() { int a = 24; int b = 42; int *p; p = &b; return *(p + 1); }'
+check 24 'int main() { int a = 24; int b = 42; int *p; p = &b; return *(1 + p); }'
+check 42 'int main() { int a = 24; int b = 42; int *p; p = &a; return *(p - 1); }'
+check 1 'int main() { int a; int b; int *p; int *q; p = &a; q = &b; return p - q; }'
+check 255 'int main() { int a; int b; int *p; int *q; p = &a; q = &b; return q - p; }'
+check 3 'int main() { int a; int b; int c; int d; int *p; int *q; p = &a; q = &d; return p - q; }'
+check 6 'int main() { int a; int b; int c; int d; int *p; int *q; p = &a; q = &d; return (p - q) * 2; }'
+check 7 'int main() { int a = 24; int b = 42; int *p; p = &b; *(p + 1) = 7; return a; }'
+check 24 'int main() { int a = 24; int b = 42; int *p; p = &b; p++; return *p; }'
+check 42 'int main() { int a = 24; int b = 42; int *p; p = &a; p--; return *p; }'
+check 24 'int main() { int a = 24; int b = 42; int *p; p = &b; ++p; return *p; }'
+check 6 'int main() { int a = 1; int b = 2; int c = 3; int *p; int s = 0; p = &c; s = s + *p; p++; s = s + *p; p++; s = s + *p; return s; }'
 check 42 'int main() { return 1, 42; }'
 check 42 'int main() { int a = 0; a = 1, a = a + 41; return a; }'
 check 6 'int main() { int i; int j; int n = 0; for (i = 0, j = 0; i < 3; i = i + 1, j = j + 1) n = n + i + j; return n; }'
@@ -590,5 +602,10 @@ check_error case-overflow-mul 'int main() { switch (0) { case 2147483647 * 21474
 check_error function-no-declaration 'int main() { return missing(); } int missing() { return 1; }' "1:21: error: function 'missing' not declared"
 check_error conflicting-prototypes 'int f(int); int f(int x, int y); int main() { return 0; }' "1:17: error: conflicting declaration of function 'f'"
 check_error void-with-arg 'int f(void); int main(void) { return f(1); } int f(void) { return 42; }' "1:38: error: wrong number of arguments to function 'f'"
+check_error ptr-plus-ptr \
+	    'int main() { int a; int *p; int *q; p = &a; q = &a; return p + q; }' \
+	    '1:62: error: invalid operands to binary +'
+check_error int-minus-ptr 'int main() { int a; int *p; p = &a; return 1 - p; }' \
+	    '1:46: error: invalid operands to binary -'
 
 printf 'All %d tests passed (%d execution, %d rejection).\n' "$((passed + rejected))" "$passed" "$rejected"

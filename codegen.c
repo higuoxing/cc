@@ -40,8 +40,10 @@ static int push_depth;
  */
 static FILE *out;
 
-/* The first six integer argument registers, in order (System V AMD64),
- * in their 64-bit and 32-bit spellings. */
+/*
+ * The first six integer argument registers, in order (System V AMD64),
+ * in their 64-bit and 32-bit spellings.
+ */
 static const char *argregs[] = {"%rdi", "%rsi", "%rdx", "%rcx", "%r8", "%r9"};
 static const char *argregs32[] = {"%edi", "%esi", "%edx",
                                   "%ecx", "%r8d", "%r9d"};
@@ -104,6 +106,49 @@ static void codegen_expr(AstNode *expr) {
     break;
   case AST_ADD:
   case AST_SUB:
+    /*
+     * int +- int: no type checks needed, the parser classified the
+     * operation already.
+     */
+    codegen_expr(expr->d.binary.rhs);
+    fprintf(out, "\tcltq\n");
+    fprintf(out, "\tpushq %%rax\n");
+    push_depth++;
+    codegen_expr(expr->d.binary.lhs);
+    fprintf(out, "\tpopq %%rcx\n");
+    push_depth--;
+    fprintf(out, expr->kind == AST_ADD ? "\taddl %%ecx, %%eax\n"
+                                       : "\tsubl %%ecx, %%eax\n");
+    break;
+  case AST_PTR_ADD:
+  case AST_PTR_SUB: {
+    /* Pointer +- integer, scaled by the pointee's size. */
+    codegen_expr(expr->d.binary.rhs);
+    fprintf(out, "\tcltq\n");
+    fprintf(out, "\tpushq %%rax\n");
+    push_depth++;
+    codegen_expr(expr->d.binary.lhs);
+    fprintf(out, "\tpopq %%rcx\n");
+    push_depth--;
+    fprintf(out, "\timulq $%d, %%rcx\n", expr->type->base->size);
+    fprintf(out, expr->kind == AST_PTR_ADD ? "\taddq %%rcx, %%rax\n"
+                                           : "\tsubq %%rcx, %%rax\n");
+    break;
+  }
+  case AST_PTR_DIFF: {
+    /* Pointer difference: byte distance / pointee size. */
+    codegen_expr(expr->d.binary.rhs);
+    fprintf(out, "\tpushq %%rax\n");
+    push_depth++;
+    codegen_expr(expr->d.binary.lhs);
+    fprintf(out, "\tpopq %%rcx\n");
+    push_depth--;
+    fprintf(out, "\tsubq %%rcx, %%rax\n");
+    fprintf(out, "\tmovq $%d, %%rcx\n", expr->d.binary.lhs->type->base->size);
+    fprintf(out, "\tcqto\n");
+    fprintf(out, "\tidivq %%rcx\n");
+    break;
+  }
   case AST_MUL:
   case AST_DIV:
   case AST_MOD:
@@ -120,13 +165,7 @@ static void codegen_expr(AstNode *expr) {
     fprintf(out, "\tpopq %%rcx\n");
     push_depth--;
 
-    if (expr->kind == AST_ADD) {
-      /* %eax = %eax + %ecx */
-      fprintf(out, "\taddl %%ecx, %%eax\n");
-    } else if (expr->kind == AST_SUB) {
-      /* %eax = %eax - %ecx */
-      fprintf(out, "\tsubl %%ecx, %%eax\n");
-    } else if (expr->kind == AST_MUL) {
+    if (expr->kind == AST_MUL) {
       /* %eax = %eax * %ecx */
       fprintf(out, "\timull %%ecx, %%eax\n");
     } else if (expr->kind == AST_DIV || expr->kind == AST_MOD) {
@@ -266,8 +305,10 @@ static void codegen_expr(AstNode *expr) {
       push_depth--;
     }
 
-    /* System V AMD64: %rsp must be 16-byte aligned at a call. An odd
-     * number of outstanding expression pushes misaligns it, so pad. */
+    /*
+     * System V AMD64: %rsp must be 16-byte aligned at a call. An odd
+     * number of outstanding expression pushes misaligns it, so pad.
+     */
     if (push_depth % 2)
       fprintf(out, "\tsubq $8, %%rsp\n");
     fprintf(out, "\tcall %.*s\n", expr->d.call.name.len,
@@ -294,57 +335,49 @@ static void codegen_expr(AstNode *expr) {
     fprintf(out, "\tmovzbl %%al, %%eax\n");
     break;
   case AST_PRE_INCREMENT:
+  case AST_PRE_DECREMENT: {
+    int is_ptr = expr->type->kind == TYPE_PTR;
+    /* Pointers step by the pointee's size, ints by 1. */
+    int step = is_ptr ? expr->type->base->size : 1;
+    const char *load =
+        is_ptr ? "\tmovq (%rax), %rcx\n" : "\tmovl (%rax), %ecx\n";
+    const char *store =
+        is_ptr ? "\tmovq %rcx, (%rax)\n" : "\tmovl %ecx, (%rax)\n";
+    const char *result = is_ptr ? "\tmovq %rcx, %rax\n" : "\tmovl %ecx, %eax\n";
+
     codegen_addr(expr->d.unary.operand);
-    /* movl (%rax), %ecx, load */
-    fprintf(out, "\tmovl (%%rax), %%ecx\n");
-    /* addl $1, %ecx, increment */
-    fprintf(out, "\taddl $1, %%ecx\n");
-    /* movl %eax, (%rax), write back */
-    fprintf(out, "\tmovl %%ecx, (%%rax)\n");
-    /* movl %ecx, %eax, result */
-    fprintf(out, "\tmovl %%ecx, %%eax\n");
+    fprintf(out, "%s", load);
+    fprintf(out, "\t%s $%d, %s\n",
+            expr->kind == AST_PRE_INCREMENT ? (is_ptr ? "addq" : "addl")
+                                            : (is_ptr ? "subq" : "subl"),
+            step, is_ptr ? "%rcx" : "%ecx");
+    fprintf(out, "%s", store);
+    fprintf(out, "%s", result);
     break;
+  }
   case AST_POST_INCREMENT:
+  case AST_POST_DECREMENT: {
+    int is_ptr = expr->type->kind == TYPE_PTR;
+    int step = is_ptr ? expr->type->base->size : 1;
+    const char *load =
+        is_ptr ? "\tmovq (%rax), %rcx\n" : "\tmovl (%rax), %ecx\n";
+    const char *store =
+        is_ptr ? "\tmovq %rcx, (%rax)\n" : "\tmovl %ecx, (%rax)\n";
+
     codegen_addr(expr->d.unary.operand);
-    /* movl (%rax), %ecx, load */
-    fprintf(out, "\tmovl (%%rax), %%ecx\n");
-    /* pushq %rcx, save the original val */
+    fprintf(out, "%s", load);
+    /* Save the original value as the result. */
     fprintf(out, "\tpushq %%rcx\n");
     push_depth++;
-    /* addl $1, %ecx, increment */
-    fprintf(out, "\taddl $1, %%ecx\n");
-    /* movl %ecx, (%rax), write back */
-    fprintf(out, "\tmovl %%ecx, (%%rax)\n");
-    /* popq %rax, result */
+    fprintf(out, "\t%s $%d, %s\n",
+            expr->kind == AST_POST_INCREMENT ? (is_ptr ? "addq" : "addl")
+                                             : (is_ptr ? "subq" : "subl"),
+            step, is_ptr ? "%rcx" : "%ecx");
+    fprintf(out, "%s", store);
     fprintf(out, "\tpopq %%rax\n");
     push_depth--;
     break;
-  case AST_PRE_DECREMENT:
-    codegen_addr(expr->d.unary.operand);
-    /* movl (%rax), %ecx, load */
-    fprintf(out, "\tmovl (%%rax), %%ecx\n");
-    /* subl $1, %ecx, decrement */
-    fprintf(out, "\tsubl $1, %%ecx\n");
-    /* movl %eax, (%rax), write back */
-    fprintf(out, "\tmovl %%ecx, (%%rax)\n");
-    /* movl %ecx, %eax, result */
-    fprintf(out, "\tmovl %%ecx, %%eax\n");
-    break;
-  case AST_POST_DECREMENT:
-    codegen_addr(expr->d.unary.operand);
-    /* movl (%rax), %ecx, load */
-    fprintf(out, "\tmovl (%%rax), %%ecx\n");
-    /* pushq %rcx, save the original val */
-    fprintf(out, "\tpushq %%rcx\n");
-    push_depth++;
-    /* subl $1, %ecx, decrement */
-    fprintf(out, "\tsubl $1, %%ecx\n");
-    /* movl %ecx, (%rax), write back */
-    fprintf(out, "\tmovl %%ecx, (%%rax)\n");
-    /* popq %rax, result */
-    fprintf(out, "\tpopq %%rax\n");
-    push_depth--;
-    break;
+  }
   default:
     fprintf(stderr, "unrecognized ast node\n");
     exit(1);
@@ -556,9 +589,11 @@ void codegen(const AstNode *ast, FILE *out_file) {
     if (stack_size)
       fprintf(out, "\tsubq $%d, %%rsp\n", stack_size);
 
-    /* Store the incoming argument registers into the parameter slots.
+    /*
+     * Store the incoming argument registers into the parameter slots.
      * The chain is reversed (last parameter first), so count and map
-     * the registers from the back. */
+     * the registers from the back.
+     */
     if (fn->d.function.params) {
       LocalVar *param;
       int nparams = 0;
