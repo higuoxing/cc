@@ -544,7 +544,10 @@ static void codegen_stmt(AstNode *stmt, int break_label, int continue_label,
   case AST_DECL:
     if (stmt->d.decl.init) {
       codegen_expr(stmt->d.decl.init);
-      fprintf(out, "\tmovl %%eax, -%d(%%rbp)\n", stmt->d.decl.var->offset);
+      if (stmt->d.decl.var->type->kind == TYPE_PTR)
+        fprintf(out, "\tmovq %%rax, -%d(%%rbp)\n", stmt->d.decl.var->offset);
+      else
+        fprintf(out, "\tmovl %%eax, -%d(%%rbp)\n", stmt->d.decl.var->offset);
     }
     break;
   case AST_EXPR_STMT:

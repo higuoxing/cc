@@ -344,6 +344,10 @@ check 42 'int main() { if (1 ? 1 : 0) return 42; return 0; }'
 check 42 'int main() { int a = 1; return a++ ? 42 : 24; }'
 check 42 'int one() { return 1; } int main() { return one() ? 42 : 24; }'
 check 42 'int main() { int x = 42; int *p; p = &x; return *p; }'
+check 42 'int main() { int x = 42; int *p = &x; return *p; }' pointer-init-address
+check 42 'int main() { int x = 42; int *p = &x; int *q = p; return *q; }' pointer-init-copy
+check 7 'int main() { int x = 42; int *p = &x; int **pp = &p; **pp = 7; return x; }' pointer-init-indirect-store
+check 42 'int main() { int x = 42; int *p = &x; return *(p += 0); }' pointer-init-compound
 check 24 'int main() { int x = 42; int *p; p = &x; *p = 24; return x; }'
 check 42 'int main() { int x = 42; int *p; int *q; p = &x; q = p; return *q; }'
 check 42 'int main() { int a = 24; int b = 42; int *p; p = &a; p = &b; return *p; }'
