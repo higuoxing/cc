@@ -442,6 +442,26 @@ check_error typed-void-pointer-add 'int main(void) { void *p = 0; p + 1; return 
 check_error typed-void-pointer-deref 'int main(void) { void *p = 0; *p; return 0; }' '1:31: error: invalid deref target'
 check_error typed-void-compound-value 'void f(void) {} int main(void) { int x = 0; x += f(); return x; }' '1:50: error: void expression used as a value'
 
+# Arguments beyond the sixth use the stack; signatures grow as needed.
+check 39 'int f(int a1, int a2, int a3, int a4, int a5, int a6, int a7, int a8); int main(void) { return f(1, 2, 3, 4, 5, 6, 7, 8); } int f(int a1, int a2, int a3, int a4, int a5, int a6, int a7, int a8) { return a1 + 2 * a7 + 3 * a8; }' stack-arguments-8
+check 42 'int f(int a1, int a2, int a3, int a4, int a5, int a6, int a7, int a8, int a9); int main(void) { return f(1, 2, 3, 4, 5, 6, 7, 8, 9); } int f(int a1, int a2, int a3, int a4, int a5, int a6, int a7, int a8, int a9) { return a1 + 2 * a7 + 3 * a9; }' stack-arguments-9
+check 63 'int f(int a1, int a2, int a3, int a4, int a5, int a6, int a7, int a8, int a9, int a10, int a11, int a12, int a13, int a14, int a15, int a16); int main(void) { return f(1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16); } int f(int a1, int a2, int a3, int a4, int a5, int a6, int a7, int a8, int a9, int a10, int a11, int a12, int a13, int a14, int a15, int a16) { return a1 + 2 * a7 + 3 * a16; }' stack-arguments-16
+check 75 'int f(int a1, int a2, int a3, int a4, int a5, int a6, int a7, int a8, int a9, int a10, int a11, int a12, int a13, int a14, int a15, int a16, int a17, int a18, int a19, int a20); int main(void) { return f(1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20); } int f(int a1, int a2, int a3, int a4, int a5, int a6, int a7, int a8, int a9, int a10, int a11, int a12, int a13, int a14, int a15, int a16, int a17, int a18, int a19, int a20) { return a1 + 2 * a7 + 3 * a20; }' stack-arguments-20
+check 135 'int f(int a1, int a2, int a3, int a4, int a5, int a6, int a7, int a8, int a9, int a10, int a11, int a12, int a13, int a14, int a15, int a16, int a17, int a18, int a19, int a20, int a21, int a22, int a23, int a24, int a25, int a26, int a27, int a28, int a29, int a30, int a31, int a32, int a33, int a34, int a35, int a36, int a37, int a38, int a39, int a40); int main(void) { return f(1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40); } int f(int a1, int a2, int a3, int a4, int a5, int a6, int a7, int a8, int a9, int a10, int a11, int a12, int a13, int a14, int a15, int a16, int a17, int a18, int a19, int a20, int a21, int a22, int a23, int a24, int a25, int a26, int a27, int a28, int a29, int a30, int a31, int a32, int a33, int a34, int a35, int a36, int a37, int a38, int a39, int a40) { return a1 + 2 * a7 + 3 * a40; }' stack-arguments-40
+check 42 'int f(int a, int b, int c, int d, int e, int f, int g) { return -g; } int main(void) { return f(1, 2, 3, 4, 5, 6, -42); }' stack-argument-negative
+check 42 'int *f(int a, int b, int c, int d, int e, int f, int *g) { return g; } int main(void) { int x = 42; return *f(1, 2, 3, 4, 5, 6, &x); }' stack-argument-pointer
+check 42 'int **f(int a, int b, int c, int d, int e, int f, int g, int **h) { return h; } int main(void) { int x = 42; int *p = &x; return **f(1, 2, 3, 4, 5, 6, 7, &p); }' stack-argument-double-pointer
+check 1 'int f(int a, int b, int c, int d, int e, int f, int *g) { return g == 0; } int main(void) { return f(1, 2, 3, 4, 5, 6, 0); }' stack-argument-null
+check 42 'void set(int *p) { *p = 42; } int f(int a, int b, int c, int d, int e, int f, int g) { set(&g); return g; } int main(void) { return f(1, 2, 3, 4, 5, 6, 7); }' stack-argument-address
+check 42 'int f(int a, int b, int c, int d, int e, int z, int g) { if (a) return f(a - 1, b, c, d, e, z, g); return g; } int main(void) { return f(4, 2, 3, 4, 5, 6, 42); }' stack-argument-recursion
+check 42 'int f(int a, int b, int c, int d, int e, int f, int g) { return g; } int main(void) { int i; int n = 0; for (i = 0; i < 100; i++) n = f(1, 2, 3, 4, 5, 6, 42); return n; }' stack-argument-cleanup
+check 42 'int f(int a, int b, int c, int d, int e, int f, int g) { return a + g; } int main(void) { return f(1, 2, 3, 4, 5, 6, f(7, 8, 9, 10, 11, 12, 34)); }' stack-argument-nested-call
+check 42 'int f(int a, int b, int c, int d, int e, int f, int g) { return a + g; } int main(void) { int x = 0; return f(x = 20, 2, 3, 4, 5, 6, x + 2); }' stack-argument-evaluation-order
+check_error stack-argument-too-few 'int f(int, int, int, int, int, int, int); int main(void) { return f(1,2,3,4,5,6); }' '1:67: error: wrong number of arguments to function '\''f'\'''
+check_error stack-argument-too-many 'int f(int, int, int, int, int, int, int); int main(void) { return f(1,2,3,4,5,6,7,8); }' '1:67: error: wrong number of arguments to function '\''f'\'''
+check_error stack-argument-type 'int f(int, int, int, int, int, int, int *); int main(void) { return f(1,2,3,4,5,6,42); }' '1:83: error: incompatible argument type'
+check_error stack-parameter-conflict 'int f(int, int, int, int, int, int, int); int f(int, int, int, int, int, int, int *);' '1:47: error: conflicting declaration of function '\''f'\'''
+
 check_error missing-plus-rhs 'int main() { return 1 +; }' '1:24: error: expect expr'
 check_error missing-sub-rhs 'int main() { return 1 -; }' '1:24: error: expect expr'
 check_error missing-mul-rhs 'int main() { return 1 *; }' '1:24: error: expect expr'
@@ -629,9 +649,6 @@ check_error too-many-args 'int foo(int a) { return a; } int main() { return foo(
 	    "1:50: error: wrong number of arguments to function 'foo'"
 check_error too-few-args 'int foo(int a) { return a; } int main() { return foo(); }' \
 	    "1:50: error: wrong number of arguments to function 'foo'"
-check_error too-many-params \
-	    'int foo(int a, int b, int c, int d, int e, int f, int g) { return 0; } int main() { return 42; }' \
-	    '1:51: error: too many parameters'
 check_error missing-conditional-colon 'int main() { return 1 ? 2; }' \
 	    "1:26: error: expect ':'"
 check_error missing-conditional-then 'int main() { return 1 ? : 2; }' \

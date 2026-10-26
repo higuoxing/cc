@@ -289,32 +289,44 @@ static void codegen_expr(AstNode *expr) {
   case AST_CALL: {
     AstNode *arg;
     int nargs = 0;
+    int nregisters;
+    int nstack;
+    int slots;
     int i;
 
-    /* Evaluate the arguments left to right, pushing each. */
-    for (arg = expr->d.call.args; arg; arg = arg->next) {
-      codegen_expr(arg);
-      fprintf(out, "\tpushq %%rax\n");
-      push_depth++;
+    for (arg = expr->d.call.args; arg; arg = arg->next)
       nargs++;
-    }
-
-    /* Pop into the argument registers in reverse order. */
-    for (i = nargs - 1; i >= 0; i--) {
-      fprintf(out, "\tpopq %s\n", argregs[i]);
-      push_depth--;
-    }
+    nregisters = nargs < 6 ? nargs : 6;
+    nstack = nargs - nregisters;
 
     /*
-     * System V AMD64: %rsp must be 16-byte aligned at a call. An odd
-     * number of outstanding expression pushes misaligns it, so pad.
+     * Reserve outgoing stack arguments first, followed by temporary slots
+     * for register arguments and any alignment padding. Argument seven is
+     * at 0(%rsp) at the call; padding must stay above the arguments.
+     * Count the entire reservation so nested calls also align their stack.
      */
-    if (push_depth % 2)
-      fprintf(out, "\tsubq $8, %%rsp\n");
+    slots = nargs + (push_depth + nargs) % 2;
+    if (slots)
+      fprintf(out, "\tsubq $%d, %%rsp\n", slots * 8);
+    push_depth += slots;
+
+    /*
+     * Preserve left-to-right evaluation. Stage all arguments in memory
+     * before loading registers, since an argument may itself contain calls.
+     */
+    for (arg = expr->d.call.args, i = 0; arg; arg = arg->next, ++i) {
+      int slot = i < 6 ? nstack + i : i - 6;
+      codegen_expr(arg);
+      fprintf(out, "\tmovq %%rax, %d(%%rsp)\n", slot * 8);
+    }
+    for (i = 0; i < nregisters; ++i)
+      fprintf(out, "\tmovq %d(%%rsp), %s\n", (nstack + i) * 8, argregs[i]);
+
     fprintf(out, "\tcall %.*s\n", expr->d.call.function->name.len,
             expr->d.call.function->name.start);
-    if (push_depth % 2)
-      fprintf(out, "\taddq $8, %%rsp\n");
+    if (slots)
+      fprintf(out, "\taddq $%d, %%rsp\n", slots * 8);
+    push_depth -= slots;
     break;
   }
   case AST_NEG:
@@ -594,9 +606,9 @@ void codegen(const AstNode *ast, FILE *out_file) {
       fprintf(out, "\tsubq $%d, %%rsp\n", stack_size);
 
     /*
-     * Store the incoming argument registers into the parameter slots.
-     * The chain is reversed (last parameter first), so count and map
-     * the registers from the back.
+     * Copy incoming parameters into writable local slots. The first six
+     * arrive in registers; later ones start at 16(%rbp), above saved rbp
+     * and the return address. The locals chain is in reverse parameter order.
      */
     if (fn->d.function.params) {
       LocalVar *param;
@@ -606,12 +618,23 @@ void codegen(const AstNode *ast, FILE *out_file) {
         nparams++;
       for (param = fn->d.function.params; param; param = param->next) {
         --nparams;
-        if (param->type->kind == TYPE_PTR)
-          fprintf(out, "\tmovq %s, -%d(%%rbp)\n", argregs[nparams],
-                  param->offset);
-        else
-          fprintf(out, "\tmovl %s, -%d(%%rbp)\n", argregs32[nparams],
-                  param->offset);
+        if (nparams < 6) {
+          if (param->type->kind == TYPE_PTR)
+            fprintf(out, "\tmovq %s, -%d(%%rbp)\n", argregs[nparams],
+                    param->offset);
+          else
+            fprintf(out, "\tmovl %s, -%d(%%rbp)\n", argregs32[nparams],
+                    param->offset);
+        } else {
+          int offset = 16 + (nparams - 6) * 8;
+          if (param->type->kind == TYPE_PTR) {
+            fprintf(out, "\tmovq %d(%%rbp), %%rax\n", offset);
+            fprintf(out, "\tmovq %%rax, -%d(%%rbp)\n", param->offset);
+          } else {
+            fprintf(out, "\tmovl %d(%%rbp), %%eax\n", offset);
+            fprintf(out, "\tmovl %%eax, -%d(%%rbp)\n", param->offset);
+          }
+        }
       }
     }
 

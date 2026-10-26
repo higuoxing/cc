@@ -77,7 +77,12 @@ Function *declare_function(Parser *p, Token name, Type *return_type,
     func->next = p->functions;
     p->functions = func;
   }
-  if (has_prototype) {
+  if (has_prototype && !func->has_prototype) {
+    if (nparams) {
+      func->param_types = calloc(nparams, sizeof(Type *));
+      if (!func->param_types)
+        error_at(p, name, "out of memory");
+    }
     func->has_prototype = 1;
     func->nparams = nparams;
     for (i = 0; i < nparams; ++i)

@@ -273,8 +273,6 @@ static AstNode *parse_call_expr(Parser *p) {
     AstNode **tail = &call->d.call.args;
 
     for (;;) {
-      if (nargs == 6)
-        parse_error(p, "too many arguments");
       *tail = parse_assignment(p);
       tail = &(*tail)->next;
       nargs++;
@@ -876,7 +874,8 @@ static AstNode *parse_external_declaration(Parser *p) {
   LocalVar *var;
   Token func_name;
   Type *return_type;
-  Type *param_types[6];
+  Type **param_types = NULL;
+  int param_capacity = 0;
   int nparams = 0;
   int definition = 0;
   int explicit_params = 0;
@@ -905,12 +904,14 @@ static AstNode *parse_external_declaration(Parser *p) {
       Token param_name;
       Type *param_type;
 
-      /*
-       * At most six parameters, matching the register ABI; the call
-       * side enforces the same limit on arguments.
-       */
-      if (nparams == 6)
-        parse_error(p, "too many parameters");
+      if (nparams == param_capacity) {
+        Type **types;
+        param_capacity = param_capacity ? param_capacity * 2 : 8;
+        types = realloc(param_types, param_capacity * sizeof(Type *));
+        if (!types)
+          parse_error(p, "out of memory");
+        param_types = types;
+      }
       param_type = parse_decl_type(p);
       if (param_type->kind == TYPE_VOID)
         parse_error(p, "parameter has void type");
@@ -961,6 +962,7 @@ static AstNode *parse_external_declaration(Parser *p) {
 
   func = declare_function(p, func_name, return_type, param_types, nparams,
                           explicit_params || definition, definition);
+  free(param_types);
 
   if (!definition) {
     /* Consume ';' */

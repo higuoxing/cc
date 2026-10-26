@@ -70,7 +70,7 @@ typedef struct Function {
   Token name;
   Type *return_type;
   int nparams;
-  Type *param_types[6];
+  Type **param_types;
   int has_prototype; /* 0 for a declaration with an empty argument list. */
   int is_defined; /* 1 once a definition has been seen. */
   struct Function *next;
