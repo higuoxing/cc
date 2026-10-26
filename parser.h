@@ -68,6 +68,7 @@ typedef struct GotoRef {
  */
 typedef struct Function {
   Token name;
+  Type *return_type;
   int nparams;
   Type *param_types[6];
   int has_prototype; /* 0 for a declaration with an empty argument list. */
@@ -83,6 +84,7 @@ typedef struct CallRef {
   Token name; /* Called function. */
   Token loc; /* The callee identifier, for diagnostics. */
   int nargs;
+  AstNode *call;
   struct CallRef *next;
 } CallRef;
 
@@ -104,6 +106,7 @@ typedef struct {
   Label *labels;
   GotoRef *goto_refs;
   Function *functions;
+  Function *current_function;
   CallRef *call_refs;
   /*
    * The innermost switch being parsed, or NULL; 'case' and 'default' are
@@ -243,8 +246,8 @@ typedef struct AstNode {
     } case_stmt;
 
     struct {
-      Token name;
-      struct AstNode *args; /* First argument expression; NULL for now. */
+      Function *function;
+      struct AstNode *args; /* First argument expression, or NULL. */
     } call;
 
     struct {

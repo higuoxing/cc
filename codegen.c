@@ -311,8 +311,8 @@ static void codegen_expr(AstNode *expr) {
      */
     if (push_depth % 2)
       fprintf(out, "\tsubq $8, %%rsp\n");
-    fprintf(out, "\tcall %.*s\n", expr->d.call.name.len,
-            expr->d.call.name.start);
+    fprintf(out, "\tcall %.*s\n", expr->d.call.function->name.len,
+            expr->d.call.function->name.start);
     if (push_depth % 2)
       fprintf(out, "\taddq $8, %%rsp\n");
     break;
@@ -397,7 +397,8 @@ static void codegen_stmt(AstNode *stmt, int break_label, int continue_label,
                          int ret_label) {
   switch (stmt->kind) {
   case AST_RETURN:
-    codegen_expr(stmt->d.ret.expr);
+    if (stmt->d.ret.expr)
+      codegen_expr(stmt->d.ret.expr);
     fprintf(out, "\tjmp .Lreturn.%d\n", ret_label);
     break;
   case AST_BREAK:
@@ -603,9 +604,15 @@ void codegen(const AstNode *ast, FILE *out_file) {
 
       for (param = fn->d.function.params; param; param = param->next)
         nparams++;
-      for (param = fn->d.function.params; param; param = param->next)
-        fprintf(out, "\tmovl %s, -%d(%%rbp)\n", argregs32[--nparams],
-                param->offset);
+      for (param = fn->d.function.params; param; param = param->next) {
+        --nparams;
+        if (param->type->kind == TYPE_PTR)
+          fprintf(out, "\tmovq %s, -%d(%%rbp)\n", argregs[nparams],
+                  param->offset);
+        else
+          fprintf(out, "\tmovl %s, -%d(%%rbp)\n", argregs32[nparams],
+                  param->offset);
+      }
     }
 
     codegen_stmt(fn->d.function.body, -1, -1, ret_label);

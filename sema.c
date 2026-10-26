@@ -37,6 +37,150 @@ Function *find_function(Parser *p, Token name) {
 }
 
 /*
+ * Declaration compatibility is structural: separately parsed pointer types
+ * need not share an address. A void pointer is convertible, not identical,
+ * to a pointer to another object type.
+ */
+static bool same_type(Type *a, Type *b) {
+  if (a->kind != b->kind)
+    return false;
+  return a->kind != TYPE_PTR || same_type(a->base, b->base);
+}
+
+Function *declare_function(Parser *p, Token name, Type *return_type,
+                           Type **param_types, int nparams, bool has_prototype,
+                           bool definition) {
+  Function *func = find_function(p, name);
+  int i;
+  if (func) {
+    if (definition && func->is_defined)
+      error_at(p, name, "redefinition of function '%.*s'", name.len,
+               name.start);
+    if (!same_type(func->return_type, return_type))
+      error_at(p, name, "conflicting declaration of function '%.*s'", name.len,
+               name.start);
+    if (func->has_prototype && has_prototype) {
+      if (func->nparams != nparams)
+        error_at(p, name, "conflicting declaration of function '%.*s'",
+                 name.len, name.start);
+      for (i = 0; i < nparams; ++i)
+        if (!same_type(func->param_types[i], param_types[i]))
+          error_at(p, name, "conflicting declaration of function '%.*s'",
+                   name.len, name.start);
+    }
+  } else {
+    func = calloc(1, sizeof(Function));
+    if (!func)
+      error_at(p, name, "out of memory");
+    func->name = name;
+    func->return_type = return_type;
+    func->next = p->functions;
+    p->functions = func;
+  }
+  if (has_prototype) {
+    func->has_prototype = 1;
+    func->nparams = nparams;
+    for (i = 0; i < nparams; ++i)
+      func->param_types[i] = param_types[i];
+  }
+  if (definition)
+    func->is_defined = 1;
+  return func;
+}
+
+void sema_check_nonvoid_expr(Parser *p, AstNode *expr) {
+  if (expr->type->kind == TYPE_VOID)
+    error_at(p, expr->loc, "void expression used as a value");
+}
+
+/*
+ * Only evaluate constant integer trees when testing for a null pointer
+ * constant. An ordinary integer variable whose value is zero is insufficient.
+ */
+static bool constant_integer_tree(AstNode *expr) {
+  if (expr->type->kind != TYPE_INT)
+    return false;
+  switch (expr->kind) {
+  case AST_INT_LITERAL:
+    return true;
+  case AST_CONDITIONAL:
+    return constant_integer_tree(expr->d.conditional.cond) &&
+           constant_integer_tree(expr->d.conditional.then_expr) &&
+           constant_integer_tree(expr->d.conditional.else_expr);
+  case AST_NEG:
+  case AST_BITWISE_NOT:
+  case AST_LOGICAL_NOT:
+    return constant_integer_tree(expr->d.unary.operand);
+  case AST_ADD:
+  case AST_SUB:
+  case AST_MUL:
+  case AST_DIV:
+  case AST_MOD:
+  case AST_LSHIFT:
+  case AST_RSHIFT:
+  case AST_LT:
+  case AST_LE:
+  case AST_GT:
+  case AST_GE:
+  case AST_EQ:
+  case AST_NE:
+  case AST_BIT_AND:
+  case AST_BIT_XOR:
+  case AST_BIT_OR:
+  case AST_LOGICAL_AND:
+  case AST_LOGICAL_OR:
+    return constant_integer_tree(expr->d.binary.lhs) &&
+           constant_integer_tree(expr->d.binary.rhs);
+  default:
+    return false;
+  }
+}
+
+static bool null_pointer_constant(Parser *p, AstNode *expr) {
+  return constant_integer_tree(expr) && eval_const_expr(p, expr) == 0;
+}
+
+static bool compatible_pointers(Type *a, Type *b) {
+  return a->kind == TYPE_PTR && b->kind == TYPE_PTR &&
+         (same_type(a, b) || a->base->kind == TYPE_VOID ||
+          b->base->kind == TYPE_VOID);
+}
+
+void sema_check_conversion(Parser *p, Type *target, AstNode *expr, Token loc,
+                           const char *context) {
+  sema_check_nonvoid_expr(p, expr);
+  if (same_type(target, expr->type) || compatible_pointers(target, expr->type))
+    return;
+  if (target->kind == TYPE_PTR && null_pointer_constant(p, expr))
+    return;
+  error_at(p, loc, "incompatible %s type", context);
+}
+
+void sema_check_call(Parser *p, Function *func, AstNode *call, int nargs) {
+  AstNode *arg;
+  int i = 0;
+  if (func->has_prototype && nargs != func->nparams)
+    error_at(p, call->loc, "wrong number of arguments to function '%.*s'",
+             func->name.len, func->name.start);
+  for (arg = call->d.call.args; arg; arg = arg->next, ++i) {
+    sema_check_nonvoid_expr(p, arg);
+    if (func->has_prototype)
+      sema_check_conversion(p, func->param_types[i], arg, arg->loc, "argument");
+  }
+}
+
+void sema_check_return(Parser *p, AstNode *stmt) {
+  Type *return_type = p->current_function->return_type;
+  AstNode *expr = stmt->d.ret.expr;
+  if (return_type->kind == TYPE_VOID) {
+    if (expr)
+      error_at(p, stmt->loc, "return with a value in void function");
+    return;
+  }
+  sema_check_conversion(p, return_type, expr, stmt->loc, "return");
+}
+
+/*
  * Sizes are stored in Type: an array's or struct's size is data, not
  * derivable from its kind. Void must never reach this.
  */
@@ -71,6 +215,7 @@ Type *sema_ptr_type(Parser *p, Type *base) {
 
 AstNode *sema_unary(Parser *p, AstKind op, AstNode *operand, Token loc) {
   AstNode *node;
+  sema_check_nonvoid_expr(p, operand);
   if (((op == AST_PRE_INCREMENT || op == AST_PRE_DECREMENT ||
         op == AST_POST_INCREMENT || op == AST_POST_DECREMENT) &&
        !is_lvalue(operand->kind)) ||
@@ -82,7 +227,13 @@ AstNode *sema_unary(Parser *p, AstKind op, AstNode *operand, Token loc) {
                                    : "decrement");
   }
 
-  if (op == AST_DEREF && operand->type->kind != TYPE_PTR)
+  if ((op == AST_PRE_INCREMENT || op == AST_PRE_DECREMENT ||
+       op == AST_POST_INCREMENT || op == AST_POST_DECREMENT) &&
+      operand->type->kind == TYPE_PTR && operand->type->base->kind == TYPE_VOID)
+    error_at(p, loc, "pointer arithmetic on void pointer");
+
+  if (op == AST_DEREF && (operand->type->kind != TYPE_PTR ||
+                          operand->type->base->kind == TYPE_VOID))
     error_at(p, loc, "invalid deref target");
 
   node =
@@ -100,7 +251,14 @@ AstNode *sema_unary(Parser *p, AstKind op, AstNode *operand, Token loc) {
 AstNode *sema_binary(Parser *p, AstKind kind, AstNode *left, AstNode *right,
                      Token loc) {
   AstNode *node;
+  if (kind != AST_COMMA) {
+    sema_check_nonvoid_expr(p, left);
+    sema_check_nonvoid_expr(p, right);
+  }
   if (kind == AST_ADD || kind == AST_SUB) {
+    if ((left->type->kind == TYPE_PTR && left->type->base->kind == TYPE_VOID) ||
+        (right->type->kind == TYPE_PTR && right->type->base->kind == TYPE_VOID))
+      error_at(p, loc, "pointer arithmetic on void pointer");
     /* 'int + ptr' is 'ptr + int' (C11 6.5.6); normalize the operands. */
     if (kind == AST_ADD && left->type->kind != TYPE_PTR &&
         right->type->kind == TYPE_PTR) {
@@ -146,7 +304,10 @@ AstNode *sema_assignment(Parser *p, Token operator, AstNode *left,
   AstNode *node;
   if (!is_lvalue(left->kind))
     error_at(p, loc, "invalid assignment target");
+  sema_check_nonvoid_expr(p, rhs);
   if (op != TOKEN_ASSIGN) {
+    if (left->type->kind == TYPE_PTR && left->type->base->kind == TYPE_VOID)
+      error_at(p, loc, "pointer arithmetic on void pointer");
     /*
      * Compound assignment desugars to 'E1 = E1 <op> E2', where E1
      * is the left operand and E2 the right one (C11 6.5.16.2p3).
@@ -207,6 +368,7 @@ AstNode *sema_assignment(Parser *p, Token operator, AstNode *left,
     rhs = binop;
   }
 
+  sema_check_conversion(p, left->type, rhs, loc, "assignment");
   node = new_expr(p, AST_ASSIGN, left->type, loc);
   node->d.binary.lhs = left;
   node->d.binary.rhs = rhs;
@@ -215,7 +377,23 @@ AstNode *sema_assignment(Parser *p, Token operator, AstNode *left,
 
 AstNode *sema_conditional(Parser *p, AstNode *cond, AstNode *then_expr,
                           AstNode *else_expr, Token loc) {
-  AstNode *node = new_expr(p, AST_CONDITIONAL, then_expr->type, loc);
+  Type *type = then_expr->type;
+  AstNode *node;
+  sema_check_nonvoid_expr(p, cond);
+  if (!same_type(type, else_expr->type)) {
+    if (compatible_pointers(type, else_expr->type)) {
+      if (else_expr->type->base->kind == TYPE_VOID)
+        type = else_expr->type;
+    } else if (type->kind == TYPE_PTR && null_pointer_constant(p, else_expr)) {
+      /* The pointer branch determines the result type. */
+    } else if (else_expr->type->kind == TYPE_PTR &&
+               null_pointer_constant(p, then_expr)) {
+      type = else_expr->type;
+    } else {
+      error_at(p, loc, "incompatible conditional operand types");
+    }
+  }
+  node = new_expr(p, AST_CONDITIONAL, type, loc);
   node->d.conditional.cond = cond;
   node->d.conditional.then_expr = then_expr;
   node->d.conditional.else_expr = else_expr;
@@ -235,6 +413,10 @@ int64_t eval_const_expr(Parser *p, AstNode *expr) {
   switch (expr->kind) {
   case AST_INT_LITERAL:
     return expr->d.int_literal.val;
+  case AST_CONDITIONAL:
+    return eval_const_expr(p, expr->d.conditional.cond)
+               ? eval_const_expr(p, expr->d.conditional.then_expr)
+               : eval_const_expr(p, expr->d.conditional.else_expr);
   case AST_NEG:
     return checked_int(p, -eval_const_expr(p, expr->d.unary.operand));
   case AST_BITWISE_NOT:
@@ -328,15 +510,8 @@ int64_t eval_const_expr(Parser *p, AstNode *expr) {
 void check_calls(Parser *p) {
   CallRef *ref;
 
-  for (ref = p->call_refs; ref; ref = ref->next) {
-    Function *func;
-
-    func = find_function(p, ref->name);
-    if (func && func->has_prototype && ref->nargs != func->nparams) {
-      error_at(p, ref->loc, "wrong number of arguments to function '%.*s'",
-               ref->name.len, ref->name.start);
-    }
-  }
+  for (ref = p->call_refs; ref; ref = ref->next)
+    sema_check_call(p, ref->call->d.call.function, ref->call, ref->nargs);
 }
 
 /*

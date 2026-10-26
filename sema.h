@@ -39,6 +39,15 @@ extern int64_t eval_const_expr(Parser *p, AstNode *expr);
 extern void check_calls(Parser *p);
 extern void check_gotos(Parser *p);
 
+extern Function *declare_function(Parser *p, Token name, Type *return_type,
+                                       Type **param_types, int nparams,
+                                       bool has_prototype, bool definition);
+extern void sema_check_nonvoid_expr(Parser *p, AstNode *expr);
+extern void sema_check_conversion(Parser *p, Type *target, AstNode *expr,
+                                  Token loc, const char *context);
+extern void sema_check_call(Parser *p, Function *func, AstNode *call, int nargs);
+extern void sema_check_return(Parser *p, AstNode *stmt);
+
 extern Type *sema_ptr_type(Parser *p, Type *base);
 extern AstNode *sema_unary(Parser *p, AstKind op, AstNode *operand, Token loc);
 extern AstNode *sema_binary(Parser *p, AstKind kind, AstNode *lhs, AstNode *rhs,

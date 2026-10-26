@@ -393,6 +393,55 @@ check 42 'int main() { int x = 42; int *p; p = &x; return *(p += 0); }' compound
 check 42 'int main() { int x = 42; int *p; p = &x; return *p++; }' postfix-pointer-type
 check 0 'int main() { int x; return (&x + 0) - &x; }' binary-pointer-type
 
+# Typed functions preserve pointer widths and check complete signatures.
+check 42 'int *identity(int *p) { return p; } int main(void) { int x = 42; return *identity(&x); }' typed-pointer-identity
+check 42 'int *identity(int *); int main(void) { int x = 42; return *identity(&x); } int *identity(int *p) { return p; }' typed-pointer-prototype
+check 42 'int **identity(int **p) { return p; } int main(void) { int x = 42; int *p = &x; return **identity(&p); }' typed-nested-pointer
+check 42 'int get(int *p, int n) { return *p + n; } int main(void) { int x = 43; return get(&x, -1); }' typed-mixed-parameters
+check 42 'int get(int *a, int b, int *c, int d, int *e, int f) { return *a + b + *c + d + *e + f; } int main(void) { int x = 10; return get(&x, 1, &x, 2, &x, 9); }' typed-six-registers
+check 42 'void set(int *p, int n) { *p = n; return; } int main(void) { int x = 0; set(&x, 42); return x; }' typed-void-return
+check 42 'void set(int *p) { *p = 42; } int main(void) { int x = 0; set(&x); return x; }' typed-void-fallthrough
+check 1 'int *nothing(void) { return 0; } int main(void) { return nothing() == 0; }' typed-null-return
+check 1 'int isnull(int *p) { return p == 0; } int main(void) { return isnull(1 - 1); }' typed-null-argument
+check 42 'void *identity(void *p) { return p; } int main(void) { int x = 42; int *p = identity(&x); return *p; }' typed-void-pointer-conversion
+check 42 'int *identity(int *p) { return p; } int main(void) { int x = 42; void *p = &x; return *identity(p); }' typed-void-pointer-argument
+check 42 'int *identity(int *p) { return p; } int main(void) { int x = 42; return *identity(identity(&x)); }' typed-nested-calls
+check 42 'int *walk(int *p, int n) { if (n) return walk(p, n - 1); return p; } int main(void) { int x = 42; return *walk(&x, 3); }' typed-pointer-recursion
+check 42 'int *identity(); int main(void) { int x = 42; return *identity(&x); } int *identity(int *p) { return p; }' typed-unspecified-prototype
+check 42 'int *identity(int *); int *identity(int *value); int *identity(int *p) { return p; } int main(void) { int x = 42; return *identity(&x); }' typed-compatible-redeclarations
+check 42 'int *identity(int *p) { return p; } int *identity(); int main(void) { int x = 42; return *identity(&x); }' typed-preserve-prototype
+check 42 'int *choose(int *p) { return 0 ? 0 : p; } int main(void) { int x = 42; return *choose(&x); }' typed-null-conditional
+check 42 'void noop(void) { return; } int main(void) { noop(), noop(); 1 ? noop() : noop(); return 42; }' typed-discard-void
+check_error typed-conflicting-return 'int *f(int *p); int f(int *p);' '1:21: error: conflicting declaration of function '\''f'\'''
+check_error typed-conflicting-parameter 'int f(int *p); int f(int p);' '1:20: error: conflicting declaration of function '\''f'\'''
+check_error typed-conflicting-pointer-depth 'int f(int **); int f(int *);' '1:20: error: conflicting declaration of function '\''f'\'''
+check_error typed-conflicting-void-pointer 'int f(void *); int f(int *);' '1:20: error: conflicting declaration of function '\''f'\'''
+check_error typed-nonzero-pointer-argument 'int f(int *p) { return 0; } int main(void) { return f(1); }' '1:55: error: incompatible argument type'
+check_error typed-variable-zero-argument 'int f(int *p) { return 0; } int main(void) { int x = 0; return f(x); }' '1:66: error: incompatible argument type'
+check_error typed-pointer-to-int-argument 'int f(int n) { return n; } int main(void) { int x = 0; return f(&x); }' '1:65: error: incompatible argument type'
+check_error typed-wrong-pointer-depth-argument 'int f(int **p) { return 0; } int main(void) { int *p = 0; return f(p); }' '1:68: error: incompatible argument type'
+check_error typed-nonzero-pointer-return 'int *f(void) { return 1; }' '1:16: error: incompatible return type'
+check_error typed-pointer-to-int-return 'int f(int *p) { return p; }' '1:17: error: incompatible return type'
+check_error typed-void-return-value 'void f(void) { return 1; }' '1:16: error: return with a value in void function'
+check_error typed-void-value-return 'void f(void) {} int main(void) { return f(); }' '1:41: error: void expression used as a value'
+check_error typed-void-initializer 'void f(void) {} int main(void) { int x = f(); return 0; }' '1:42: error: void expression used as a value'
+check_error typed-void-condition 'void f(void) {} int main(void) { if (f()) return 1; return 0; }' '1:38: error: void expression used as a value'
+check_error typed-void-arithmetic 'void f(void) {} int main(void) { return f() + 1; }' '1:41: error: void expression used as a value'
+check_error typed-void-variable 'int main(void) { void x; return 0; }' '1:23: error: variable has void type'
+check_error typed-void-parameter 'int f(void x);' '1:12: error: parameter has void type'
+check_error typed-pointer-arity 'int f(int *); int main(void) { return f(); }' '1:39: error: wrong number of arguments to function '\''f'\'''
+check_error typed-deferred-argument 'int f(); int main(void) { return f(1); } int f(int *p) { return 0; }' '1:36: error: incompatible argument type'
+check_error typed-void-double-pointer 'int f(void **p) { return 0; } int main(void) { int *p = 0; return f(&p); }' '1:69: error: incompatible argument type'
+check_error typed-missing-pointer-return 'int *f(void) { return; }' '1:22: error: expect return expr'
+
+check 1 'int f(int *p) { return p == 0; } int main(void) { return f(1 ? 0 : 1 / 0); }' typed-conditional-null
+check 42 'int *f(int *p) { return p; } int main(void) { int x = 42; return *(f(&x) + 0); }' typed-call-pointer-arithmetic
+check_error typed-void-pointer-increment 'int main(void) { void *p = 0; p++; return 0; }' '1:32: error: pointer arithmetic on void pointer'
+check_error typed-void-pointer-compound 'int main(void) { void *p = 0; p += 1; return 0; }' '1:33: error: pointer arithmetic on void pointer'
+check_error typed-void-pointer-add 'int main(void) { void *p = 0; p + 1; return 0; }' '1:33: error: pointer arithmetic on void pointer'
+check_error typed-void-pointer-deref 'int main(void) { void *p = 0; *p; return 0; }' '1:31: error: invalid deref target'
+check_error typed-void-compound-value 'void f(void) {} int main(void) { int x = 0; x += f(); return x; }' '1:50: error: void expression used as a value'
+
 check_error missing-plus-rhs 'int main() { return 1 +; }' '1:24: error: expect expr'
 check_error missing-sub-rhs 'int main() { return 1 -; }' '1:24: error: expect expr'
 check_error missing-mul-rhs 'int main() { return 1 *; }' '1:24: error: expect expr'

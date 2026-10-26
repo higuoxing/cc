@@ -133,6 +133,7 @@ static void reset_function_state(Parser *p) {
   p->labels = NULL;
   p->goto_refs = NULL;
   p->current_switch = NULL;
+  p->current_function = NULL;
   p->scope_depth = 0;
   p->loop_depth = 0;
   p->stack_size = 0;
@@ -145,6 +146,7 @@ static void parser_init(Parser *p, const char *filename, const char *source) {
   p->functions = NULL;
   p->call_refs = NULL;
   p->current_switch = NULL;
+  p->current_function = NULL;
   p->scope_depth = 0;
   p->loop_depth = 0;
   p->stack_size = 0;
@@ -244,6 +246,7 @@ static AstNode *parse_unary(Parser *p) {
 static AstNode *parse_call_expr(Parser *p) {
   AstNode *call;
   CallRef *ref;
+  Function *func;
   int nargs = 0;
 
   ref = (CallRef *)calloc(1, sizeof(CallRef));
@@ -254,12 +257,14 @@ static AstNode *parse_call_expr(Parser *p) {
   ref->next = p->call_refs;
   p->call_refs = ref;
 
-  if (find_function(p, ref->name) == NULL)
+  func = find_function(p, ref->name);
+  if (func == NULL)
     parse_error(p, "function '%.*s' not declared", ref->name.len,
                 ref->name.start);
 
-  call = new_expr(p, AST_CALL, &builtin_type_int);
-  call->d.call.name = p->current;
+  call = new_expr(p, AST_CALL, func->return_type);
+  call->d.call.function = func;
+  ref->call = call;
   /* Consume the function name. */
   parser_advance(p);
   parse_expect(p, TOKEN_LPAREN, "expect '('");
@@ -283,6 +288,7 @@ static AstNode *parse_call_expr(Parser *p) {
   parse_expect(p, TOKEN_RPAREN, "expect ')'");
 
   ref->nargs = nargs;
+  sema_check_call(p, func, call, nargs);
   return call;
 }
 
@@ -357,22 +363,38 @@ static AstNode *parse_primary(Parser *p) {
 }
 
 /*
+ * The supported declaration type is an int or void followed by pointer stars.
+ * Names and function parameter lists are parsed by the caller.
+ */
+static Type *parse_decl_type(Parser *p) {
+  Type *type;
+  if (p->current.kind == TOKEN_INT)
+    type = &builtin_type_int;
+  else if (p->current.kind == TOKEN_VOID)
+    type = &builtin_type_void;
+  else
+    parse_error(p, "expect 'int'");
+  parser_advance(p);
+  while (p->current.kind == TOKEN_STAR) {
+    type = sema_ptr_type(p, type);
+    parser_advance(p);
+  }
+  return type;
+}
+
+/*
  * declaration:
- *   'int' identifier ['=' expression] ';'
- * (C11 6.7, restricted to int and a single declarator)
+ *   declaration-type identifier ['=' assignment-expression] ';'
+ * Restricted to a single declarator.
  */
 static AstNode *parse_decl(Parser *p) {
   AstNode *decl;
   Token name;
   Type *type;
 
-  type = &builtin_type_int;
-  parse_expect(p, TOKEN_INT, "expect 'int'");
-  while (p->current.kind == TOKEN_STAR) {
-    type = sema_ptr_type(p, type);
-    /* Consume '*' */
-    parser_advance(p);
-  }
+  type = parse_decl_type(p);
+  if (type->kind == TYPE_VOID)
+    parse_error(p, "variable has void type");
 
   if (p->current.kind != TOKEN_IDENTIFIER)
     parse_error(p, "expect variable name");
@@ -387,6 +409,7 @@ static AstNode *parse_decl(Parser *p) {
     /* Consume '=' */
     parser_advance(p);
     decl->d.decl.init = parse_assignment(p);
+    sema_check_conversion(p, type, decl->d.decl.init, name, "initializer");
   }
 
   parse_expect(p, TOKEN_SEMICOLON, "expect ';'");
@@ -792,18 +815,22 @@ static AstNode *parse_assignment(Parser *p) {
 
 /*
  * jump-statement:
- *   'return' expression ';'
- * (C11 6.8.6.4; bare 'return;' is rejected for now)
+ *   'return' expression_opt ';'
+ * The function's return type determines whether a value is required.
  */
 static AstNode *parse_return_stmt(Parser *p) {
   AstNode *ast;
-
+  Token loc = p->current;
   parse_expect(p, TOKEN_RETURN, "expect 'return'");
-  if (p->current.kind == TOKEN_SEMICOLON)
+  if (p->current.kind == TOKEN_SEMICOLON &&
+      p->current_function->return_type->kind != TYPE_VOID)
     parse_error(p, "expect return expr");
 
   ast = new_ast_node(p, AST_RETURN);
-  ast->d.ret.expr = parse_expression(p);
+  ast->loc = loc;
+  if (p->current.kind != TOKEN_SEMICOLON)
+    ast->d.ret.expr = parse_expression(p);
+  sema_check_return(p, ast);
   parse_expect(p, TOKEN_SEMICOLON, "expect ';'");
 
   return ast;
@@ -848,6 +875,8 @@ static AstNode *parse_external_declaration(Parser *p) {
   Function *func;
   LocalVar *var;
   Token func_name;
+  Type *return_type;
+  Type *param_types[6];
   int nparams = 0;
   int definition = 0;
   int explicit_params = 0;
@@ -855,7 +884,7 @@ static AstNode *parse_external_declaration(Parser *p) {
 
   reset_function_state(p);
   fn = new_ast_node(p, AST_FUNCTION);
-  parse_expect(p, TOKEN_INT, "expect 'int'");
+  return_type = parse_decl_type(p);
   if (p->current.kind != TOKEN_IDENTIFIER)
     parse_error(p, "expect function name");
 
@@ -866,16 +895,15 @@ static AstNode *parse_external_declaration(Parser *p) {
 
   parse_expect(p, TOKEN_LPAREN, "expect '('");
 
-  if (p->current.kind == TOKEN_VOID) {
+  if (p->current.kind == TOKEN_VOID && p->lookahead.kind == TOKEN_RPAREN) {
     explicit_params = 1;
     parser_advance(p);
-    if (p->current.kind != TOKEN_RPAREN)
-      parse_error(p, "expect ')' after 'void'");
   } else if (p->current.kind != TOKEN_RPAREN) {
     explicit_params = 1;
     for (;;) {
       LocalVar *param;
       Token param_name;
+      Type *param_type;
 
       /*
        * At most six parameters, matching the register ABI; the call
@@ -883,7 +911,10 @@ static AstNode *parse_external_declaration(Parser *p) {
        */
       if (nparams == 6)
         parse_error(p, "too many parameters");
-      parse_expect(p, TOKEN_INT, "expect 'int'");
+      param_type = parse_decl_type(p);
+      if (param_type->kind == TYPE_VOID)
+        parse_error(p, "parameter has void type");
+      param_types[nparams] = param_type;
 
       if (p->current.kind == TOKEN_IDENTIFIER) {
         param_name = p->current;
@@ -899,12 +930,14 @@ static AstNode *parse_external_declaration(Parser *p) {
         if (!param)
           parse_error(p, "out of memory");
         param->name = param_name;
-        param->type = &builtin_type_int;
+        param->type = param_type;
         param->scope_depth = 0;
         param->offset = 8 * (nparams + 1);
         param->next = p->locals;
         p->locals = param;
       } else {
+        if (p->current.kind != TOKEN_COMMA && p->current.kind != TOKEN_RPAREN)
+          parse_error(p, "expect parameter name");
         unamed_param = 1;
       }
 
@@ -926,35 +959,8 @@ static AstNode *parse_external_declaration(Parser *p) {
   if (definition && unamed_param)
     parse_error(p, "expect parameter name in function definition");
 
-  func = find_function(p, func_name);
-  if (func) {
-    if (definition && func->is_defined) {
-      p->current = func_name;
-      parse_error(p, "redefinition of function '%.*s'", func_name.len,
-                  func_name.start);
-    }
-
-    if (func->has_prototype && (explicit_params || definition) &&
-        func->nparams != nparams) {
-      p->current = func_name;
-      parse_error(p, "conflicting declaration of function '%.*s'",
-                  func_name.len, func_name.start);
-    }
-
-    if (explicit_params || definition) {
-      func->nparams = nparams;
-      func->has_prototype = 1;
-    }
-  } else {
-    func = (Function *)calloc(1, sizeof(Function));
-    if (!func)
-      parse_error(p, "out of memory");
-    func->name = func_name;
-    func->nparams = nparams;
-    func->has_prototype = explicit_params || definition;
-    func->next = p->functions;
-    p->functions = func;
-  }
+  func = declare_function(p, func_name, return_type, param_types, nparams,
+                          explicit_params || definition, definition);
 
   if (!definition) {
     /* Consume ';' */
@@ -962,7 +968,7 @@ static AstNode *parse_external_declaration(Parser *p) {
     return NULL;
   }
 
-  func->is_defined = 1;
+  p->current_function = func;
   fn->d.function.params = p->locals;
   p->stack_size = 8 * nparams;
   fn->d.function.body = parse_block(p);
@@ -985,6 +991,7 @@ static AstNode *parse_if_stmt(Parser *p) {
   parse_expect(p, TOKEN_LPAREN, "expect '('");
   if_node = new_ast_node(p, AST_IF);
   if_node->d.if_stmt.cond = parse_expression(p);
+  sema_check_nonvoid_expr(p, if_node->d.if_stmt.cond);
   parse_expect(p, TOKEN_RPAREN, "expect ')'");
   if_node->d.if_stmt.then_stmt = parse_stmt(p, /*allow_decl=*/false);
   if (p->current.kind == TOKEN_ELSE) {
@@ -1007,6 +1014,7 @@ static AstNode *parse_while_stmt(Parser *p) {
   parse_expect(p, TOKEN_LPAREN, "expect '('");
   while_node = new_ast_node(p, AST_WHILE);
   while_node->d.while_stmt.cond = parse_expression(p);
+  sema_check_nonvoid_expr(p, while_node->d.while_stmt.cond);
   parse_expect(p, TOKEN_RPAREN, "expect ')'");
   ++p->loop_depth;
   while_node->d.while_stmt.body = parse_stmt(p, /*allow_decl=*/false);
@@ -1035,7 +1043,7 @@ static AstNode *parse_for_stmt(Parser *p) {
   outer_locals = p->locals;
   ++p->scope_depth;
 
-  if (p->current.kind == TOKEN_INT) {
+  if (p->current.kind == TOKEN_INT || p->current.kind == TOKEN_VOID) {
     /* parse_decl consumes the declaration's own ';'. */
     for_node->d.for_stmt.init = parse_decl(p);
   } else if (p->current.kind == TOKEN_SEMICOLON) {
@@ -1048,8 +1056,10 @@ static AstNode *parse_for_stmt(Parser *p) {
     for_node->d.for_stmt.init = init;
   }
 
-  if (p->current.kind != TOKEN_SEMICOLON)
+  if (p->current.kind != TOKEN_SEMICOLON) {
     for_node->d.for_stmt.cond = parse_expression(p);
+    sema_check_nonvoid_expr(p, for_node->d.for_stmt.cond);
+  }
   parse_expect(p, TOKEN_SEMICOLON, "expect ';'");
 
   if (p->current.kind != TOKEN_RPAREN)
@@ -1081,6 +1091,7 @@ static AstNode *parse_do_stmt(Parser *p) {
   parse_expect(p, TOKEN_WHILE, "expect 'while'");
   parse_expect(p, TOKEN_LPAREN, "expect '('");
   do_node->d.do_stmt.cond = parse_expression(p);
+  sema_check_nonvoid_expr(p, do_node->d.do_stmt.cond);
   parse_expect(p, TOKEN_RPAREN, "expect ')'");
   /* The trailing ';' is part of the do-statement itself. */
   parse_expect(p, TOKEN_SEMICOLON, "expect ';'");
@@ -1197,6 +1208,7 @@ static AstNode *parse_switch_stmt(Parser *p) {
   parse_expect(p, TOKEN_LPAREN, "expect '('");
   switch_node = new_ast_node(p, AST_SWITCH);
   switch_node->d.switch_stmt.cond = parse_expression(p);
+  sema_check_nonvoid_expr(p, switch_node->d.switch_stmt.cond);
   parse_expect(p, TOKEN_RPAREN, "expect ')'");
 
   /*
@@ -1335,6 +1347,7 @@ static AstNode *parse_stmt(Parser *p, bool allow_decl) {
   case TOKEN_LBRACE:
     return parse_block(p);
   case TOKEN_INT:
+  case TOKEN_VOID:
     if (allow_decl)
       return parse_decl(p);
     /*
