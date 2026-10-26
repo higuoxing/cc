@@ -381,6 +381,14 @@ check 42 'int f(int); int f(int x) {return x;} int main() { return f(42); }' pro
 check 42 'int f(int y); int f(int x) {return x;} int main() { return f(42); }' prototype-different-param-name
 check 42 'int f(); int f(int x) {return x;} int main() {return f(42);}' prototype-unspecified-params
 
+# Expression builders must preserve pointer types through nested expressions.
+check 42 'int main() { int x = 42; int y = 7; return *(1 ? &x : &y); }' conditional-pointer-type
+check 42 'int main() { int x = 42; return *(0, &x); }' comma-pointer-type
+check 42 'int main() { int x = 42; int *p; return *(p = &x); }' assignment-pointer-type
+check 42 'int main() { int x = 42; int *p; p = &x; return *(p += 0); }' compound-pointer-type
+check 42 'int main() { int x = 42; int *p; p = &x; return *p++; }' postfix-pointer-type
+check 0 'int main() { int x; return (&x + 0) - &x; }' binary-pointer-type
+
 check_error missing-plus-rhs 'int main() { return 1 +; }' '1:24: error: expect expr'
 check_error missing-sub-rhs 'int main() { return 1 -; }' '1:24: error: expect expr'
 check_error missing-mul-rhs 'int main() { return 1 *; }' '1:24: error: expect expr'
@@ -393,8 +401,8 @@ check_error empty-parens 'int main() { return (); }' '1:22: error: expect expr'
 check_error nested-empty-parens 'int main() { return (()); }' '1:23: error: expect expr'
 check_error empty-rhs 'int main() { return 1 + (); }' '1:26: error: expect expr'
 check_error empty-lhs 'int main() { return () + 1; }' '1:22: error: expect expr'
-check_error unexpected-mul 'int main() { return * 2; }' '1:24: error: invalid deref target'
-check_error double-operator 'int main() { return 1 + * 2; }' '1:28: error: invalid deref target'
+check_error unexpected-mul 'int main() { return * 2; }' '1:21: error: invalid deref target'
+check_error double-operator 'int main() { return 1 + * 2; }' '1:25: error: invalid deref target'
 check_error unknown-operand 'int main() { return @; }' '1:21: error: expect expr'
 check_error keyword-operand 'int main() { return return; }' '1:21: error: expect expr'
 check_error unexpected-close 'int main() { return ); }' '1:21: error: expect expr'

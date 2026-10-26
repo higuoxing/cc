@@ -285,6 +285,12 @@ typedef struct AstNode {
   } d;
 } AstNode;
 
+/* Shared diagnostics; error_at does not alter parser token state. */
+extern void error_at(Parser *p, Token loc, const char *fmt, ...)
+    __attribute__((format(printf, 3, 4), noreturn));
+extern void parse_error(Parser *p, const char *fmt, ...)
+    __attribute__((format(printf, 2, 3), noreturn));
+
 extern AstNode *parse_translation_unit(const char *filename, const char *source);
 
 #endif
