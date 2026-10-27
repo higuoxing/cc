@@ -23,6 +23,7 @@
 
 typedef enum {
   TYPE_CHAR,
+  TYPE_SHORT,
   TYPE_INT,
   TYPE_LONG,
   TYPE_PTR,
@@ -38,6 +39,8 @@ typedef struct Type {
 
 extern Type builtin_type_char;
 extern Type builtin_type_unsigned_char;
+extern Type builtin_type_short;
+extern Type builtin_type_unsigned_short;
 extern Type builtin_type_int;
 extern Type builtin_type_unsigned;
 extern Type builtin_type_long;
@@ -45,6 +48,7 @@ extern Type builtin_type_unsigned_long;
 extern Type builtin_type_void;
 
 extern bool is_integer(const Type *type);
+extern Type *integer_promotion_type(Type *type);
 extern Type *common_integer_type(const Type *a, const Type *b);
 extern bool same_type(const Type *a, const Type *b);
 extern bool compatible_pointers(const Type *a, const Type *b);

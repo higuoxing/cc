@@ -363,7 +363,7 @@ static AstNode *parse_primary(Parser *p) {
 
 /*
  * Consume declaration specifiers and return the base type only.
- * Unsigned and long may precede or follow the base type specifier.
+ * Unsigned, short and long may precede or follow the base type specifier.
  */
 static Type *parse_declspecs(Parser *p) {
   enum {
@@ -371,6 +371,7 @@ static Type *parse_declspecs(Parser *p) {
     DECLSPEC_CHAR = 1 << 1,
     DECLSPEC_UNSIGNED = 1 << 2,
     DECLSPEC_LONG = 1 << 3,
+    DECLSPEC_SHORT = 1 << 4,
   };
   unsigned specs = 0;
 
@@ -379,7 +380,8 @@ static Type *parse_declspecs(Parser *p) {
     return &builtin_type_void;
   }
   while (p->current.kind == TOKEN_INT || p->current.kind == TOKEN_CHAR ||
-         p->current.kind == TOKEN_UNSIGNED || p->current.kind == TOKEN_LONG) {
+         p->current.kind == TOKEN_UNSIGNED || p->current.kind == TOKEN_LONG ||
+         p->current.kind == TOKEN_SHORT) {
     unsigned flag;
     if (p->current.kind == TOKEN_INT)
       flag = DECLSPEC_INT;
@@ -387,8 +389,10 @@ static Type *parse_declspecs(Parser *p) {
       flag = DECLSPEC_CHAR;
     else if (p->current.kind == TOKEN_UNSIGNED)
       flag = DECLSPEC_UNSIGNED;
-    else
+    else if (p->current.kind == TOKEN_LONG)
       flag = DECLSPEC_LONG;
+    else
+      flag = DECLSPEC_SHORT;
 
     if (specs & flag) {
       if (flag == DECLSPEC_LONG)
@@ -397,7 +401,9 @@ static Type *parse_declspecs(Parser *p) {
                   p->current.start);
     }
     specs |= flag;
-    if ((specs & DECLSPEC_CHAR) && (specs & (DECLSPEC_INT | DECLSPEC_LONG)))
+    if (((specs & DECLSPEC_CHAR) &&
+         (specs & (DECLSPEC_INT | DECLSPEC_LONG | DECLSPEC_SHORT))) ||
+        ((specs & DECLSPEC_SHORT) && (specs & DECLSPEC_LONG)))
       parse_error(p, "invalid combination of type specifiers");
     parser_advance(p);
   }
@@ -412,6 +418,12 @@ static Type *parse_declspecs(Parser *p) {
     return &builtin_type_unsigned;
   case DECLSPEC_UNSIGNED | DECLSPEC_CHAR:
     return &builtin_type_unsigned_char;
+  case DECLSPEC_SHORT:
+  case DECLSPEC_SHORT | DECLSPEC_INT:
+    return &builtin_type_short;
+  case DECLSPEC_UNSIGNED | DECLSPEC_SHORT:
+  case DECLSPEC_UNSIGNED | DECLSPEC_SHORT | DECLSPEC_INT:
+    return &builtin_type_unsigned_short;
   case DECLSPEC_LONG:
   case DECLSPEC_LONG | DECLSPEC_INT:
     return &builtin_type_long;
@@ -1108,7 +1120,7 @@ static AstNode *parse_for_stmt(Parser *p) {
 
   if (p->current.kind == TOKEN_INT || p->current.kind == TOKEN_CHAR ||
       p->current.kind == TOKEN_UNSIGNED || p->current.kind == TOKEN_LONG ||
-      p->current.kind == TOKEN_VOID) {
+      p->current.kind == TOKEN_SHORT || p->current.kind == TOKEN_VOID) {
     /* parse_decl consumes the declaration's own ';'. */
     for_node->d.for_stmt.init = parse_decl(p);
   } else if (p->current.kind == TOKEN_SEMICOLON) {
@@ -1420,6 +1432,7 @@ static AstNode *parse_stmt(Parser *p, bool allow_decl) {
   case TOKEN_CHAR:
   case TOKEN_INT:
   case TOKEN_LONG:
+  case TOKEN_SHORT:
   case TOKEN_UNSIGNED:
   case TOKEN_VOID:
     if (allow_decl)

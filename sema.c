@@ -38,9 +38,10 @@ static AstNode *new_expr(Parser *p, AstKind kind, Type *type, Token loc);
 
 static AstNode *integer_promotion(Parser *p, AstNode *expr) {
   AstNode *node;
-  if (expr->type->kind != TYPE_CHAR)
+  Type *type = integer_promotion_type(expr->type);
+  if (type == expr->type)
     return expr;
-  node = new_expr(p, AST_CONVERT, &builtin_type_int, expr->loc);
+  node = new_expr(p, AST_CONVERT, type, expr->loc);
   node->d.unary.operand = expr;
   return node;
 }
@@ -68,7 +69,7 @@ Function *declare_function(Parser *p, Token name, Type *return_type,
       Type **types = func->has_prototype ? func->param_types : param_types;
       int count = func->has_prototype ? func->nparams : nparams;
       for (i = 0; i < count; ++i)
-        if (types[i]->kind == TYPE_CHAR)
+        if (!same_type(types[i], integer_promotion_type(types[i])))
           error_at(p, name, "conflicting declaration of function '%.*s'",
                    name.len, name.start);
     }
@@ -116,7 +117,7 @@ void sema_check_nonvoid_expr(Parser *p, AstNode *expr) {
  * constant. An ordinary integer variable whose value is zero is insufficient.
  */
 static bool constant_integer_tree(AstNode *expr) {
-  if (expr->type->kind != TYPE_INT)
+  if (!is_integer(expr->type))
     return false;
   switch (expr->kind) {
   case AST_INT_LITERAL:
@@ -462,15 +463,10 @@ int64_t eval_const_expr(Parser *p, AstNode *expr) {
     return expr->d.int_literal.val;
   case AST_CONVERT: {
     int64_t val = eval_const_expr(p, expr->d.unary.operand);
-    if (expr->type->kind == TYPE_CHAR) {
-      val &= 255;
-      return expr->type->is_unsigned || val < 128 ? val : val - 256;
-    }
-    if (expr->type->kind == TYPE_INT) {
-      uint32_t bits = (uint32_t)val;
-      return expr->type->is_unsigned || bits <= INT32_MAX
-                 ? (int64_t)bits
-                 : (int64_t)bits - 4294967296;
+    if (is_integer(expr->type) && expr->type->size < 8) {
+      int64_t modulus = INT64_C(1) << (expr->type->size * 8);
+      val = (uint64_t)val & (uint64_t)(modulus - 1);
+      return expr->type->is_unsigned || val < modulus / 2 ? val : val - modulus;
     }
     return val;
   }

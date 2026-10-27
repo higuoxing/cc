@@ -43,11 +43,12 @@ static FILE *out;
 
 /*
  * The first six integer argument registers, in order (System V AMD64),
- * in their 64-bit, 32-bit, and 8-bit spellings.
+ * in their 64-bit, 32-bit, 16-bit, and 8-bit spellings.
  */
 static const char *argregs64[] = {"%rdi", "%rsi", "%rdx", "%rcx", "%r8", "%r9"};
 static const char *argregs32[] = {"%edi", "%esi", "%edx",
                                   "%ecx", "%r8d", "%r9d"};
+static const char *argregs16[] = {"%di", "%si", "%dx", "%cx", "%r8w", "%r9w"};
 static const char *argregs8[] = {"%dil", "%sil", "%dl", "%cl", "%r8b", "%r9b"};
 
 static void codegen_expr(AstNode *expr);
@@ -79,6 +80,11 @@ static void codegen_load(Type *type, const char *dst) {
             type->is_unsigned ? "\tmovzbq (%%rax), %s\n"
                               : "\tmovsbq (%%rax), %s\n",
             dst);
+  else if (type->kind == TYPE_SHORT)
+    fprintf(out,
+            type->is_unsigned ? "\tmovzwq (%%rax), %s\n"
+                              : "\tmovswq (%%rax), %s\n",
+            dst);
   else if (type->is_unsigned) {
     fprintf(out, "\tmovl (%%rax), %%r11d\n");
     fprintf(out, "\tmovq %%r11, %s\n", dst);
@@ -95,6 +101,8 @@ static void codegen_store(Type *type) {
     fprintf(out, "\tmovq %%rcx, (%%rax)\n");
   else if (type->kind == TYPE_CHAR)
     fprintf(out, "\tmovb %%cl, (%%rax)\n");
+  else if (type->kind == TYPE_SHORT)
+    fprintf(out, "\tmovw %%cx, (%%rax)\n");
   else
     fprintf(out, "\tmovl %%ecx, (%%rax)\n");
 }
@@ -107,6 +115,9 @@ static void codegen_normalize(Type *type) {
   if (type->kind == TYPE_CHAR)
     fprintf(out, type->is_unsigned ? "\tmovzbq %%al, %%rax\n"
                                    : "\tmovsbq %%al, %%rax\n");
+  else if (type->kind == TYPE_SHORT)
+    fprintf(out, type->is_unsigned ? "\tmovzwq %%ax, %%rax\n"
+                                   : "\tmovswq %%ax, %%rax\n");
   else if (type->kind == TYPE_INT)
     fprintf(out, type->is_unsigned ? "\tmovl %%eax, %%eax\n" : "\tcltq\n");
 }
@@ -630,6 +641,8 @@ static void codegen_stmt(AstNode *stmt, int break_label, int continue_label,
         fprintf(out, "\tmovq %%rax, -%d(%%rbp)\n", stmt->d.decl.var->offset);
       else if (stmt->d.decl.var->type->kind == TYPE_CHAR)
         fprintf(out, "\tmovb %%al, -%d(%%rbp)\n", stmt->d.decl.var->offset);
+      else if (stmt->d.decl.var->type->kind == TYPE_SHORT)
+        fprintf(out, "\tmovw %%ax, -%d(%%rbp)\n", stmt->d.decl.var->offset);
       else
         fprintf(out, "\tmovl %%eax, -%d(%%rbp)\n", stmt->d.decl.var->offset);
     }
@@ -696,6 +709,9 @@ void codegen(const AstNode *ast, FILE *out_file) {
           else if (param->type->kind == TYPE_CHAR)
             fprintf(out, "\tmovb %s, -%d(%%rbp)\n", argregs8[nparams],
                     param->offset);
+          else if (param->type->kind == TYPE_SHORT)
+            fprintf(out, "\tmovw %s, -%d(%%rbp)\n", argregs16[nparams],
+                    param->offset);
           else
             fprintf(out, "\tmovl %s, -%d(%%rbp)\n", argregs32[nparams],
                     param->offset);
@@ -707,6 +723,9 @@ void codegen(const AstNode *ast, FILE *out_file) {
           } else if (param->type->kind == TYPE_CHAR) {
             fprintf(out, "\tmovb %d(%%rbp), %%al\n", offset);
             fprintf(out, "\tmovb %%al, -%d(%%rbp)\n", param->offset);
+          } else if (param->type->kind == TYPE_SHORT) {
+            fprintf(out, "\tmovw %d(%%rbp), %%ax\n", offset);
+            fprintf(out, "\tmovw %%ax, -%d(%%rbp)\n", param->offset);
           } else {
             fprintf(out, "\tmovl %d(%%rbp), %%eax\n", offset);
             fprintf(out, "\tmovl %%eax, -%d(%%rbp)\n", param->offset);

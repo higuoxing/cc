@@ -77,6 +77,7 @@ typedef enum {
   TOKEN_RSHIFT,    /* '>>' */
   TOKEN_RSHIFT_EQ, /* '>>=' */
   TOKEN_SEMICOLON,
+  TOKEN_SHORT,    /* 'short' */
   TOKEN_SLASH,    /* '/' */
   TOKEN_SLASH_EQ, /* '/=' */
   TOKEN_STAR,     /* '*' */

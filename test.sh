@@ -191,6 +191,7 @@ check 5 'int main() { int a = 5; { int a = 4; } { int a = 7; a = 9; } return a; 
 check 42 'int main() { int a = 10; int aa = 32; return a + aa; }'
 check 42 'int main() { int _a = 20; int A1 = 22; return _a + A1; }'
 check 42 'int main() { int longer = 20; int long_ = 21; int long1 = 1; return longer + long_ + long1; }' long-keyword-prefix-identifiers
+check 42 'int main() { int shorter = 20; int short_ = 21; int short1 = 1; return shorter + short_ + short1; }' short-keyword-prefix-identifiers
 check 42 'int main() { int a = 0; int b = (a = 40) + 2; return b; }'
 check 42 'int main() { int a; return a = 6 * 7; }'
 check 42 'int main() { int while_count = 40; int return_value = 2; int _Boolish = 0; return while_count + return_value + _Boolish; }'
@@ -629,6 +630,88 @@ check_error character-literal-raw-newline $'int main(void) { return \'\n\'; }' "
 check_error character-literal-raw-crlf $'int main(void) { return \'\r\n\'; }' "1:25: error: unterminated character literal"
 check_error character-literal-escaped-newline $'int main(void) { return \'\\\n\'; }' "1:25: error: unterminated character literal"
 
+# Full unsigned short int and unsigned long int spellings.
+check 1 'int main(void) { unsigned short int x = -1; return x == 65535 && x + 1 == 65536; }' unsigned-short-int-promotion
+check 1 'int main(void) { unsigned short int x = 65537; x += 65535; return x == 0; }' unsigned-short-int-truncation
+check 1 'int main(void) { unsigned short int guard = 42; unsigned short int x = 0; unsigned short int *p = &x; return (*p = -1) == 65535 && x == 65535 && guard == 42; }' unsigned-short-int-pointer-store
+check 1 'unsigned short int id(unsigned short int); unsigned short int id(unsigned short int x) { return x; } int main(void) { return id(-1) == 65535 && id(65536) == 0; }' unsigned-short-int-function-signature
+check 1 'int main(void) { unsigned long int x = 1; x <<= 40; return x >> 40 == 1; }' unsigned-long-int-width
+check 1 'int main(void) { unsigned long int x = -1; return x + 1 == 0 && x / 2 >> 62 == 1; }' unsigned-long-int-arithmetic
+check 1 'unsigned long int *id(unsigned long int *p) { return p; } int main(void) { unsigned long int x = 1; x <<= 40; unsigned long int y = x; *id(&x) = x + 7; return x == y + 7; }' unsigned-long-int-pointer-store
+check 1 'unsigned long int id(unsigned long int); unsigned long int id(unsigned long int x) { return x; } int main(void) { unsigned long int x = 1; x <<= 40; return id(x) == x && id(-1) >> 63 == 1; }' unsigned-long-int-function-signature
+check 1 'unsigned long int f(int a, int b, int c, int d, int e, int f, unsigned short int g, unsigned long int h) { return g + h; } int main(void) { unsigned long int x = 1; x <<= 40; return f(1,2,3,4,5,6,-1,x) == x + 65535; }' unsigned-short-long-int-stack-arguments
+
+# Short storage, conversions, and promotions use the target's 16-bit width.
+check 1 'int main(void) { short s = 32767; return s == 32767; }' short-load
+check 1 'int main(void) { short s = -32768; return s == -32768 && s < 0; }' short-sign-extension
+check 1 'int main(void) { unsigned short s = 65535; return s == 65535 && s > 0; }' unsigned-short-zero-extension
+check 1 'int main(void) { short s = 65535; return s == -1; }' short-initializer-truncate
+check 1 'int main(void) { unsigned short s = -1; return s == 65535; }' unsigned-short-initializer-truncate
+check 1 'int main(void) { short s = 65536; unsigned short u = 65537; return s == 0 && u == 1; }' short-initializer-wrap
+check 1 'int main(void) { short s = 0; unsigned short u = 0; return (s = 65535) == -1 && (u = -1) == 65535; }' short-assignment-result
+check 1 'int main(void) { int guard = 42; short a = -1; short b = 7; b = 9; return guard == 42 && a == -1 && b == 9; }' short-adjacent-stores
+check 1 'int main(void) { char a = 42; short b = -1; char c = 7; short d = 9; d = -2; return a == 42 && b == -1 && c == 7 && d == -2; }' short-mixed-local-layout
+check 1 'int main(void) { unsigned short s = 65535; return s + 1 == 65536 && s > -1; }' unsigned-short-integer-promotion
+check 1 'int main(void) { unsigned short s = 65535; return -s == -65535 && ~s == -65536; }' unsigned-short-unary-promotion
+check 1 'int main(void) { short s = -32768; return -s == 32768 && s / -1 == 32768; }' short-unary-division-promotion
+check 1 'int main(void) { short s = -1; unsigned short u = 65535; return u + s == 65534 && u > s; }' short-mixed-signs
+check 1 'int main(void) { unsigned short s = 65535; unsigned u = -1; return s < u && s + u == 65534; }' short-unsigned-common-type
+check 1 'int main(void) { unsigned short s = 65535; return (1 ? s : -1) == 65535 && (0 ? s : -1) < 0; }' short-conditional-promotion
+check 1 'int main(void) { short s = -1; unsigned short u = 65535; long a = s; long b = u; return a == -1 && b == 65535; }' short-widen-long
+check 1 'int main(void) { long x = 1; x <<= 40; short s = x + 65535; unsigned short u = x + 65537; return s == -1 && u == 1; }' long-narrow-short
+check 1 'int main(void) { unsigned x = -1; short s = x; unsigned short u = x; return s == -1 && u == 65535; }' unsigned-int-narrow-short
+check 1 'int main(void) { short s = -1; char c = s; unsigned char u = s; unsigned short v = c; return c == -1 && u == 255 && v == 65535; }' short-char-conversions
+check 1 'int main(void) { short s = 32767; s += 1; s -= 1; return s == 32767; }' short-compound-truncate
+check 1 'int main(void) { unsigned short s = 65535; s += 1; s -= 1; s *= 2; s /= 2; s %= 7; return s == 0; }' short-compound-arithmetic
+check 1 'int main(void) { unsigned short s = 65535; s <<= 1; s >>= 1; s |= 7; s ^= 8; s &= 255; return s == 247; }' short-compound-bitwise
+check 1 'int main(void) { short s = 32767; return s++ == 32767 && s == -32768 && --s == 32767 && ++s == -32768 && s-- == -32768 && s == 32767; }' short-increment-boundaries
+check 1 'int main(void) { unsigned short s = 65535; return s++ == 65535 && s == 0 && --s == 65535 && ++s == 0 && s-- == 0 && s == 65535; }' unsigned-short-increment-boundaries
+check 1 'int main(void) { short guard = 42; short s = 0; short *p = &s; return (*p = 65535) == -1 && s == -1 && guard == 42; }' short-indirect-store
+check 1 'int main(void) { unsigned short s = 65535; unsigned short *p = &s; return (*p)++ == 65535 && s == 0 && --*p == 65535; }' short-indirect-increment
+check 42 'int main(void) { short s = 42; short *p = &s + 1; short n = -1; return *(p + n); }' short-pointer-offset
+check 1 'int main(void) { unsigned short s = 32768; if (!s) return 0; return s && (0 || s) && (s ? 1 : 0); }' short-condition
+check 42 'int main(void) { unsigned short s = -1; switch (s) { case -1: return 0; case 65535: return 42; default: return 0; } }' short-switch-promotion
+check 2 'int main(void) { int n = 0; for (unsigned short s = 65534; s; s++) n++; return n; }' short-for-counter
+check 1 'short id(short s) { return s; } int main(void) { return id(65535) == -1 && id(32768) == -32768; }' short-call-return
+check 1 'unsigned short id(unsigned short s) { return s; } int main(void) { return id(-1) == 65535 && id(65536) == 0 && id(-1) + 1 == 65536; }' unsigned-short-call-return
+check 1 'short f(void) { return 65535; } unsigned short g(void) { return -1; } int main(void) { return f() == -1 && g() == 65535; }' short-return-conversion
+check 1 'int f(short a, unsigned short b, short c, unsigned short d, short e, unsigned short f) { return a+b+c+d+e+f; } int main(void) { return f(-1,65535,-2,32768,-3,12345) == 110642; }' short-six-register-arguments
+check 1 'int f(int a, int b, int c, int d, int e, int f, short g, unsigned short h) { return a+g+h; } int main(void) { return f(1,2,3,4,5,6,32768,-1) == 32768; }' short-stack-arguments
+check 1 'long f(short a, unsigned short b, char c, int d, long e, unsigned long f, int g, short h, unsigned short i) { return a+b+c+d+e+f+g+h+i; } int main(void) { long x = 1; x <<= 40; return f(-1,-1,-2,3,x,0,0,32768,32768) == x + 65535; }' short-mixed-stack-arguments
+check 1 'void set(short *p) { *p = -1; } short f(short s) { set(&s); return s; } int main(void) { return f(42) == -1; }' short-parameter-address
+check 1 'int f(); int main(void) { unsigned short s = 65535; return f(s); } int f(int s) { return s == 65535; }' short-default-argument-promotion
+check 1 'unsigned short id(unsigned short s) { return s; } int main(void) { return id(id(-1)) == 65535; }' short-nested-call
+check 120 'short fact(short n) { if (n == 0) return 1; return n * fact(n - 1); } int main(void) { return fact(5); }' short-recursion
+
+# Short declaration specifiers.
+for spec in 'short' 'short int' 'int short' 'unsigned short' 'short unsigned' \
+    'unsigned short int' 'unsigned int short' 'short unsigned int' \
+    'short int unsigned' 'int unsigned short' 'int short unsigned'; do
+    check 42 "$spec f($spec); int main(void) { $spec x; return 42; }" "short-declspecs-$spec"
+done
+check 42 'short f(short int); short int f(int short); int main(void) { return 42; }' short-compatible-prototypes
+check 42 'unsigned short f(short unsigned int); int unsigned short f(unsigned int short); int main(void) { return 42; }' unsigned-short-compatible-prototypes
+check 42 'int main(void) { for (short i; 0;) ; return 42; }' short-for-declaration
+check 42 'int main(void) { for (unsigned short i; 0;) ; return 42; }' unsigned-short-for-declaration
+check 1 'int main(void) { short x; short *p = &x; return (p + 1) - p; }' short-pointer-declaration
+
+check_error short-missing-name 'int main() { int short; return 0; }' '1:23: error: expect variable name'
+check_error short-char-specifiers 'int main(void) { short char x; return 0; }' '1:24: error: invalid combination of type specifiers'
+check_error char-short-specifiers 'int main(void) { char short x; return 0; }' '1:23: error: invalid combination of type specifiers'
+check_error short-long-specifiers 'int main(void) { short long x; return 0; }' '1:24: error: invalid combination of type specifiers'
+check_error long-short-specifiers 'int main(void) { long short x; return 0; }' '1:23: error: invalid combination of type specifiers'
+check_error duplicate-short-specifier 'int main(void) { short short x; return 0; }' '1:24: error: duplicate short type specifier'
+check_error short-duplicate-int 'int main(void) { short int int x; return 0; }' '1:28: error: duplicate int type specifier'
+check_error short-duplicate-unsigned 'int main(void) { unsigned short unsigned x; return 0; }' '1:33: error: duplicate unsigned type specifier'
+check_error short-conflicting-return 'short f(void); int f(void);' '1:20: error: conflicting declaration of function '"'"'f'"'"''
+check_error short-conflicting-parameter 'int f(short); int f(int);' '1:19: error: conflicting declaration of function '"'"'f'"'"''
+check_error short-conflicting-signedness 'int f(short); int f(unsigned short);' '1:19: error: conflicting declaration of function '"'"'f'"'"''
+check_error short-no-prototype-promotion 'int f(); int f(short);' '1:14: error: conflicting declaration of function '"'"'f'"'"''
+check_error short-no-prototype-promotion-reverse 'int f(short); int f();' '1:19: error: conflicting declaration of function '"'"'f'"'"''
+check_error unsigned-short-no-prototype-promotion 'int f(); int f(unsigned short);' '1:14: error: conflicting declaration of function '"'"'f'"'"''
+check_error short-incompatible-pointer 'int main(void) { int x; short *p = &x; return 0; }' '1:32: error: incompatible initializer type'
+check_error short-declaration-as-statement 'int main(void) { if (1) short x; return 0; }' '1:25: error: expect statement'
+
 # Long values exercise the upper 32 bits without requiring long literals.
 check 1 'int main(void) { long x = 1; x <<= 40; long y = x; return y >> 40 == 1; }' long-load-store
 check 1 'int main(void) { long x = -1; long y = 0 - 1; return x < 0 && y < 0; }' long-sign-extension
@@ -854,7 +937,7 @@ for kw in \
     _Alignas _Alignof _Atomic _Bool _Complex _Generic _Imaginary \
 	     _Noreturn _Static_assert _Thread_local \
 	     auto break case const continue default do double else enum extern \
-	     float for goto if inline register restrict short signed sizeof \
+	     float for goto if inline register restrict signed sizeof \
 	     static struct switch typedef union void volatile while; do
     check_error "reserved-kw-$kw" \
 		"int main() { int $kw; return 0; }" \
