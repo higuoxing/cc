@@ -190,6 +190,7 @@ check 2 'int main() { int a = 1; { a = 2; int a = 3; a = 4; } return a; }'
 check 5 'int main() { int a = 5; { int a = 4; } { int a = 7; a = 9; } return a; }'
 check 42 'int main() { int a = 10; int aa = 32; return a + aa; }'
 check 42 'int main() { int _a = 20; int A1 = 22; return _a + A1; }'
+check 42 'int main() { int longer = 20; int long_ = 21; int long1 = 1; return longer + long_ + long1; }' long-keyword-prefix-identifiers
 check 42 'int main() { int a = 0; int b = (a = 40) + 2; return b; }'
 check 42 'int main() { int a; return a = 6 * 7; }'
 check 42 'int main() { int while_count = 40; int return_value = 2; int _Boolish = 0; return while_count + return_value + _Boolish; }'
@@ -609,6 +610,84 @@ check_error character-literal-raw-newline $'int main(void) { return \'\n\'; }' "
 check_error character-literal-raw-crlf $'int main(void) { return \'\r\n\'; }' "1:25: error: unterminated character literal"
 check_error character-literal-escaped-newline $'int main(void) { return \'\\\n\'; }' "1:25: error: unterminated character literal"
 
+# Long values exercise the upper 32 bits without requiring long literals.
+check 1 'int main(void) { long x = 1; x <<= 40; long y = x; return y >> 40 == 1; }' long-load-store
+check 1 'int main(void) { long x = -1; long y = 0 - 1; return x < 0 && y < 0; }' long-sign-extension
+check 1 'int main(void) { unsigned x = -1; long y = x; return y > 2147483647 && y >> 32 == 0; }' long-zero-extension
+check 1 'int main(void) { long x = -2147483647 - 1; return x < -2147483647; }' long-int-min-extension
+check 1 'int main(void) { unsigned long x = -1; return x >> 63 == 1; }' unsigned-long-sign-extension
+check 1 'int main(void) { long x = 1; x <<= 40; long y; return (y = x) == x && y >> 40 == 1; }' long-assignment-result
+check 1 'int main(void) { long x = 1; x <<= 40; return x + x == x * 2 && x + 7 - x == 7; }' long-add-subtract-multiply
+check 1 'int main(void) { long x = 1; x <<= 40; return (x * 6) / 3 == x * 2 && (x + 5) % x == 5; }' long-divmod
+check 1 'int main(void) { long x = 1; x <<= 40; return (-x - 5) / x == -1 && (-x - 5) % x == -5; }' long-negative-divmod
+check 1 'int main(void) { unsigned long x = -1; return x / 2 >> 62 == 1 && x % 2 == 1; }' unsigned-long-divmod
+check 1 'int main(void) { unsigned long x = -1; return x + 1 == 0 && x * x == 1 && -x == 1; }' unsigned-long-wraparound
+check 1 'int main(void) { long x = 1; x <<= 40; return x != 0 && x > 2147483647 && x >= x && 0 < x && 0 <= x; }' long-comparisons
+check 1 'int main(void) { unsigned long x = -1; long y = -1; return x > 0 && x >= y && y > 0 - x && x == y; }' unsigned-long-comparisons
+check 1 'int main(void) { long x = -1; unsigned y = 1; return x < y && x + y == 0 && x <= y; }' long-unsigned-int-common-type
+check 1 'int main(void) { long x = -1; unsigned long y = 1; return x > y && x + y == 0; }' long-unsigned-long-common-type
+check 1 'int main(void) { long x = 0; unsigned y = -1; return (x | y) >> 32 == 0 && (x ^ y) >> 32 == 0; }' long-unsigned-bitwise-conversion
+check 1 'int main(void) { long x = 1; x <<= 40; return (x | 3) == x + 3 && (x ^ 3) == x + 3 && ((x | 3) & x) == x; }' long-bitwise
+check 1 'int main(void) { long x = 1; x <<= 40; return ~x == -x - 1 && -x < 0; }' long-unary
+check 1 'int main(void) { long x = -1; unsigned y = 40; return x >> y == -1; }' long-signed-shift
+check 1 'int main(void) { unsigned long x = -1; return x >> 63 == 1 && x << 63 >> 63 == 1; }' unsigned-long-shifts
+check 1 'int main(void) { long n = 1; return (-4 >> n) == -2; }' int-shift-long-count
+check 1 'int main(void) { long x = 1; x <<= 40; return (1 ? x : 0) == x && (0 ? 0 : x) == x; }' long-conditional-type
+check 1 'int main(void) { long x = -1; unsigned y = 0; return (1 ? x : y) < 0 && (0 ? y : x) < 0; }' long-conditional-signedness
+check 1 'int main(void) { long x = 1; x <<= 40; return !x == 0 && !!x && (x && 1) && (0 || x); }' long-logical
+check 42 'int main(void) { long x = 1; x <<= 32; if (x) return 42; return 0; }' long-if-condition
+check 42 'int main(void) { long x = 1; x <<= 32; return x ? 42 : 0; }' long-conditional-condition
+check 42 'int main(void) { long x = 1; x <<= 32; while (x) { x = 0; return 42; } return 0; }' long-while-condition
+check 42 'int main(void) { long x = 1; x <<= 32; for (; x;) { x = 0; return 42; } return 0; }' long-for-condition
+check 2 'int main(void) { long x = 1; x <<= 32; int n = 0; do { n++; if (n == 2) x = 0; } while (x); return n; }' long-do-condition
+check 42 'int main(void) { long x = 1; x <<= 32; switch (x) { case 0: return 0; default: return 42; } }' long-switch-full-width
+check 42 'int main(void) { long x = -1; switch (x) { case -1: return 42; default: return 0; } }' long-switch-negative
+check 42 'int main(void) { unsigned long x = -1; switch (x) { case -1: return 42; default: return 0; } }' unsigned-long-switch-negative
+check 1 'int main(void) { long x = 1; x <<= 40; int y = x + 42; unsigned z = x + 43; return y == 42 && z == 43; }' long-narrow-int
+check 1 'int main(void) { long x = -1; char c = x; unsigned char u = x; return c == -1 && u == 255; }' long-narrow-char
+check 1 'int main(void) { char c = -1; unsigned char u = 255; long x = c; long y = u; return x == -1 && y == 255; }' long-widen-char
+check 1 'int main(void) { long x = 1; x <<= 40; long y = x; x += 7; x -= 1; x *= 3; x /= 3; return x == y + 6; }' long-compound-arithmetic
+check 1 'int main(void) { unsigned long x = -1; x >>= 32; x <<= 8; x |= 15; x ^= 8; x &= -1; x %= 16; return x == 7; }' long-compound-bitwise
+check 1 'int main(void) { long x = 1; x <<= 40; long y = x; return x++ == y && ++x == y + 2 && x-- == y + 2 && --x == y; }' long-increment
+check 1 'int main(void) { unsigned long x = -1; return x++ != 0 && x == 0 && --x != 0; }' unsigned-long-increment
+check 1 'int main(void) { long x = 1; x <<= 40; long *p = &x; long y = *p; *p = x + 7; return x == y + 7 && (*p)++ == y + 7 && --*p == y + 7; }' long-indirect-load-store-increment
+check 42 'int main(void) { long x = 42; long *p = &x + 1; long n = -1; return *(p + n); }' long-pointer-offset
+check 1 'int main(void) { long x; unsigned y = 0; return (&x - (&x + 1)) < y; }' pointer-difference-long-type
+check 1 'long id(long x) { return x; } int main(void) { long x = 1; x <<= 40; return id(x) == x && id(-1) < 0; }' long-call-return
+check 1 'unsigned long id(unsigned long x) { return x; } int main(void) { return id(-1) >> 63 == 1; }' unsigned-long-call-return
+check 1 'long f(void) { return -1; } int main(void) { return f() < 0; }' long-return-int-conversion
+check 1 'int f(long x) { return x; } int main(void) { long x = 1; x <<= 40; return f(x + 42) == 42; }' long-return-narrow-conversion
+check 1 'long id(); int main(void) { long x = 1; x <<= 40; return id(x) == x; } long id(long x) { return x; }' long-default-argument
+check 1 'long sum(long a, long b, long c, long d, long e, long f, long g, long h) { return a+b+c+d+e+f+g+h; } int main(void) { long x = 1; x <<= 40; return sum(x,x,x,x,x,x,x,x) == x * 8; }' long-eight-arguments
+check 1 'long f(int a, char b, long c, unsigned d, unsigned long e, char f, long g, unsigned long h) { return c + g + h - e + a + b + d + f; } int main(void) { long x = 1; x <<= 40; return f(1,2,x,3,x,4,x,x) == x * 2 + 10; }' long-mixed-arguments
+check 1 'long f(long x, int n) { if (n) return f(x + 1, n - 1); return x; } int main(void) { long x = 1; x <<= 40; return f(x, 3) == x + 3; }' long-recursion
+check 1 'long f(long x) { return x + 1; } int main(void) { long x = 1; x <<= 40; return x + f(f(x)) == x * 2 + 2; }' long-nested-calls
+
+# Long declaration specifiers.
+for spec in 'long' 'long int' 'int long' 'unsigned long' 'long unsigned' \
+    'unsigned long int' 'unsigned int long' 'long unsigned int' \
+    'long int unsigned' 'int unsigned long' 'int long unsigned'; do
+    check 42 "$spec f($spec); int main(void) { $spec x; return 42; }" "long-declspecs-$spec"
+done
+check 42 'long f(long int); long int f(int long); int main(void) { return 42; }' long-compatible-prototypes
+check 42 'unsigned long f(long unsigned int); int unsigned long f(unsigned int long); int main(void) { return 42; }' unsigned-long-compatible-prototypes
+check 42 'int main(void) { for (long i; 0;) ; return 42; }' long-for-declaration
+check 42 'int main(void) { for (unsigned long i; 0;) ; return 42; }' unsigned-long-for-declaration
+check 1 'int main(void) { long x; long *p = &x; return (p + 1) - p; }' long-pointer-declaration
+
+check_error long-missing-name 'int main() { int long; return 0; }' '1:22: error: expect variable name'
+check_error long-char-specifiers 'int main(void) { long char x; return 0; }' '1:23: error: invalid combination of type specifiers'
+check_error char-long-specifiers 'int main(void) { char long x; return 0; }' '1:23: error: invalid combination of type specifiers'
+check_error long-long-unsupported 'int main(void) { long long x; return 0; }' '1:23: error: long long is not supported'
+check_error long-duplicate-int 'int main(void) { long int int x; return 0; }' '1:27: error: duplicate int type specifier'
+check_error long-duplicate-unsigned 'int main(void) { unsigned long unsigned x; return 0; }' '1:32: error: duplicate unsigned type specifier'
+check_error long-conflicting-return 'long f(void); int f(void);' '1:19: error: conflicting declaration of function '"'"'f'"'"''
+check_error long-conflicting-parameter 'int f(long); int f(int);' '1:18: error: conflicting declaration of function '"'"'f'"'"''
+check_error long-conflicting-signedness 'long f(long); unsigned long f(long);' '1:29: error: conflicting declaration of function '"'"'f'"'"''
+check_error long-conflicting-parameter-signedness 'int f(long); int f(unsigned long);' '1:18: error: conflicting declaration of function '"'"'f'"'"''
+check_error long-incompatible-pointer 'int main(void) { int x; long *p = &x; return 0; }' '1:31: error: incompatible initializer type'
+check_error long-declaration-as-statement 'int main(void) { if (1) long x; return 0; }' '1:25: error: expect statement'
+
 # Unsigned char occupies one byte and promotes to int.
 check 255 'int main(void) { unsigned char c = -1; return c; }' unsigned-char-load
 check 255 'int main(void) { char unsigned c = -1; return c; }' char-unsigned-order
@@ -756,7 +835,7 @@ for kw in \
     _Alignas _Alignof _Atomic _Bool _Complex _Generic _Imaginary \
 	     _Noreturn _Static_assert _Thread_local \
 	     auto break case const continue default do double else enum extern \
-	     float for goto if inline long register restrict short signed sizeof \
+	     float for goto if inline register restrict short signed sizeof \
 	     static struct switch typedef union void volatile while; do
     check_error "reserved-kw-$kw" \
 		"int main() { int $kw; return 0; }" \

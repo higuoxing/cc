@@ -363,42 +363,64 @@ static AstNode *parse_primary(Parser *p) {
 
 /*
  * Consume declaration specifiers and return the base type only.
- * Unsigned may precede or follow int or char.
+ * Unsigned and long may precede or follow the base type specifier.
  */
 static Type *parse_declspecs(Parser *p) {
-  Type *type = NULL;
-  bool seen_unsigned = false;
+  enum {
+    DECLSPEC_INT = 1 << 0,
+    DECLSPEC_CHAR = 1 << 1,
+    DECLSPEC_UNSIGNED = 1 << 2,
+    DECLSPEC_LONG = 1 << 3,
+  };
+  unsigned specs = 0;
+
   if (p->current.kind == TOKEN_VOID) {
     parser_advance(p);
     return &builtin_type_void;
   }
-  if (p->current.kind != TOKEN_INT && p->current.kind != TOKEN_CHAR &&
-      p->current.kind != TOKEN_UNSIGNED)
-    parse_error(p, "expect 'int'");
   while (p->current.kind == TOKEN_INT || p->current.kind == TOKEN_CHAR ||
-         p->current.kind == TOKEN_UNSIGNED) {
-    if (p->current.kind == TOKEN_UNSIGNED) {
-      if (seen_unsigned)
-        parse_error(p, "duplicate unsigned type specifier");
-      seen_unsigned = true;
-    } else {
-      Type *specifier =
-          p->current.kind == TOKEN_INT ? &builtin_type_int : &builtin_type_char;
-      if (type == specifier)
-        parse_error(p, "duplicate %s type specifier",
-                    type->kind == TYPE_INT ? "int" : "char");
-      if (type)
-        parse_error(p, "invalid combination of type specifiers");
-      type = specifier;
+         p->current.kind == TOKEN_UNSIGNED || p->current.kind == TOKEN_LONG) {
+    unsigned flag;
+    if (p->current.kind == TOKEN_INT)
+      flag = DECLSPEC_INT;
+    else if (p->current.kind == TOKEN_CHAR)
+      flag = DECLSPEC_CHAR;
+    else if (p->current.kind == TOKEN_UNSIGNED)
+      flag = DECLSPEC_UNSIGNED;
+    else
+      flag = DECLSPEC_LONG;
+
+    if (specs & flag) {
+      if (flag == DECLSPEC_LONG)
+        parse_error(p, "long long is not supported");
+      parse_error(p, "duplicate %.*s type specifier", p->current.len,
+                  p->current.start);
     }
+    specs |= flag;
+    if ((specs & DECLSPEC_CHAR) && (specs & (DECLSPEC_INT | DECLSPEC_LONG)))
+      parse_error(p, "invalid combination of type specifiers");
     parser_advance(p);
   }
-  if (!type)
-    type = &builtin_type_int;
-  if (seen_unsigned)
-    return type->kind == TYPE_CHAR ? &builtin_type_unsigned_char
-                                   : &builtin_type_unsigned;
-  return type;
+
+  switch (specs) {
+  case DECLSPEC_INT:
+    return &builtin_type_int;
+  case DECLSPEC_CHAR:
+    return &builtin_type_char;
+  case DECLSPEC_UNSIGNED:
+  case DECLSPEC_UNSIGNED | DECLSPEC_INT:
+    return &builtin_type_unsigned;
+  case DECLSPEC_UNSIGNED | DECLSPEC_CHAR:
+    return &builtin_type_unsigned_char;
+  case DECLSPEC_LONG:
+  case DECLSPEC_LONG | DECLSPEC_INT:
+    return &builtin_type_long;
+  case DECLSPEC_UNSIGNED | DECLSPEC_LONG:
+  case DECLSPEC_UNSIGNED | DECLSPEC_LONG | DECLSPEC_INT:
+    return &builtin_type_unsigned_long;
+  default:
+    parse_error(p, "expect 'int'");
+  }
 }
 
 /*
@@ -1085,7 +1107,8 @@ static AstNode *parse_for_stmt(Parser *p) {
   ++p->scope_depth;
 
   if (p->current.kind == TOKEN_INT || p->current.kind == TOKEN_CHAR ||
-      p->current.kind == TOKEN_UNSIGNED || p->current.kind == TOKEN_VOID) {
+      p->current.kind == TOKEN_UNSIGNED || p->current.kind == TOKEN_LONG ||
+      p->current.kind == TOKEN_VOID) {
     /* parse_decl consumes the declaration's own ';'. */
     for_node->d.for_stmt.init = parse_decl(p);
   } else if (p->current.kind == TOKEN_SEMICOLON) {
@@ -1396,6 +1419,7 @@ static AstNode *parse_stmt(Parser *p, bool allow_decl) {
     return parse_block(p);
   case TOKEN_CHAR:
   case TOKEN_INT:
+  case TOKEN_LONG:
   case TOKEN_UNSIGNED:
   case TOKEN_VOID:
     if (allow_decl)

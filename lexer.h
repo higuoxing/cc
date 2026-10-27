@@ -55,6 +55,7 @@ typedef enum {
   TOKEN_LBRACE,      /* '{' */
   TOKEN_LESS,        /* '<' */
   TOKEN_LESS_EQ,     /* '<=' */
+  TOKEN_LONG,        /* 'long' */
   TOKEN_LPAREN,      /* '(' */
   TOKEN_LSHIFT,      /* '<<' */
   TOKEN_LSHIFT_EQ,   /* '<<=' */

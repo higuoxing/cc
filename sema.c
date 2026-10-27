@@ -281,9 +281,7 @@ AstNode *sema_binary(Parser *p, AstKind kind, AstNode *left, AstNode *right,
     if (kind == AST_LSHIFT || kind == AST_RSHIFT) {
       type = left->type;
     } else {
-      type = left->type->is_unsigned || right->type->is_unsigned
-                 ? &builtin_type_unsigned
-                 : &builtin_type_int;
+      type = common_integer_type(left->type, right->type);
       left = sema_convert_expr(p, type, left, loc, "operand");
       right = sema_convert_expr(p, type, right, loc, "operand");
       if (kind == AST_LT || kind == AST_LE || kind == AST_GT ||
@@ -312,10 +310,9 @@ AstNode *sema_binary(Parser *p, AstKind kind, AstNode *left, AstNode *right,
         error_at(p, loc, "invalid operands to binary +");
       }
       /*
-       * Pointer difference: the element count (C11 6.5.6p9: ptrdiff_t,
-       * approximated by int until 'long' exists).
+       * Pointer difference has type ptrdiff_t, signed long on our target.
        */
-      node = new_expr(p, AST_PTR_DIFF, &builtin_type_int, loc);
+      node = new_expr(p, AST_PTR_DIFF, &builtin_type_long, loc);
     } else if (left->type->kind == TYPE_PTR) {
       node = new_expr(p, kind == AST_ADD ? AST_PTR_ADD : AST_PTR_SUB,
                       left->type, loc);
@@ -419,9 +416,7 @@ AstNode *sema_conditional(Parser *p, AstNode *cond, AstNode *then_expr,
   }
   type = then_expr->type;
   if (is_integer(type) && is_integer(else_expr->type)) {
-    type = type->is_unsigned || else_expr->type->is_unsigned
-               ? &builtin_type_unsigned
-               : &builtin_type_int;
+    type = common_integer_type(type, else_expr->type);
   } else if (!same_type(type, else_expr->type)) {
     if (compatible_pointers(type, else_expr->type)) {
       if (else_expr->type->base->kind == TYPE_VOID)

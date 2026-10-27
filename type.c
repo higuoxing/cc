@@ -26,10 +26,29 @@ Type builtin_type_unsigned_char = {
 Type builtin_type_int = {.kind = TYPE_INT, .size = 4, .base = NULL};
 Type builtin_type_unsigned = {
     .kind = TYPE_INT, .size = 4, .is_unsigned = true, .base = NULL};
+Type builtin_type_long = {.kind = TYPE_LONG, .size = 8, .base = NULL};
+Type builtin_type_unsigned_long = {
+    .kind = TYPE_LONG, .size = 8, .is_unsigned = true, .base = NULL};
 Type builtin_type_void = {.kind = TYPE_VOID, .size = 0, .base = NULL};
 
 bool is_integer(const Type *type) {
-  return type->kind == TYPE_CHAR || type->kind == TYPE_INT;
+  return type->kind == TYPE_CHAR || type->kind == TYPE_INT ||
+         type->kind == TYPE_LONG;
+}
+
+/*
+ * Common type after integer promotion on our LP64 target. Signed long
+ * represents every unsigned int value; unsigned long wins at equal rank.
+ */
+Type *common_integer_type(const Type *a, const Type *b) {
+  if (a->kind == TYPE_LONG || b->kind == TYPE_LONG) {
+    if ((a->kind == TYPE_LONG && a->is_unsigned) ||
+        (b->kind == TYPE_LONG && b->is_unsigned))
+      return &builtin_type_unsigned_long;
+    return &builtin_type_long;
+  }
+  return a->is_unsigned || b->is_unsigned ? &builtin_type_unsigned
+                                          : &builtin_type_int;
 }
 
 /*

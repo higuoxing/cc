@@ -72,7 +72,7 @@ static void codegen_addr(AstNode *expr) {
  * Signed loads sign-extend, unsigned loads zero-extend. Clobbers %r11.
  */
 static void codegen_load(Type *type, const char *dst) {
-  if (type->kind == TYPE_PTR)
+  if (type->size == 8)
     fprintf(out, "\tmovq (%%rax), %s\n", dst);
   else if (type->kind == TYPE_CHAR)
     fprintf(out,
@@ -91,7 +91,7 @@ static void codegen_load(Type *type, const char *dst) {
  * are preserved so the caller can produce the expression's result.
  */
 static void codegen_store(Type *type) {
-  if (type->kind == TYPE_PTR)
+  if (type->size == 8)
     fprintf(out, "\tmovq %%rcx, (%%rax)\n");
   else if (type->kind == TYPE_CHAR)
     fprintf(out, "\tmovb %%cl, (%%rax)\n");
@@ -101,7 +101,7 @@ static void codegen_store(Type *type) {
 
 /*
  * Normalize the value in %rax to its integer type: truncate to the type's
- * width, then sign- or zero-extend. Pointer and void values need no change.
+ * width, then sign- or zero-extend. Long, pointer and void need no change.
  */
 static void codegen_normalize(Type *type) {
   if (type->kind == TYPE_CHAR)
@@ -109,6 +109,70 @@ static void codegen_normalize(Type *type) {
                                    : "\tmovsbq %%al, %%rax\n");
   else if (type->kind == TYPE_INT)
     fprintf(out, type->is_unsigned ? "\tmovl %%eax, %%eax\n" : "\tcltq\n");
+}
+
+/*
+ * Test the full value in %rax using the expression's width.
+ */
+static void codegen_test(Type *type) {
+  fprintf(out, type->size == 8 ? "\tcmpq $0, %%rax\n" : "\tcmpl $0, %%eax\n");
+}
+
+/*
+ * Integer operands are already in %rax and %rcx. Width and signedness
+ * select instructions; shifts always take their count from %cl.
+ */
+static void codegen_integer_binary(AstNode *expr) {
+  bool wide = expr->type->size == 8;
+  char suffix = wide ? 'q' : 'l';
+  const char *lhs = wide ? "%rax" : "%eax";
+  const char *rhs = wide ? "%rcx" : "%ecx";
+  const char *op;
+
+  switch (expr->kind) {
+  case AST_ADD:
+    op = "add";
+    break;
+  case AST_SUB:
+    op = "sub";
+    break;
+  case AST_MUL:
+    op = "imul";
+    break;
+  case AST_BIT_AND:
+    op = "and";
+    break;
+  case AST_BIT_OR:
+    op = "or";
+    break;
+  case AST_BIT_XOR:
+    op = "xor";
+    break;
+  case AST_LSHIFT:
+    op = "sal";
+    rhs = "%cl";
+    break;
+  case AST_RSHIFT:
+    op = expr->type->is_unsigned ? "shr" : "sar";
+    rhs = "%cl";
+    break;
+  case AST_DIV:
+  case AST_MOD:
+    if (expr->type->is_unsigned) {
+      fprintf(out, "\txorl %%edx, %%edx\n");
+      fprintf(out, "\tdiv%c %s\n", suffix, rhs);
+    } else {
+      fprintf(out, wide ? "\tcqto\n" : "\tcltd\n");
+      fprintf(out, "\tidiv%c %s\n", suffix, rhs);
+    }
+    if (expr->kind == AST_MOD)
+      fprintf(out, "\tmov%c %s, %s\n", suffix, wide ? "%rdx" : "%edx", lhs);
+    return;
+  default:
+    fprintf(stderr, "unrecognized integer binary operator\n");
+    exit(1);
+  }
+  fprintf(out, "\t%s%c %s, %s\n", op, suffix, rhs, lhs);
 }
 
 static void codegen_expr(AstNode *expr) {
@@ -138,6 +202,9 @@ static void codegen_expr(AstNode *expr) {
     break;
   case AST_CONVERT:
     codegen_expr(expr->d.unary.operand);
+    if (is_integer(expr->type) &&
+        expr->type->size > expr->d.unary.operand->type->size)
+      codegen_normalize(expr->d.unary.operand->type);
     codegen_normalize(expr->type);
     break;
   case AST_INT_LITERAL:
@@ -146,26 +213,27 @@ static void codegen_expr(AstNode *expr) {
     break;
   case AST_ADD:
   case AST_SUB:
-    /*
-     * int +- int: no type checks needed, the parser classified the
-     * operation already.
-     */
+  case AST_MUL:
+  case AST_DIV:
+  case AST_MOD:
+  case AST_LSHIFT:
+  case AST_RSHIFT:
+  case AST_BIT_AND:
+  case AST_BIT_XOR:
+  case AST_BIT_OR:
     codegen_expr(expr->d.binary.rhs);
-    fprintf(out, "\tcltq\n");
     fprintf(out, "\tpushq %%rax\n");
     push_depth++;
     codegen_expr(expr->d.binary.lhs);
     fprintf(out, "\tpopq %%rcx\n");
     push_depth--;
-    fprintf(out, expr->kind == AST_ADD ? "\taddl %%ecx, %%eax\n"
-                                       : "\tsubl %%ecx, %%eax\n");
+    codegen_integer_binary(expr);
     break;
   case AST_PTR_ADD:
   case AST_PTR_SUB: {
     /* Pointer +- integer, scaled by the pointee's size. */
     codegen_expr(expr->d.binary.rhs);
-    fprintf(out, expr->d.binary.rhs->type->is_unsigned ? "\tmovl %%eax, %%eax\n"
-                                                       : "\tcltq\n");
+    codegen_normalize(expr->d.binary.rhs->type);
     fprintf(out, "\tpushq %%rax\n");
     push_depth++;
     codegen_expr(expr->d.binary.lhs);
@@ -190,68 +258,22 @@ static void codegen_expr(AstNode *expr) {
     fprintf(out, "\tidivq %%rcx\n");
     break;
   }
-  case AST_MUL:
-  case AST_DIV:
-  case AST_MOD:
-  case AST_LSHIFT:
-  case AST_RSHIFT:
-  case AST_BIT_AND:
-  case AST_BIT_XOR:
-  case AST_BIT_OR:
-    codegen_expr(expr->d.binary.rhs);
-    fprintf(out, "\tcltq\n");
-    fprintf(out, "\tpushq %%rax\n");
-    push_depth++;
-    codegen_expr(expr->d.binary.lhs);
-    fprintf(out, "\tpopq %%rcx\n");
-    push_depth--;
-
-    if (expr->kind == AST_MUL) {
-      /* %eax = %eax * %ecx */
-      fprintf(out, "\timull %%ecx, %%eax\n");
-    } else if (expr->kind == AST_DIV || expr->kind == AST_MOD) {
-      if (expr->type->is_unsigned) {
-        fprintf(out, "\txorl %%edx, %%edx\n");
-        fprintf(out, "\tdivl %%ecx\n");
-      } else {
-        fprintf(out, "\tcltd\n");
-        fprintf(out, "\tidivl %%ecx\n");
-      }
-      if (expr->kind == AST_MOD)
-        fprintf(out, "\tmovl %%edx, %%eax\n"); /* Remainder is the result */
-    } else if (expr->kind == AST_LSHIFT) {
-      /* The shift count comes from %cl, the low byte of %ecx. */
-      fprintf(out, "\tsall %%cl, %%eax\n");
-    } else if (expr->kind == AST_RSHIFT) {
-      fprintf(out, expr->type->is_unsigned ? "\tshrl %%cl, %%eax\n"
-                                           : "\tsarl %%cl, %%eax\n");
-    } else if (expr->kind == AST_BIT_AND) {
-      fprintf(out, "\tandl %%ecx, %%eax\n");
-    } else if (expr->kind == AST_BIT_XOR) {
-      fprintf(out, "\txorl %%ecx, %%eax\n");
-    } else if (expr->kind == AST_BIT_OR) {
-      fprintf(out, "\torl %%ecx, %%eax\n");
-    } else {
-      fprintf(stderr, "unrecognized binary operator\n");
-      exit(1);
-    }
-    break;
   case AST_LT:
   case AST_LE:
   case AST_GT:
   case AST_GE:
   case AST_EQ:
-  case AST_NE:
+  case AST_NE: {
+    bool wide = expr->d.binary.lhs->type->size == 8 ||
+                expr->d.binary.rhs->type->size == 8;
     codegen_expr(expr->d.binary.rhs);
-    fprintf(out, "\tcltq\n");
     fprintf(out, "\tpushq %%rax\n");
     push_depth++;
     codegen_expr(expr->d.binary.lhs);
     fprintf(out, "\tpopq %%rcx\n");
     push_depth--;
 
-    /* cmpl computes %eax - %ecx, i.e. lhs - rhs, and sets the flags. */
-    fprintf(out, "\tcmpl %%ecx, %%eax\n");
+    fprintf(out, wide ? "\tcmpq %%rcx, %%rax\n" : "\tcmpl %%ecx, %%eax\n");
     switch (expr->kind) {
     case AST_EQ:
       fprintf(out, "\tsete %%al\n");
@@ -282,15 +304,16 @@ static void codegen_expr(AstNode *expr) {
     /* Zero-extend %al into %eax. */
     fprintf(out, "\tmovzbl %%al, %%eax\n");
     break;
+  }
   case AST_LOGICAL_AND: {
     int seq = label_seq++;
 
     /* Short-circuit: skip the right operand when the left one is zero. */
     codegen_expr(expr->d.binary.lhs);
-    fprintf(out, "\tcmpl $0, %%eax\n");
+    codegen_test(expr->d.binary.lhs->type);
     fprintf(out, "\tje .L.false.%d\n", seq);
     codegen_expr(expr->d.binary.rhs);
-    fprintf(out, "\tcmpl $0, %%eax\n");
+    codegen_test(expr->d.binary.rhs->type);
     fprintf(out, "\tje .L.false.%d\n", seq);
     fprintf(out, "\tmovl $1, %%eax\n");
     fprintf(out, "\tjmp .L.end.%d\n", seq);
@@ -304,10 +327,10 @@ static void codegen_expr(AstNode *expr) {
 
     /* Short-circuit: skip the right operand when the left one is nonzero. */
     codegen_expr(expr->d.binary.lhs);
-    fprintf(out, "\tcmpl $0, %%eax\n");
+    codegen_test(expr->d.binary.lhs->type);
     fprintf(out, "\tjne .L.true.%d\n", seq);
     codegen_expr(expr->d.binary.rhs);
-    fprintf(out, "\tcmpl $0, %%eax\n");
+    codegen_test(expr->d.binary.rhs->type);
     fprintf(out, "\tjne .L.true.%d\n", seq);
     fprintf(out, "\tmovl $0, %%eax\n");
     fprintf(out, "\tjmp .L.end.%d\n", seq);
@@ -326,7 +349,7 @@ static void codegen_expr(AstNode *expr) {
 
     /* Only the selected branch is evaluated. */
     codegen_expr(expr->d.conditional.cond);
-    fprintf(out, "\tcmpl $0, %%eax\n");
+    codegen_test(expr->d.conditional.cond->type);
     fprintf(out, "\tje .L.else.%d\n", seq);
     codegen_expr(expr->d.conditional.then_expr);
     fprintf(out, "\tjmp .L.end.%d\n", seq);
@@ -381,16 +404,15 @@ static void codegen_expr(AstNode *expr) {
   }
   case AST_NEG:
     codegen_expr(expr->d.unary.operand);
-    fprintf(out, "\tnegl %%eax\n");
+    fprintf(out, expr->type->size == 8 ? "\tnegq %%rax\n" : "\tnegl %%eax\n");
     break;
   case AST_BITWISE_NOT:
     codegen_expr(expr->d.unary.operand);
-    fprintf(out, "\tnotl %%eax\n");
+    fprintf(out, expr->type->size == 8 ? "\tnotq %%rax\n" : "\tnotl %%eax\n");
     break;
   case AST_LOGICAL_NOT:
     codegen_expr(expr->d.unary.operand);
-    /* Compare %eax to 0 */
-    fprintf(out, "\tcmpl $0, %%eax\n");
+    codegen_test(expr->d.unary.operand->type);
     /* Set %al to 1 if %eax was 0 */
     fprintf(out, "\tsete %%al\n");
     /* Zero-extend %al into %eax */
@@ -399,14 +421,14 @@ static void codegen_expr(AstNode *expr) {
   case AST_PRE_INCREMENT:
   case AST_PRE_DECREMENT: {
     int is_ptr = expr->type->kind == TYPE_PTR;
+    bool wide = expr->type->size == 8;
     /* Pointers step by the pointee's size, integers by 1. */
     int step = is_ptr ? expr->type->base->size : 1;
     codegen_addr(expr->d.unary.operand);
     codegen_load(expr->type, "%rcx");
-    fprintf(out, "\t%s $%d, %s\n",
-            expr->kind == AST_PRE_INCREMENT ? (is_ptr ? "addq" : "addl")
-                                            : (is_ptr ? "subq" : "subl"),
-            step, is_ptr ? "%rcx" : "%ecx");
+    fprintf(out, "\t%s%c $%d, %s\n",
+            expr->kind == AST_PRE_INCREMENT ? "add" : "sub", wide ? 'q' : 'l',
+            step, wide ? "%rcx" : "%ecx");
     codegen_store(expr->type);
     fprintf(out, "\tmovq %%rcx, %%rax\n");
     codegen_normalize(expr->type);
@@ -415,6 +437,7 @@ static void codegen_expr(AstNode *expr) {
   case AST_POST_INCREMENT:
   case AST_POST_DECREMENT: {
     int is_ptr = expr->type->kind == TYPE_PTR;
+    bool wide = expr->type->size == 8;
     int step = is_ptr ? expr->type->base->size : 1;
 
     codegen_addr(expr->d.unary.operand);
@@ -422,10 +445,9 @@ static void codegen_expr(AstNode *expr) {
     /* Save the original value as the result. */
     fprintf(out, "\tpushq %%rcx\n");
     push_depth++;
-    fprintf(out, "\t%s $%d, %s\n",
-            expr->kind == AST_POST_INCREMENT ? (is_ptr ? "addq" : "addl")
-                                             : (is_ptr ? "subq" : "subl"),
-            step, is_ptr ? "%rcx" : "%ecx");
+    fprintf(out, "\t%s%c $%d, %s\n",
+            expr->kind == AST_POST_INCREMENT ? "add" : "sub", wide ? 'q' : 'l',
+            step, wide ? "%rcx" : "%ecx");
     codegen_store(expr->type);
     fprintf(out, "\tpopq %%rax\n");
     push_depth--;
@@ -473,7 +495,7 @@ static void codegen_stmt(AstNode *stmt, int break_label, int continue_label,
 
     /* Jump to the else branch when the condition is zero. */
     codegen_expr(stmt->d.if_stmt.cond);
-    fprintf(out, "\tcmpl $0, %%eax\n");
+    codegen_test(stmt->d.if_stmt.cond->type);
     fprintf(out, "\tje .L.else.%d\n", seq);
     codegen_stmt(stmt->d.if_stmt.then_stmt, break_label, continue_label,
                  ret_label);
@@ -495,7 +517,7 @@ static void codegen_stmt(AstNode *stmt, int break_label, int continue_label,
     fprintf(out, ".L.begin.%d:\n", seq);
     fprintf(out, ".L.continue.%d:\n", seq);
     codegen_expr(stmt->d.while_stmt.cond);
-    fprintf(out, "\tcmpl $0, %%eax\n");
+    codegen_test(stmt->d.while_stmt.cond->type);
     fprintf(out, "\tje .L.end.%d\n", seq);
     codegen_stmt(stmt->d.while_stmt.body, seq, seq, ret_label);
     fprintf(out, "\tjmp .L.begin.%d\n", seq);
@@ -512,7 +534,7 @@ static void codegen_stmt(AstNode *stmt, int break_label, int continue_label,
     if (stmt->d.for_stmt.cond) {
       /* An omitted condition is a nonzero constant: skip the test. */
       codegen_expr(stmt->d.for_stmt.cond);
-      fprintf(out, "\tcmpl $0, %%eax\n");
+      codegen_test(stmt->d.for_stmt.cond->type);
       fprintf(out, "\tje .L.end.%d\n", seq);
     }
     codegen_stmt(stmt->d.for_stmt.body, seq, seq, ret_label);
@@ -535,7 +557,7 @@ static void codegen_stmt(AstNode *stmt, int break_label, int continue_label,
     codegen_stmt(stmt->d.do_stmt.body, seq, seq, ret_label);
     fprintf(out, ".L.continue.%d:\n", seq);
     codegen_expr(stmt->d.do_stmt.cond);
-    fprintf(out, "\tcmpl $0, %%eax\n");
+    codegen_test(stmt->d.do_stmt.cond->type);
     fprintf(out, "\tjne .L.begin.%d\n", seq);
     fprintf(out, ".L.end.%d:\n", seq);
     break;
@@ -574,7 +596,13 @@ static void codegen_stmt(AstNode *stmt, int break_label, int continue_label,
         default_node = cl->node;
         continue;
       }
-      fprintf(out, "\tcmpl $%" PRId64 ", %%eax\n", cl->node->d.case_stmt.val);
+      if (stmt->d.switch_stmt.cond->type->size == 8) {
+        fprintf(out, "\tmovabsq $%" PRId64 ", %%rcx\n",
+                cl->node->d.case_stmt.val);
+        fprintf(out, "\tcmpq %%rcx, %%rax\n");
+      } else {
+        fprintf(out, "\tcmpl $%" PRId64 ", %%eax\n", cl->node->d.case_stmt.val);
+      }
       fprintf(out, "\tje .L.case.%d\n", cl->node->d.case_stmt.label);
     }
     if (default_node)
@@ -598,7 +626,7 @@ static void codegen_stmt(AstNode *stmt, int break_label, int continue_label,
   case AST_DECL:
     if (stmt->d.decl.init) {
       codegen_expr(stmt->d.decl.init);
-      if (stmt->d.decl.var->type->kind == TYPE_PTR)
+      if (stmt->d.decl.var->type->size == 8)
         fprintf(out, "\tmovq %%rax, -%d(%%rbp)\n", stmt->d.decl.var->offset);
       else if (stmt->d.decl.var->type->kind == TYPE_CHAR)
         fprintf(out, "\tmovb %%al, -%d(%%rbp)\n", stmt->d.decl.var->offset);
@@ -662,7 +690,7 @@ void codegen(const AstNode *ast, FILE *out_file) {
       for (param = fn->d.function.params; param; param = param->next) {
         --nparams;
         if (nparams < 6) {
-          if (param->type->kind == TYPE_PTR)
+          if (param->type->size == 8)
             fprintf(out, "\tmovq %s, -%d(%%rbp)\n", argregs64[nparams],
                     param->offset);
           else if (param->type->kind == TYPE_CHAR)
@@ -673,7 +701,7 @@ void codegen(const AstNode *ast, FILE *out_file) {
                     param->offset);
         } else {
           int offset = 16 + (nparams - 6) * 8;
-          if (param->type->kind == TYPE_PTR) {
+          if (param->type->size == 8) {
             fprintf(out, "\tmovq %d(%%rbp), %%rax\n", offset);
             fprintf(out, "\tmovq %%rax, -%d(%%rbp)\n", param->offset);
           } else if (param->type->kind == TYPE_CHAR) {
