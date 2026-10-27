@@ -88,6 +88,11 @@ typedef enum {
   TOKEN_WHILE, /* 'while' */
 } TokenKind;
 
+enum {
+  INT_SUFFIX_UNSIGNED = 1 << 0,
+  INT_SUFFIX_LONG = 1 << 1,
+};
+
 typedef struct {
   TokenKind kind;
   const char *start;
@@ -95,6 +100,7 @@ typedef struct {
   int line;
   int col;
   int64_t int_literal_val;
+  unsigned int_literal_suffix;
 } Token;
 
 typedef struct {

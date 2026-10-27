@@ -203,6 +203,25 @@ check 0 'int main() { return 000; }' octal-zeros
 check 7 'int main() { return 07; }' octal-seven
 check 8 'int main() { return 010; }' octal-ten
 check 42 'int main() { return 052; }' octal-fifty-two
+# Integer suffix spelling and token boundaries; literal typing follows later.
+for suffix in U u L l UL Ul uL ul LU Lu lU lu; do
+    check 42 "int main(void) { return 42$suffix; }" "integer-suffix-decimal-$suffix"
+    check 42 "int main(void) { return 052$suffix; }" "integer-suffix-octal-$suffix"
+done
+check 42 'int main(void) { return 1U+051L; }' integer-suffix-before-operator
+check 0 'int main(void) { return 0uL; }' integer-suffix-zero
+check_error integer-suffix-duplicate-unsigned 'int main(void) { return 42UU; }' '1:25: error: invalid integer suffix'
+check_error integer-suffix-duplicate-unsigned-case 'int main(void) { return 42Uu; }' '1:25: error: invalid integer suffix'
+check_error integer-suffix-duplicate-unsigned-after-long 'int main(void) { return 42ULU; }' '1:25: error: invalid integer suffix'
+check_error integer-suffix-long-long 'int main(void) { return 42LL; }' '1:25: error: long long integer literals not supported'
+check_error integer-suffix-long-long-lowercase 'int main(void) { return 42ll; }' '1:25: error: long long integer literals not supported'
+check_error integer-suffix-long-long-mixed-case 'int main(void) { return 42lL; }' '1:25: error: long long integer literals not supported'
+check_error integer-suffix-unsigned-long-long 'int main(void) { return 42uLL; }' '1:25: error: long long integer literals not supported'
+check_error integer-suffix-trailing-letter 'int main(void) { return 42ULx; }' '1:25: error: invalid integer suffix'
+check_error integer-suffix-trailing-digit 'int main(void) { return 42U2; }' '1:25: error: invalid integer suffix'
+check_error integer-suffix-trailing-underscore 'int main(void) { return 42L_name; }' '1:25: error: invalid integer suffix'
+check_error integer-suffix-invalid-octal 'int main(void) { return 08U; }' '1:25: error: invalid digit in octal integer literal'
+
 check 42 'int main() { int a = 41; return ++a; }'
 check 41 'int main() { int a = 41; return a++; }'
 check 42 'int main() { int a = 43; return --a; }'

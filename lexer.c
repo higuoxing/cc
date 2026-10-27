@@ -176,6 +176,29 @@ static void lexer_error(Lexer *l, Token loc, const char *message) {
   exit(1);
 }
 
+/*
+ * Integer suffixes allow one U and one L, in either order and either case.
+ * Keep the flags on the token for literal type selection in the parser.
+ */
+static unsigned read_int_suffix(Lexer *l, Token loc) {
+  unsigned suffix = 0;
+  while (*l->cursor == 'u' || *l->cursor == 'U' || *l->cursor == 'l' ||
+         *l->cursor == 'L') {
+    unsigned flag = *l->cursor == 'u' || *l->cursor == 'U' ? INT_SUFFIX_UNSIGNED
+                                                           : INT_SUFFIX_LONG;
+    if (suffix & flag) {
+      if (flag == INT_SUFFIX_LONG)
+        lexer_error(l, loc, "long long integer literals not supported");
+      lexer_error(l, loc, "invalid integer suffix");
+    }
+    suffix |= flag;
+    lexer_advance(l);
+  }
+  if (isalnum((unsigned char)*l->cursor) || *l->cursor == '_')
+    lexer_error(l, loc, "invalid integer suffix");
+  return suffix;
+}
+
 static int hex_digit(unsigned char c) {
   if (c >= '0' && c <= '9')
     return c - '0';
@@ -289,7 +312,7 @@ static Token read_char_literal(Lexer *l, Token tok) {
 }
 
 Token lexer_next_token(Lexer *l) {
-  Token tok;
+  Token tok = {0};
 
   skip_whitespace(l);
 
@@ -535,23 +558,15 @@ Token lexer_next_token(Lexer *l) {
       int digit;
       digit = *l->cursor - '0';
 
-      if (base == 8 && digit >= 8) {
-        fprintf(stderr,
-                "%s:%d:%d: error: invalid digit in octal integer literal\n",
-                l->filename, tok.line, tok.col);
-        exit(1);
-      }
-      if (int_literal_val > (INT32_MAX - digit) / base) {
-        fprintf(
-            stderr,
-            "%s:%d:%d: error: integer literal out of range for 32-bit int\n",
-            l->filename, tok.line, tok.col);
-        exit(1);
-      }
+      if (base == 8 && digit >= 8)
+        lexer_error(l, tok, "invalid digit in octal integer literal");
+      if (int_literal_val > (INT32_MAX - digit) / base)
+        lexer_error(l, tok, "integer literal out of range for 32-bit int");
       int_literal_val = int_literal_val * base + digit;
       lexer_advance(l);
     }
 
+    tok.int_literal_suffix = read_int_suffix(l, tok);
     tok.kind = TOKEN_INT_LITERAL;
     tok.len = (int)(l->cursor - tok.start);
     tok.int_literal_val = int_literal_val;
