@@ -100,7 +100,7 @@ typedef struct {
   int len;
   int line;
   int col;
-  int64_t int_literal_val;
+  uint64_t int_literal_val;
   unsigned int_literal_suffix;
 } Token;
 

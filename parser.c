@@ -328,8 +328,7 @@ static AstNode *parse_postfix(Parser *p) {
 static AstNode *parse_primary(Parser *p) {
   if (p->current.kind == TOKEN_INT_LITERAL) {
     AstNode *expr;
-    expr = new_expr(p, AST_INT_LITERAL, &builtin_type_int);
-    expr->d.int_literal.val = p->current.int_literal_val;
+    expr = sema_integer_literal(p, p->current);
 
     /* Consume the integer or character constant. */
     parser_advance(p);

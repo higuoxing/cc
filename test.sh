@@ -204,7 +204,7 @@ check 0 'int main() { return 000; }' octal-zeros
 check 7 'int main() { return 07; }' octal-seven
 check 8 'int main() { return 010; }' octal-ten
 check 42 'int main() { return 052; }' octal-fifty-two
-# Integer suffix spelling and token boundaries; literal typing follows later.
+# Integer suffix spelling and token boundaries.
 for suffix in U u L l UL Ul uL ul LU Lu lU lu; do
     check 42 "int main(void) { return 42$suffix; }" "integer-suffix-decimal-$suffix"
     check 42 "int main(void) { return 052$suffix; }" "integer-suffix-octal-$suffix"
@@ -630,6 +630,73 @@ check_error character-literal-raw-newline $'int main(void) { return \'\n\'; }' "
 check_error character-literal-raw-crlf $'int main(void) { return \'\r\n\'; }' "1:25: error: unterminated character literal"
 check_error character-literal-escaped-newline $'int main(void) { return \'\\\n\'; }' "1:25: error: unterminated character literal"
 
+# Integer literal ranges, suffix types, and 64-bit constant expressions.
+check 1 'int main(void) { return 2147483648 > -1; }' literal-decimal-above-int
+check 1 'int main(void) { return 4294967295 > -1 && ~4294967295 == -4294967296L; }' literal-decimal-uses-long
+check 1 'int main(void) { return -2147483648 < 0U; }' literal-minus-is-separate-operator
+check 1 'int main(void) { return 1U - 2 > 0 && 4294967295U + 1 == 0; }' literal-unsigned-int-type
+check 1 'int main(void) { return 4294967296U >> 32 == 1 && 4294967296U > -1L == 0; }' literal-unsigned-promotes-to-long
+check 1 'int main(void) { return 1L << 40 == 1099511627776; }' literal-long-suffix-width
+check 1 'int main(void) { return 1UL - 2 > 9223372036854775807L; }' literal-unsigned-long-suffix
+check 1 'int main(void) { return 037777777777 > -1 == 0 && ~037777777777 == 0U; }' literal-octal-unsigned-int-type
+check 1 'int main(void) { return 040000000000 > -1 && 040000000000 >> 32 == 1; }' literal-octal-long-type
+check 1 'int main(void) { return 037777777777L > -1 && 037777777777L >> 32 == 0; }' literal-octal-long-suffix
+check 1 'int main(void) { return 01000000000000000000000 >> 63 == 1; }' literal-octal-unsigned-long-type
+check 1 'int main(void) { return 01777777777777777777777 == 18446744073709551615UL; }' literal-octal-unsigned-long-max
+check 1 'int main(void) { return 01000000000000000000000L > 0; }' literal-octal-long-selects-unsigned
+check 1 'int main(void) { long x = 9223372036854775807; return x > 2147483647 && x >> 62 == 1; }' literal-long-max
+check 1 'int main(void) { long x = -9223372036854775807L - 1; return x < 0 && x >> 63 == -1; }' literal-long-min
+check 1 'int main(void) { unsigned long x = 18446744073709551615U; return x / 2 == 9223372036854775807L && x + 1 == 0; }' literal-unsigned-long-max
+check 1 'int main(void) { return 18446744073709551615ul == 18446744073709551615LU; }' literal-suffix-case-order-large
+check 1 'int main(void) { unsigned short s = 4294967295U; unsigned u = 18446744073709551615UL; return s == 65535 && u == 4294967295U; }' literal-narrow-conversions
+check 1 'long f(long x) { return x; } int main(void) { return f(4294967296L) == 4294967296L; }' literal-long-call
+check 1 'unsigned long f(int a, int b, int c, int d, int e, int f, unsigned long g) { return g; } int main(void) { return f(1,2,3,4,5,6,18446744073709551615UL) == 18446744073709551615UL; }' literal-wide-stack-argument
+check 42 'int main(void) { long x = 4294967296L; switch (x) { case 4294967296L: return 42; default: return 0; } }' case-long-literal
+check 42 'int main(void) { unsigned long x = 18446744073709551615UL; switch (x) { case 18446744073709551615UL: return 42; default: return 0; } }' case-unsigned-long-literal
+check 42 'int main(void) { long x = -9223372036854775807L - 1; switch (x) { case -9223372036854775807L - 1: return 42; default: return 0; } }' case-long-min
+check 42 'int main(void) { switch (0) { case 18446744073709551615UL + 1: return 42; default: return 0; } }' case-unsigned-long-add-wrap
+check 42 'int main(void) { unsigned long x = 18446744073709551615UL; switch (x) { case 0UL - 1: return 42; default: return 0; } }' case-unsigned-long-subtract-wrap
+check 42 'int main(void) { switch (1) { case 18446744073709551615UL * 18446744073709551615UL: return 42; default: return 0; } }' case-unsigned-long-multiply-wrap
+check 42 'int main(void) { long x = 9223372032559808512L; switch (x) { case 4294967296L * 2147483647: return 42; default: return 0; } }' case-long-multiply
+check 42 'int main(void) { long x = -9223372036854775807L - 1; switch (x) { case (-9223372036854775807L - 1) * 1: return 42; default: return 0; } }' case-long-min-multiply
+check 42 'int main(void) { long x = 9223372036854775807L; switch (x) { case 18446744073709551615UL / 2: return 42; default: return 0; } }' case-unsigned-long-division
+check 42 'int main(void) { switch (1) { case 18446744073709551615UL % 7: return 42; default: return 0; } }' case-unsigned-long-remainder
+check 42 'int main(void) { switch (-1) { case -4294967297L / 4294967296L: return 42; default: return 0; } }' case-long-negative-division
+check 42 'int main(void) { long x = -9223372036854775807L - 1; switch (x) { case -9223372036854775807L + -1L: return 42; default: return 0; } }' case-long-add-negative
+check 42 'int main(void) { switch (-1) { case (-9223372036854775807L - 1) + 9223372036854775807L: return 42; default: return 0; } }' case-long-add-min-max
+check 42 'int main(void) { switch (0) { case 9223372036854775807L - 9223372036854775807L: return 42; default: return 0; } }' case-long-subtract
+check 42 'int main(void) { unsigned long x = 9223372036854775808UL; switch (x) { case 1UL << 63: return 42; default: return 0; } }' case-long-shift-63
+check 42 'int main(void) { switch (1) { case 18446744073709551615UL >> 63: return 42; default: return 0; } }' case-unsigned-long-right-shift
+check 42 'int main(void) { switch (-1) { case -1L >> 63: return 42; default: return 0; } }' case-long-signed-right-shift
+check 42 'int main(void) { long x = 1099511627776L; switch (x) { case 1L << 40: return 42; default: return 0; } }' case-long-left-shift
+check 42 'int main(void) { switch (1) { case 18446744073709551615UL > 9223372036854775807L: return 42; default: return 0; } }' case-unsigned-long-comparison
+check 42 'int main(void) { switch (0) { case 18446744073709551615UL < 1UL: return 42; default: return 0; } }' case-unsigned-long-comparison-false
+check 42 'int main(void) { switch (-1) { case ~0UL: return 42; default: return 0; } }' case-unsigned-long-narrow
+check 42 'int main(void) { switch (0) { case ~18446744073709551615UL: return 42; default: return 0; } }' case-unsigned-long-not
+check 42 'int main(void) { switch (1) { case -18446744073709551615UL: return 42; default: return 0; } }' case-unsigned-long-negate
+check 42 'int main(void) { switch (0) { case 0 && (9223372036854775807L + 1L): return 42; default: return 0; } }' case-long-overflow-short-circuit
+check 1 'int main(void) { int *p = 18446744073709551615UL + 1; return p == 0; }' literal-unsigned-long-null-constant
+
+check_error literal-over-uint64 'int main(void) { return 18446744073709551616UL; }' '1:25: error: integer literal out of range for 64-bit unsigned integer'
+check_error literal-over-uint64-no-suffix 'int main(void) { return 18446744073709551616; }' '1:25: error: integer literal out of range for 64-bit unsigned integer'
+check_error literal-over-uint64-octal 'int main(void) { return 02000000000000000000000U; }' '1:25: error: integer literal out of range for 64-bit unsigned integer'
+check_error literal-over-signed-long 'int main(void) { return 9223372036854775808; }' '1:25: error: integer literal out of range for supported signed types'
+check_error literal-over-signed-long-suffix 'int main(void) { return 9223372036854775808L; }' '1:25: error: integer literal out of range for supported signed types'
+check_error case-long-overflow-add 'int main(void) { switch (0) { case 9223372036854775807L + 1L: return 1; } return 0; }' '1:61: error: integer overflow in constant expression'
+check_error case-long-overflow-sub 'int main(void) { switch (0) { case (-9223372036854775807L - 1) - 1L: return 1; } return 0; }' '1:68: error: integer overflow in constant expression'
+check_error case-long-overflow-mul 'int main(void) { switch (0) { case 9223372036854775807L * 2L: return 1; } return 0; }' '1:61: error: integer overflow in constant expression'
+check_error case-long-overflow-mul-min 'int main(void) { switch (0) { case (-9223372036854775807L - 1) * -1L: return 1; } return 0; }' '1:69: error: integer overflow in constant expression'
+check_error case-long-overflow-neg 'int main(void) { switch (0) { case -(-9223372036854775807L - 1): return 1; } return 0; }' '1:64: error: integer overflow in constant expression'
+check_error case-long-overflow-div 'int main(void) { switch (0) { case (-9223372036854775807L - 1) / -1L: return 1; } return 0; }' '1:69: error: integer overflow in constant expression'
+check_error case-long-overflow-mod 'int main(void) { switch (0) { case (-9223372036854775807L - 1) % -1L: return 1; } return 0; }' '1:69: error: integer overflow in constant expression'
+check_error case-long-shift-64 'int main(void) { switch (0) { case 1L << 64: return 1; } return 0; }' '1:44: error: invalid shift count in constant expression'
+check_error case-unsigned-long-shift-64 'int main(void) { switch (0) { case 1UL << 64: return 1; } return 0; }' '1:45: error: invalid shift count in constant expression'
+check_error case-long-overflow-shift 'int main(void) { switch (0) { case 9223372036854775807L << 1: return 1; } return 0; }' '1:61: error: integer overflow in constant expression'
+check_error case-long-shift-negative 'int main(void) { switch (0) { case -1L << 1: return 1; } return 0; }' '1:44: error: left shift of negative value in constant expression'
+check_error case-unsigned-long-zero-divisor 'int main(void) { switch (0) { case 1UL / 0UL: return 1; } return 0; }' '1:45: error: division by zero in constant expression'
+check_error case-long-duplicate-after-conversion 'int main(void) { switch (0) { case 4294967296L: return 1; case 0: return 2; } }' '1:59: error: duplicate case value'
+check_error case-unsigned-long-duplicate 'int main(void) { unsigned long x = 0; switch (x) { case -1: return 1; case 18446744073709551615UL: return 2; } return 0; }' '1:71: error: duplicate case value'
+
 # Full unsigned short int and unsigned long int spellings.
 check 1 'int main(void) { unsigned short int x = -1; return x == 65535 && x + 1 == 65536; }' unsigned-short-int-promotion
 check 1 'int main(void) { unsigned short int x = 65537; x += 65535; return x == 0; }' unsigned-short-int-truncation
@@ -943,9 +1010,6 @@ for kw in \
 		"int main() { int $kw; return 0; }" \
 		'1:18: error: expect variable name'
 done
-# TODO: Allow different type of integer literals
-check_error literal-over-int32 'int main() { return 2147483648; }' \
-	    '1:21: error: integer literal out of range for 32-bit int'
 check_error invalid-increment 'int main() { return ++1; }' \
 	    '1:21: error: invalid increment target'
 check_error invalid-increment 'int main() { return 1++; }' \

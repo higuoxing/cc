@@ -547,7 +547,7 @@ Token lexer_next_token(Lexer *l) {
   }
 
   if (isdigit((unsigned char)*l->cursor)) {
-    int64_t int_literal_val;
+    uint64_t int_literal_val;
     int base;
 
     int_literal_val = 0;
@@ -560,8 +560,9 @@ Token lexer_next_token(Lexer *l) {
 
       if (base == 8 && digit >= 8)
         lexer_error(l, tok, "invalid digit in octal integer literal");
-      if (int_literal_val > (INT32_MAX - digit) / base)
-        lexer_error(l, tok, "integer literal out of range for 32-bit int");
+      if (int_literal_val > (UINT64_MAX - digit) / base)
+        lexer_error(l, tok,
+                    "integer literal out of range for 64-bit unsigned integer");
       int_literal_val = int_literal_val * base + digit;
       lexer_advance(l);
     }

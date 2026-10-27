@@ -264,7 +264,7 @@ typedef struct AstNode {
     } variable;
 
     struct {
-      int64_t val;
+      uint64_t val;
     } int_literal;
 
     struct {

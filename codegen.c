@@ -219,8 +219,11 @@ static void codegen_expr(AstNode *expr) {
     codegen_normalize(expr->type);
     break;
   case AST_INT_LITERAL:
-    /* movl $VAL, %eax */
-    fprintf(out, "\tmovl $%" PRId64 ", %%eax\n", expr->d.int_literal.val);
+    if (expr->type->size == 8)
+      fprintf(out, "\tmovabsq $%" PRIu64 ", %%rax\n", expr->d.int_literal.val);
+    else
+      fprintf(out, "\tmovl $%" PRIu32 ", %%eax\n",
+              (uint32_t)expr->d.int_literal.val);
     break;
   case AST_ADD:
   case AST_SUB:

@@ -224,6 +224,40 @@ static AstNode *new_expr(Parser *p, AstKind kind, Type *type, Token loc) {
   return node;
 }
 
+/*
+ * Select the first supported type that holds the literal (C11 6.4.4.1).
+ * Decimal constants without U use signed types; octal may use unsigned.
+ * Character constants always have type int.
+ */
+AstNode *sema_integer_literal(Parser *p, Token loc) {
+  uint64_t value = loc.int_literal_val;
+  bool is_unsigned = (loc.int_literal_suffix & INT_SUFFIX_UNSIGNED) != 0;
+  bool is_long = (loc.int_literal_suffix & INT_SUFFIX_LONG) != 0;
+  bool decimal = loc.start[0] != '0';
+  Type *type;
+  AstNode *node;
+
+  if (loc.start[0] == '\'')
+    type = &builtin_type_int;
+  else if (is_unsigned)
+    type = !is_long && value <= UINT32_MAX ? &builtin_type_unsigned
+                                           : &builtin_type_unsigned_long;
+  else if (!is_long && value <= INT32_MAX)
+    type = &builtin_type_int;
+  else if (!is_long && !decimal && value <= UINT32_MAX)
+    type = &builtin_type_unsigned;
+  else if (value <= INT64_MAX)
+    type = &builtin_type_long;
+  else if (!decimal)
+    type = &builtin_type_unsigned_long;
+  else
+    error_at(p, loc, "integer literal out of range for supported signed types");
+
+  node = new_expr(p, AST_INT_LITERAL, type, loc);
+  node->d.int_literal.val = value;
+  return node;
+}
+
 AstNode *sema_unary(Parser *p, AstKind op, AstNode *operand, Token loc) {
   AstNode *node;
   Type *type;
@@ -445,9 +479,20 @@ AstNode *sema_conditional(Parser *p, AstNode *cond, AstNode *then_expr,
 }
 
 /*
- * Unsigned arithmetic wraps modulo 2^32; signed overflow is diagnosed.
+ * Constant values use int64_t to carry signed values or unsigned bit patterns.
+ * Convert high unsigned values without relying on an out-of-range signed cast.
+ */
+static int64_t integer_from_bits(uint64_t bits) {
+  return bits <= INT64_MAX ? (int64_t)bits : -1 - (int64_t)(UINT64_MAX - bits);
+}
+
+/*
+ * Arithmetic is promoted to int or long. Unsigned results wrap to the type's
+ * width; signed 64-bit overflow is checked before performing the operation.
  */
 static int64_t checked_integer(Parser *p, Type *type, int64_t val) {
+  if (type->size == 8)
+    return val;
   if (type->is_unsigned)
     return (uint32_t)val;
   if (val < INT32_MIN || val > INT32_MAX)
@@ -458,13 +503,15 @@ static int64_t checked_integer(Parser *p, Type *type, int64_t val) {
 /* Evaluate an integer constant expression (C11 6.6), used for case labels. */
 int64_t eval_const_expr(Parser *p, AstNode *expr) {
   int64_t lhs, rhs;
+  bool unsigned_comparison;
+  int width = expr->type->size * 8;
   switch (expr->kind) {
   case AST_INT_LITERAL:
-    return expr->d.int_literal.val;
+    return integer_from_bits(expr->d.int_literal.val);
   case AST_CONVERT: {
     int64_t val = eval_const_expr(p, expr->d.unary.operand);
     if (is_integer(expr->type) && expr->type->size < 8) {
-      int64_t modulus = INT64_C(1) << (expr->type->size * 8);
+      int64_t modulus = INT64_C(1) << width;
       val = (uint64_t)val & (uint64_t)(modulus - 1);
       return expr->type->is_unsigned || val < modulus / 2 ? val : val - modulus;
     }
@@ -474,9 +521,12 @@ int64_t eval_const_expr(Parser *p, AstNode *expr) {
     return eval_const_expr(p, expr->d.conditional.cond)
                ? eval_const_expr(p, expr->d.conditional.then_expr)
                : eval_const_expr(p, expr->d.conditional.else_expr);
-  case AST_NEG:
-    return checked_integer(p, expr->type,
-                           -eval_const_expr(p, expr->d.unary.operand));
+  case AST_NEG: {
+    int64_t val = eval_const_expr(p, expr->d.unary.operand);
+    if (!expr->type->is_unsigned && val == INT64_MIN)
+      parse_error(p, "integer overflow in constant expression");
+    return checked_integer(p, expr->type, integer_from_bits(0 - (uint64_t)val));
+  }
   case AST_BITWISE_NOT:
     return checked_integer(p, expr->type,
                            ~eval_const_expr(p, expr->d.unary.operand));
@@ -515,43 +565,81 @@ int64_t eval_const_expr(Parser *p, AstNode *expr) {
 
   lhs = eval_const_expr(p, expr->d.binary.lhs);
   rhs = eval_const_expr(p, expr->d.binary.rhs);
+  unsigned_comparison = expr->d.binary.lhs->type->is_unsigned;
 
   switch (expr->kind) {
   case AST_ADD:
+    if (expr->type->is_unsigned)
+      return checked_integer(p, expr->type,
+                             integer_from_bits((uint64_t)lhs + (uint64_t)rhs));
+    if ((rhs > 0 && lhs > INT64_MAX - rhs) ||
+        (rhs < 0 && lhs < INT64_MIN - rhs))
+      parse_error(p, "integer overflow in constant expression");
     return checked_integer(p, expr->type, lhs + rhs);
   case AST_SUB:
-    return checked_integer(p, expr->type, lhs - rhs);
-  case AST_MUL:
     if (expr->type->is_unsigned)
-      return (uint32_t)((uint64_t)lhs * (uint64_t)rhs);
-    return checked_integer(p, expr->type, lhs * rhs);
+      return checked_integer(p, expr->type,
+                             integer_from_bits((uint64_t)lhs - (uint64_t)rhs));
+    if ((rhs > 0 && lhs < INT64_MIN + rhs) ||
+        (rhs < 0 && lhs > INT64_MAX + rhs))
+      parse_error(p, "integer overflow in constant expression");
+    return checked_integer(p, expr->type, lhs - rhs);
+  case AST_MUL: {
+    if (expr->type->is_unsigned)
+      return checked_integer(p, expr->type,
+                             integer_from_bits((uint64_t)lhs * (uint64_t)rhs));
+    bool negative = (lhs < 0) != (rhs < 0);
+    uint64_t a = lhs < 0 ? 0 - (uint64_t)lhs : (uint64_t)lhs;
+    uint64_t b = rhs < 0 ? 0 - (uint64_t)rhs : (uint64_t)rhs;
+    uint64_t limit = (uint64_t)INT64_MAX + negative;
+    if (b && a > limit / b)
+      parse_error(p, "integer overflow in constant expression");
+    uint64_t product = a * b;
+    return checked_integer(p, expr->type,
+                           integer_from_bits(negative ? 0 - product : product));
+  }
   case AST_DIV:
   case AST_MOD:
     if (rhs == 0)
       parse_error(p, "division by zero in constant expression");
-    if (!expr->type->is_unsigned && lhs == INT32_MIN && rhs == -1)
+    if (expr->type->is_unsigned)
+      return checked_integer(
+          p, expr->type,
+          integer_from_bits(expr->kind == AST_DIV
+                                ? (uint64_t)lhs / (uint64_t)rhs
+                                : (uint64_t)lhs % (uint64_t)rhs));
+    if (lhs == (width == 64 ? INT64_MIN : INT32_MIN) && rhs == -1)
       parse_error(p, "integer overflow in constant expression");
     return checked_integer(p, expr->type,
                            expr->kind == AST_DIV ? lhs / rhs : lhs % rhs);
   case AST_LSHIFT:
-    if (rhs < 0 || rhs >= 32)
+    if (rhs < 0 || rhs >= width)
       parse_error(p, "invalid shift count in constant expression");
-    if (lhs < 0)
-      parse_error(p, "left shift of negative value in constant expression");
-    checked_integer(p, expr->type, lhs);
-    return checked_integer(p, expr->type, lhs << rhs);
+    if (!expr->type->is_unsigned) {
+      if (lhs < 0)
+        parse_error(p, "left shift of negative value in constant expression");
+      uint64_t limit = width == 64 ? INT64_MAX : INT32_MAX;
+      if ((uint64_t)lhs > (limit >> rhs))
+        parse_error(p, "integer overflow in constant expression");
+    }
+    return checked_integer(p, expr->type,
+                           integer_from_bits((uint64_t)lhs << rhs));
   case AST_RSHIFT:
-    if (rhs < 0 || rhs >= 32)
+    if (rhs < 0 || rhs >= width)
       parse_error(p, "invalid shift count in constant expression");
-    return lhs >> rhs;
+    if (expr->type->is_unsigned || lhs >= 0)
+      return checked_integer(p, expr->type,
+                             integer_from_bits((uint64_t)lhs >> rhs));
+    return checked_integer(p, expr->type,
+                           integer_from_bits(~(~(uint64_t)lhs >> rhs)));
   case AST_LT:
-    return lhs < rhs;
+    return unsigned_comparison ? (uint64_t)lhs < (uint64_t)rhs : lhs < rhs;
   case AST_LE:
-    return lhs <= rhs;
+    return unsigned_comparison ? (uint64_t)lhs <= (uint64_t)rhs : lhs <= rhs;
   case AST_GT:
-    return lhs > rhs;
+    return unsigned_comparison ? (uint64_t)lhs > (uint64_t)rhs : lhs > rhs;
   case AST_GE:
-    return lhs >= rhs;
+    return unsigned_comparison ? (uint64_t)lhs >= (uint64_t)rhs : lhs >= rhs;
   case AST_EQ:
     return lhs == rhs;
   case AST_NE:
