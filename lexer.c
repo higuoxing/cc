@@ -167,6 +167,127 @@ void skip_whitespace(Lexer *l) {
   }
 }
 
+static void lexer_error(Lexer *l, Token loc, const char *message)
+    __attribute__((noreturn));
+
+static void lexer_error(Lexer *l, Token loc, const char *message) {
+  fprintf(stderr, "%s:%d:%d: error: %s\n", l->filename, loc.line, loc.col,
+          message);
+  exit(1);
+}
+
+static int hex_digit(unsigned char c) {
+  if (c >= '0' && c <= '9')
+    return c - '0';
+  if (c >= 'a' && c <= 'f')
+    return c - 'a' + 10;
+  if (c >= 'A' && c <= 'F')
+    return c - 'A' + 10;
+  return -1;
+}
+
+/*
+ * Decode an escape after its backslash. Octal escapes consume up to three
+ * digits; hexadecimal escapes consume all following hexadecimal digits.
+ */
+static int read_char_escape(Lexer *l, Token loc) {
+  int value = 0;
+  int c = (unsigned char)*l->cursor;
+  if (c >= '0' && c <= '7') {
+    int i;
+    for (i = 0; i < 3 && *l->cursor >= '0' && *l->cursor <= '7'; ++i) {
+      value = value * 8 + *l->cursor - '0';
+      lexer_advance(l);
+    }
+    if (value > 255)
+      lexer_error(l, loc, "character escape out of range");
+    return value;
+  }
+  if (c == 'x') {
+    int digit;
+    lexer_advance(l);
+    if (hex_digit((unsigned char)*l->cursor) < 0)
+      lexer_error(l, loc, "expect hexadecimal digit in character escape");
+    while ((digit = hex_digit((unsigned char)*l->cursor)) >= 0) {
+      if (value > (255 - digit) / 16)
+        lexer_error(l, loc, "character escape out of range");
+      value = value * 16 + digit;
+      lexer_advance(l);
+    }
+    return value;
+  }
+
+  if (c == '\0' || c == '\n' || c == '\r')
+    lexer_error(l, loc, "unterminated character literal");
+  lexer_advance(l);
+  switch (c) {
+  case '\'':
+    return '\'';
+  case '"':
+    return '"';
+  case '?':
+    return '?';
+  case '\\':
+    return '\\';
+  case 'a':
+    return '\a';
+  case 'b':
+    return '\b';
+  case 'f':
+    return '\f';
+  case 'n':
+    return '\n';
+  case 'r':
+    return '\r';
+  case 't':
+    return '\t';
+  case 'v':
+    return '\v';
+  default:
+    lexer_error(l, loc, "invalid escape sequence in character literal");
+  }
+}
+
+/*
+ * Ordinary single-byte character constants have type int. Interpret the
+ * decoded byte as signed char, matching the target's plain char semantics.
+ */
+static Token read_char_literal(Lexer *l, Token tok) {
+  int value;
+  lexer_advance(l);
+  if (*l->cursor == '\'')
+    lexer_error(l, tok, "empty character literal");
+  if (*l->cursor == '\0' || *l->cursor == '\n' || *l->cursor == '\r')
+    lexer_error(l, tok, "unterminated character literal");
+
+  if (*l->cursor == '\\') {
+    lexer_advance(l);
+    value = read_char_escape(l, tok);
+  } else {
+    value = (unsigned char)*l->cursor;
+    lexer_advance(l);
+  }
+  if (*l->cursor == '\0' || *l->cursor == '\n' || *l->cursor == '\r')
+    lexer_error(l, tok, "unterminated character literal");
+  if (*l->cursor != '\'') {
+    const char *end = l->cursor;
+    while (*end && *end != '\n' && *end != '\r') {
+      if (*end == '\'')
+        lexer_error(l, tok, "multi-character literals not supported");
+      if (*end == '\\' && end[1] && end[1] != '\n' && end[1] != '\r')
+        ++end;
+      ++end;
+    }
+    lexer_error(l, tok, "unterminated character literal");
+  }
+  lexer_advance(l);
+
+  tok.kind = TOKEN_INT_LITERAL;
+  tok.len = (int)(l->cursor - tok.start);
+  tok.int_literal_val = value < 128 ? value : value - 256;
+  return tok;
+}
+
 Token lexer_next_token(Lexer *l) {
   Token tok;
 
@@ -185,6 +306,8 @@ Token lexer_next_token(Lexer *l) {
   }
 
   switch (*l->cursor) {
+  case '\'':
+    return read_char_literal(l, tok);
   case ';':
     tok.kind = TOKEN_SEMICOLON;
     tok.len = 1;

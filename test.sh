@@ -521,6 +521,50 @@ check_error char-incompatible-pointer 'int main(void) { char *p; int *q = p; ret
 check_error char-not-null-pointer-constant 'int main(void) { char c = 0; int *p = c; return 0; }' '1:35: error: incompatible initializer type'
 check_error char-pointer-assignment 'int main(void) { char c; int *p = 0; c = p; return 0; }' '1:40: error: incompatible assignment type'
 
+# Ordinary character constants are int tokens; byte escapes follow signed char.
+check 65 "int main(void) { return 'A'; }" character-literal-letter
+check 48 "int main(void) { return '0'; }" character-literal-digit
+check 32 "int main(void) { return ' '; }" character-literal-space
+check 34 "int main(void) { return '\"'; }" character-literal-double-quote
+check 39 "int main(void) { return '\\''; }" character-literal-escaped-quote
+check 34 "int main(void) { return '\\\"'; }" character-literal-escaped-double-quote
+check 92 "int main(void) { return '\\\\'; }" character-literal-backslash
+check 63 "int main(void) { return '\\?'; }" character-literal-question
+check 7 "int main(void) { return '\\a'; }" character-literal-alert
+check 8 "int main(void) { return '\\b'; }" character-literal-backspace
+check 12 "int main(void) { return '\\f'; }" character-literal-form-feed
+check 10 "int main(void) { return '\\n'; }" character-literal-newline
+check 13 "int main(void) { return '\\r'; }" character-literal-carriage-return
+check 9 "int main(void) { return '\\t'; }" character-literal-tab
+check 11 "int main(void) { return '\\v'; }" character-literal-vertical-tab
+check 0 "int main(void) { return '\\0'; }" character-literal-null
+check 7 "int main(void) { return '\\7'; }" character-literal-octal-one-digit
+check 10 "int main(void) { return '\\12'; }" character-literal-octal-two-digits
+check 65 "int main(void) { return '\\101'; }" character-literal-octal-three-digits
+check 65 "int main(void) { return '\\x41'; }" character-literal-hex
+check 65 "int main(void) { return '\\x00000041'; }" character-literal-hex-leading-zeroes
+check 1 "int main(void) { return '\\xff' == -1 && '\\377' == -1 && '\\x80' == -128 && '\\200' == -128; }" character-literal-signed-byte
+check 1 "int main(void) { char c = 'A'; return c == 65 && 'A' + 200 == 265; }" character-literal-char-initialization
+check 42 "int main(void) { switch ('\\n') { case 10: return 42; default: return 0; } }" character-literal-switch
+check 42 "int main(void) { switch (10) { case '\\n': return 42; default: return 0; } }" character-literal-case
+check 89 "int main(void) { return '/' + '*'; }" character-literal-comment-characters
+check 1 "char identity(char c) { return c; } int main(void) { return identity('\\xff') == -1; }" character-literal-function-argument
+check_error character-literal-empty "int main(void) { return ''; }" "1:25: error: empty character literal"
+check_error character-literal-multiple "int main(void) { return 'ab'; }" "1:25: error: multi-character literals not supported"
+check_error character-literal-invalid-escape "int main(void) { return '\\q'; }" "1:25: error: invalid escape sequence in character literal"
+check_error character-literal-empty-hex "int main(void) { return '\\x'; }" "1:25: error: expect hexadecimal digit in character escape"
+check_error character-literal-invalid-hex "int main(void) { return '\\xg'; }" "1:25: error: expect hexadecimal digit in character escape"
+check_error character-literal-octal-overflow "int main(void) { return '\\400'; }" "1:25: error: character escape out of range"
+check_error character-literal-hex-overflow "int main(void) { return '\\x100'; }" "1:25: error: character escape out of range"
+check_error character-literal-long-hex-overflow "int main(void) { return '\\xffffffffffffffffffff'; }" "1:25: error: character escape out of range"
+check_error character-literal-octal-limit "int main(void) { return '\\1234'; }" "1:25: error: multi-character literals not supported"
+check_error character-literal-eof "int main(void) { return '" "1:25: error: unterminated character literal"
+check_error character-literal-missing-quote "int main(void) { return 'a; }" "1:25: error: unterminated character literal"
+check_error character-literal-escape-eof "int main(void) { return '\\" "1:25: error: unterminated character literal"
+check_error character-literal-raw-newline $'int main(void) { return \'\n\'; }' "1:25: error: unterminated character literal"
+check_error character-literal-raw-crlf $'int main(void) { return \'\r\n\'; }' "1:25: error: unterminated character literal"
+check_error character-literal-escaped-newline $'int main(void) { return \'\\\n\'; }' "1:25: error: unterminated character literal"
+
 check_error missing-plus-rhs 'int main() { return 1 +; }' '1:24: error: expect expr'
 check_error missing-sub-rhs 'int main() { return 1 -; }' '1:24: error: expect expr'
 check_error missing-mul-rhs 'int main() { return 1 *; }' '1:24: error: expect expr'
