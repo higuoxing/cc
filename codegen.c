@@ -42,11 +42,12 @@ static FILE *out;
 
 /*
  * The first six integer argument registers, in order (System V AMD64),
- * in their 64-bit and 32-bit spellings.
+ * in their 64-bit, 32-bit, and 8-bit spellings.
  */
-static const char *argregs[] = {"%rdi", "%rsi", "%rdx", "%rcx", "%r8", "%r9"};
+static const char *argregs64[] = {"%rdi", "%rsi", "%rdx", "%rcx", "%r8", "%r9"};
 static const char *argregs32[] = {"%edi", "%esi", "%edx",
                                   "%ecx", "%r8d", "%r9d"};
+static const char *argregs8[] = {"%dil", "%sil", "%dl", "%cl", "%r8b", "%r9b"};
 
 static void codegen_expr(AstNode *expr);
 
@@ -65,14 +66,37 @@ static void codegen_addr(AstNode *expr) {
   }
 }
 
+/*
+ * Load through the address in %rax into a 64-bit destination register.
+ * Signed char and int loads sign-extend; pointer loads preserve all bits.
+ */
+static void codegen_load(Type *type, const char *dst) {
+  if (type->kind == TYPE_PTR)
+    fprintf(out, "\tmovq (%%rax), %s\n", dst);
+  else if (type->kind == TYPE_CHAR)
+    fprintf(out, "\tmovsbq (%%rax), %s\n", dst);
+  else
+    fprintf(out, "\tmovslq (%%rax), %s\n", dst);
+}
+
+/*
+ * Store the value in %rcx through the address in %rax. Both registers
+ * are preserved so the caller can produce the expression's result.
+ */
+static void codegen_store(Type *type) {
+  if (type->kind == TYPE_PTR)
+    fprintf(out, "\tmovq %%rcx, (%%rax)\n");
+  else if (type->kind == TYPE_CHAR)
+    fprintf(out, "\tmovb %%cl, (%%rax)\n");
+  else
+    fprintf(out, "\tmovl %%ecx, (%%rax)\n");
+}
+
 static void codegen_expr(AstNode *expr) {
   switch (expr->kind) {
   case AST_VAR:
     codegen_addr(expr);
-    if (expr->type->kind == TYPE_PTR)
-      fprintf(out, "\tmovq (%%rax), %%rax\n");
-    else
-      fprintf(out, "\tmovl (%%rax), %%eax\n");
+    codegen_load(expr->type, "%rax");
     break;
   case AST_ADDR:
     /* The address is the value. */
@@ -80,10 +104,7 @@ static void codegen_expr(AstNode *expr) {
     break;
   case AST_DEREF:
     codegen_expr(expr->d.unary.operand);
-    if (expr->type->kind == TYPE_PTR)
-      fprintf(out, "\tmovq (%%rax), %%rax\n");
-    else
-      fprintf(out, "\tmovl (%%rax), %%eax\n");
+    codegen_load(expr->type, "%rax");
     break;
   case AST_ASSIGN:
     codegen_expr(expr->d.binary.rhs);
@@ -92,13 +113,18 @@ static void codegen_expr(AstNode *expr) {
     codegen_addr(expr->d.binary.lhs);
     fprintf(out, "\tpopq %%rcx\n");
     push_depth--;
-    if (expr->type->kind == TYPE_PTR) {
-      fprintf(out, "\tmovq %%rcx, (%%rax)\n");
+    codegen_store(expr->type);
+    if (expr->type->kind == TYPE_PTR)
       fprintf(out, "\tmovq %%rcx, %%rax\n");
-    } else {
-      fprintf(out, "\tmovl %%ecx, (%%rax)\n");
+    else if (expr->type->kind == TYPE_CHAR)
+      fprintf(out, "\tmovsbl %%cl, %%eax\n");
+    else
       fprintf(out, "\tmovl %%ecx, %%eax\n");
-    }
+    break;
+  case AST_CONVERT:
+    codegen_expr(expr->d.unary.operand);
+    if (expr->type->kind == TYPE_CHAR)
+      fprintf(out, "\tmovsbl %%al, %%eax\n");
     break;
   case AST_INT_LITERAL:
     /* movl $VAL, %eax */
@@ -320,13 +346,15 @@ static void codegen_expr(AstNode *expr) {
       fprintf(out, "\tmovq %%rax, %d(%%rsp)\n", slot * 8);
     }
     for (i = 0; i < nregisters; ++i)
-      fprintf(out, "\tmovq %d(%%rsp), %s\n", (nstack + i) * 8, argregs[i]);
+      fprintf(out, "\tmovq %d(%%rsp), %s\n", (nstack + i) * 8, argregs64[i]);
 
     fprintf(out, "\tcall %.*s\n", expr->d.call.function->name.len,
             expr->d.call.function->name.start);
     if (slots)
       fprintf(out, "\taddq $%d, %%rsp\n", slots * 8);
     push_depth -= slots;
+    if (expr->type->kind == TYPE_CHAR)
+      fprintf(out, "\tmovsbl %%al, %%eax\n");
     break;
   }
   case AST_NEG:
@@ -349,21 +377,20 @@ static void codegen_expr(AstNode *expr) {
   case AST_PRE_INCREMENT:
   case AST_PRE_DECREMENT: {
     int is_ptr = expr->type->kind == TYPE_PTR;
-    /* Pointers step by the pointee's size, ints by 1. */
+    int is_char = expr->type->kind == TYPE_CHAR;
+    /* Pointers step by the pointee's size, integers by 1. */
     int step = is_ptr ? expr->type->base->size : 1;
-    const char *load =
-        is_ptr ? "\tmovq (%rax), %rcx\n" : "\tmovl (%rax), %ecx\n";
-    const char *store =
-        is_ptr ? "\tmovq %rcx, (%rax)\n" : "\tmovl %ecx, (%rax)\n";
-    const char *result = is_ptr ? "\tmovq %rcx, %rax\n" : "\tmovl %ecx, %eax\n";
+    const char *result = is_ptr    ? "\tmovq %rcx, %rax\n"
+                         : is_char ? "\tmovsbl %cl, %eax\n"
+                                   : "\tmovl %ecx, %eax\n";
 
     codegen_addr(expr->d.unary.operand);
-    fprintf(out, "%s", load);
+    codegen_load(expr->type, "%rcx");
     fprintf(out, "\t%s $%d, %s\n",
             expr->kind == AST_PRE_INCREMENT ? (is_ptr ? "addq" : "addl")
                                             : (is_ptr ? "subq" : "subl"),
             step, is_ptr ? "%rcx" : "%ecx");
-    fprintf(out, "%s", store);
+    codegen_store(expr->type);
     fprintf(out, "%s", result);
     break;
   }
@@ -371,13 +398,9 @@ static void codegen_expr(AstNode *expr) {
   case AST_POST_DECREMENT: {
     int is_ptr = expr->type->kind == TYPE_PTR;
     int step = is_ptr ? expr->type->base->size : 1;
-    const char *load =
-        is_ptr ? "\tmovq (%rax), %rcx\n" : "\tmovl (%rax), %ecx\n";
-    const char *store =
-        is_ptr ? "\tmovq %rcx, (%rax)\n" : "\tmovl %ecx, (%rax)\n";
 
     codegen_addr(expr->d.unary.operand);
-    fprintf(out, "%s", load);
+    codegen_load(expr->type, "%rcx");
     /* Save the original value as the result. */
     fprintf(out, "\tpushq %%rcx\n");
     push_depth++;
@@ -385,7 +408,7 @@ static void codegen_expr(AstNode *expr) {
             expr->kind == AST_POST_INCREMENT ? (is_ptr ? "addq" : "addl")
                                              : (is_ptr ? "subq" : "subl"),
             step, is_ptr ? "%rcx" : "%ecx");
-    fprintf(out, "%s", store);
+    codegen_store(expr->type);
     fprintf(out, "\tpopq %%rax\n");
     push_depth--;
     break;
@@ -559,6 +582,8 @@ static void codegen_stmt(AstNode *stmt, int break_label, int continue_label,
       codegen_expr(stmt->d.decl.init);
       if (stmt->d.decl.var->type->kind == TYPE_PTR)
         fprintf(out, "\tmovq %%rax, -%d(%%rbp)\n", stmt->d.decl.var->offset);
+      else if (stmt->d.decl.var->type->kind == TYPE_CHAR)
+        fprintf(out, "\tmovb %%al, -%d(%%rbp)\n", stmt->d.decl.var->offset);
       else
         fprintf(out, "\tmovl %%eax, -%d(%%rbp)\n", stmt->d.decl.var->offset);
     }
@@ -620,7 +645,10 @@ void codegen(const AstNode *ast, FILE *out_file) {
         --nparams;
         if (nparams < 6) {
           if (param->type->kind == TYPE_PTR)
-            fprintf(out, "\tmovq %s, -%d(%%rbp)\n", argregs[nparams],
+            fprintf(out, "\tmovq %s, -%d(%%rbp)\n", argregs64[nparams],
+                    param->offset);
+          else if (param->type->kind == TYPE_CHAR)
+            fprintf(out, "\tmovb %s, -%d(%%rbp)\n", argregs8[nparams],
                     param->offset);
           else
             fprintf(out, "\tmovl %s, -%d(%%rbp)\n", argregs32[nparams],
@@ -630,6 +658,9 @@ void codegen(const AstNode *ast, FILE *out_file) {
           if (param->type->kind == TYPE_PTR) {
             fprintf(out, "\tmovq %d(%%rbp), %%rax\n", offset);
             fprintf(out, "\tmovq %%rax, -%d(%%rbp)\n", param->offset);
+          } else if (param->type->kind == TYPE_CHAR) {
+            fprintf(out, "\tmovb %d(%%rbp), %%al\n", offset);
+            fprintf(out, "\tmovb %%al, -%d(%%rbp)\n", param->offset);
           } else {
             fprintf(out, "\tmovl %d(%%rbp), %%eax\n", offset);
             fprintf(out, "\tmovl %%eax, -%d(%%rbp)\n", param->offset);

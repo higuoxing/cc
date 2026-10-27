@@ -36,6 +36,7 @@ typedef enum {
   TOKEN_BIT_XOR_EQ, /* '^=' */
   TOKEN_BREAK,      /* 'break' */
   TOKEN_CASE,       /* 'case' */
+  TOKEN_CHAR,       /* 'char' */
   TOKEN_COLON,      /* ':' */
   TOKEN_COMMA,      /* ',' */
   TOKEN_CONTINUE,   /* 'continue' */

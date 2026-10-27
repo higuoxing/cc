@@ -24,6 +24,7 @@
 typedef struct AstNode AstNode;
 
 typedef enum {
+  TYPE_CHAR,
   TYPE_INT,
   TYPE_PTR,
   TYPE_VOID,
@@ -133,6 +134,7 @@ typedef enum {
   AST_COMMA,
   AST_CONDITIONAL,
   AST_CONTINUE,
+  AST_CONVERT,
   AST_DECL,
   AST_DEREF,
   AST_DIV,

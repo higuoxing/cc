@@ -20,6 +20,7 @@
 
 #include "sema.h"
 
+Type builtin_type_char = {.kind = TYPE_CHAR, .size = 1, .base = NULL};
 Type builtin_type_int = {.kind = TYPE_INT, .size = 4, .base = NULL};
 Type builtin_type_void = {.kind = TYPE_VOID, .size = 0, .base = NULL};
 
@@ -47,6 +48,21 @@ static bool same_type(Type *a, Type *b) {
   return a->kind != TYPE_PTR || same_type(a->base, b->base);
 }
 
+static AstNode *new_expr(Parser *p, AstKind kind, Type *type, Token loc);
+
+static bool is_integer(Type *type) {
+  return type->kind == TYPE_CHAR || type->kind == TYPE_INT;
+}
+
+static AstNode *integer_promotion(Parser *p, AstNode *expr) {
+  AstNode *node;
+  if (expr->type->kind != TYPE_CHAR)
+    return expr;
+  node = new_expr(p, AST_CONVERT, &builtin_type_int, expr->loc);
+  node->d.unary.operand = expr;
+  return node;
+}
+
 Function *declare_function(Parser *p, Token name, Type *return_type,
                            Type **param_types, int nparams, bool has_prototype,
                            bool definition) {
@@ -59,6 +75,14 @@ Function *declare_function(Parser *p, Token name, Type *return_type,
     if (!same_type(func->return_type, return_type))
       error_at(p, name, "conflicting declaration of function '%.*s'", name.len,
                name.start);
+    if (func->has_prototype != has_prototype) {
+      Type **types = func->has_prototype ? func->param_types : param_types;
+      int count = func->has_prototype ? func->nparams : nparams;
+      for (i = 0; i < count; ++i)
+        if (types[i]->kind == TYPE_CHAR)
+          error_at(p, name, "conflicting declaration of function '%.*s'",
+                   name.len, name.start);
+    }
     if (func->has_prototype && has_prototype) {
       if (func->nparams != nparams)
         error_at(p, name, "conflicting declaration of function '%.*s'",
@@ -108,6 +132,8 @@ static bool constant_integer_tree(AstNode *expr) {
   switch (expr->kind) {
   case AST_INT_LITERAL:
     return true;
+  case AST_CONVERT:
+    return constant_integer_tree(expr->d.unary.operand);
   case AST_CONDITIONAL:
     return constant_integer_tree(expr->d.conditional.cond) &&
            constant_integer_tree(expr->d.conditional.then_expr) &&
@@ -151,26 +177,38 @@ static bool compatible_pointers(Type *a, Type *b) {
           b->base->kind == TYPE_VOID);
 }
 
-void sema_check_conversion(Parser *p, Type *target, AstNode *expr, Token loc,
+AstNode *sema_convert_expr(Parser *p, Type *target, AstNode *expr, Token loc,
                            const char *context) {
+  AstNode *node;
   sema_check_nonvoid_expr(p, expr);
-  if (same_type(target, expr->type) || compatible_pointers(target, expr->type))
-    return;
-  if (target->kind == TYPE_PTR && null_pointer_constant(p, expr))
-    return;
-  error_at(p, loc, "incompatible %s type", context);
+  if (same_type(target, expr->type))
+    return expr;
+  if (!(is_integer(target) && is_integer(expr->type)) &&
+      !compatible_pointers(target, expr->type) &&
+      !(target->kind == TYPE_PTR && null_pointer_constant(p, expr)))
+    error_at(p, loc, "incompatible %s type", context);
+  node = new_expr(p, AST_CONVERT, target, expr->loc);
+  node->d.unary.operand = expr;
+  return node;
 }
 
 void sema_check_call(Parser *p, Function *func, AstNode *call, int nargs) {
-  AstNode *arg;
+  AstNode **link;
   int i = 0;
   if (func->has_prototype && nargs != func->nparams)
     error_at(p, call->loc, "wrong number of arguments to function '%.*s'",
              func->name.len, func->name.start);
-  for (arg = call->d.call.args; arg; arg = arg->next, ++i) {
+  for (link = &call->d.call.args; *link; link = &(*link)->next, ++i) {
+    AstNode *arg = *link;
+    AstNode *next = arg->next;
+    arg->next = NULL;
     sema_check_nonvoid_expr(p, arg);
     if (func->has_prototype)
-      sema_check_conversion(p, func->param_types[i], arg, arg->loc, "argument");
+      *link =
+          sema_convert_expr(p, func->param_types[i], arg, arg->loc, "argument");
+    else
+      *link = integer_promotion(p, arg);
+    (*link)->next = next;
   }
 }
 
@@ -182,7 +220,8 @@ void sema_check_return(Parser *p, AstNode *stmt) {
       error_at(p, stmt->loc, "return with a value in void function");
     return;
   }
-  sema_check_conversion(p, return_type, expr, stmt->loc, "return");
+  stmt->d.ret.expr =
+      sema_convert_expr(p, return_type, expr, stmt->loc, "return");
 }
 
 /*
@@ -241,6 +280,9 @@ AstNode *sema_unary(Parser *p, AstKind op, AstNode *operand, Token loc) {
                           operand->type->base->kind == TYPE_VOID))
     error_at(p, loc, "invalid deref target");
 
+  if (op == AST_NEG || op == AST_BITWISE_NOT || op == AST_LOGICAL_NOT)
+    operand = integer_promotion(p, operand);
+
   node =
       new_expr(p, op,
                op == AST_DEREF  ? operand->type->base
@@ -259,6 +301,8 @@ AstNode *sema_binary(Parser *p, AstKind kind, AstNode *left, AstNode *right,
   if (kind != AST_COMMA) {
     sema_check_nonvoid_expr(p, left);
     sema_check_nonvoid_expr(p, right);
+    left = integer_promotion(p, left);
+    right = integer_promotion(p, right);
   }
   if (kind == AST_ADD || kind == AST_SUB) {
     if ((left->type->kind == TYPE_PTR && left->type->base->kind == TYPE_VOID) ||
@@ -328,10 +372,10 @@ AstNode *sema_assignment(Parser *p, Token operator, AstNode *left,
     switch (op) {
     case TOKEN_PLUS_EQ:
       /* p += 1 on a pointer steps by the pointee's size. */
-      binop_ty = left->type->kind == TYPE_PTR ? AST_PTR_ADD : AST_ADD;
+      binop_ty = AST_ADD;
       break;
     case TOKEN_MINUS_EQ:
-      binop_ty = left->type->kind == TYPE_PTR ? AST_PTR_SUB : AST_SUB;
+      binop_ty = AST_SUB;
       break;
     case TOKEN_STAR_EQ:
       binop_ty = AST_MUL;
@@ -364,16 +408,14 @@ AstNode *sema_assignment(Parser *p, Token operator, AstNode *left,
     if (left->kind != AST_VAR)
       error_at(p, loc, "compound assignment through pointer not supported");
 
-    binop = new_expr(p, binop_ty, left->type, loc);
     lhs_copy = new_expr(p, AST_VAR, left->d.variable.var->type, loc);
     lhs_copy->d.variable.var = left->d.variable.var;
 
-    binop->d.binary.lhs = lhs_copy;
-    binop->d.binary.rhs = rhs;
+    binop = sema_binary(p, binop_ty, lhs_copy, rhs, loc);
     rhs = binop;
   }
 
-  sema_check_conversion(p, left->type, rhs, loc, "assignment");
+  rhs = sema_convert_expr(p, left->type, rhs, loc, "assignment");
   node = new_expr(p, AST_ASSIGN, left->type, loc);
   node->d.binary.lhs = left;
   node->d.binary.rhs = rhs;
@@ -382,9 +424,14 @@ AstNode *sema_assignment(Parser *p, Token operator, AstNode *left,
 
 AstNode *sema_conditional(Parser *p, AstNode *cond, AstNode *then_expr,
                           AstNode *else_expr, Token loc) {
-  Type *type = then_expr->type;
+  Type *type;
   AstNode *node;
   sema_check_nonvoid_expr(p, cond);
+  if (is_integer(then_expr->type) && is_integer(else_expr->type)) {
+    then_expr = integer_promotion(p, then_expr);
+    else_expr = integer_promotion(p, else_expr);
+  }
+  type = then_expr->type;
   if (!same_type(type, else_expr->type)) {
     if (compatible_pointers(type, else_expr->type)) {
       if (else_expr->type->base->kind == TYPE_VOID)
@@ -397,6 +444,12 @@ AstNode *sema_conditional(Parser *p, AstNode *cond, AstNode *then_expr,
     } else {
       error_at(p, loc, "incompatible conditional operand types");
     }
+  }
+  if (type->kind != TYPE_VOID) {
+    then_expr =
+        sema_convert_expr(p, type, then_expr, loc, "conditional operand");
+    else_expr =
+        sema_convert_expr(p, type, else_expr, loc, "conditional operand");
   }
   node = new_expr(p, AST_CONDITIONAL, type, loc);
   node->d.conditional.cond = cond;
@@ -418,6 +471,14 @@ int64_t eval_const_expr(Parser *p, AstNode *expr) {
   switch (expr->kind) {
   case AST_INT_LITERAL:
     return expr->d.int_literal.val;
+  case AST_CONVERT: {
+    int64_t val = eval_const_expr(p, expr->d.unary.operand);
+    if (expr->type->kind == TYPE_CHAR) {
+      val &= 255;
+      return val < 128 ? val : val - 256;
+    }
+    return val;
+  }
   case AST_CONDITIONAL:
     return eval_const_expr(p, expr->d.conditional.cond)
                ? eval_const_expr(p, expr->d.conditional.then_expr)

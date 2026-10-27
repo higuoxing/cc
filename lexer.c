@@ -46,7 +46,7 @@ static const Keyword keywords[] = {
     KW("auto", TOKEN_RESERVED),
     KW("break", TOKEN_BREAK),
     KW("case", TOKEN_CASE),
-    KW("char", TOKEN_RESERVED),
+    KW("char", TOKEN_CHAR),
     KW("const", TOKEN_RESERVED),
     KW("continue", TOKEN_CONTINUE),
     KW("default", TOKEN_DEFAULT),

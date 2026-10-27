@@ -29,6 +29,7 @@
  * Parser remains the shared context during this incremental extraction.
  */
 
+extern Type builtin_type_char;
 extern Type builtin_type_int;
 extern Type builtin_type_void;
 
@@ -43,7 +44,7 @@ extern Function *declare_function(Parser *p, Token name, Type *return_type,
                                        Type **param_types, int nparams,
                                        bool has_prototype, bool definition);
 extern void sema_check_nonvoid_expr(Parser *p, AstNode *expr);
-extern void sema_check_conversion(Parser *p, Type *target, AstNode *expr,
+extern AstNode *sema_convert_expr(Parser *p, Type *target, AstNode *expr,
                                   Token loc, const char *context);
 extern void sema_check_call(Parser *p, Function *func, AstNode *call, int nargs);
 extern void sema_check_return(Parser *p, AstNode *stmt);

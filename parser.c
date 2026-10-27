@@ -361,13 +361,15 @@ static AstNode *parse_primary(Parser *p) {
 }
 
 /*
- * The supported declaration type is an int or void followed by pointer stars.
- * Names and function parameter lists are parsed by the caller.
+ * The supported declaration type is char, int, or void followed by pointer
+ * stars. Names and function parameter lists are parsed by the caller.
  */
 static Type *parse_decl_type(Parser *p) {
   Type *type;
   if (p->current.kind == TOKEN_INT)
     type = &builtin_type_int;
+  else if (p->current.kind == TOKEN_CHAR)
+    type = &builtin_type_char;
   else if (p->current.kind == TOKEN_VOID)
     type = &builtin_type_void;
   else
@@ -407,7 +409,8 @@ static AstNode *parse_decl(Parser *p) {
     /* Consume '=' */
     parser_advance(p);
     decl->d.decl.init = parse_assignment(p);
-    sema_check_conversion(p, type, decl->d.decl.init, name, "initializer");
+    decl->d.decl.init =
+        sema_convert_expr(p, type, decl->d.decl.init, name, "initializer");
   }
 
   parse_expect(p, TOKEN_SEMICOLON, "expect ';'");
@@ -1045,7 +1048,8 @@ static AstNode *parse_for_stmt(Parser *p) {
   outer_locals = p->locals;
   ++p->scope_depth;
 
-  if (p->current.kind == TOKEN_INT || p->current.kind == TOKEN_VOID) {
+  if (p->current.kind == TOKEN_INT || p->current.kind == TOKEN_CHAR ||
+      p->current.kind == TOKEN_VOID) {
     /* parse_decl consumes the declaration's own ';'. */
     for_node->d.for_stmt.init = parse_decl(p);
   } else if (p->current.kind == TOKEN_SEMICOLON) {
@@ -1348,6 +1352,7 @@ static AstNode *parse_stmt(Parser *p, bool allow_decl) {
     return parse_default_stmt(p);
   case TOKEN_LBRACE:
     return parse_block(p);
+  case TOKEN_CHAR:
   case TOKEN_INT:
   case TOKEN_VOID:
     if (allow_decl)
