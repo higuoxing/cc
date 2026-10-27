@@ -21,7 +21,11 @@
 #include "type.h"
 
 Type builtin_type_char = {.kind = TYPE_CHAR, .size = 1, .base = NULL};
+Type builtin_type_unsigned_char = {
+    .kind = TYPE_CHAR, .size = 1, .is_unsigned = true, .base = NULL};
 Type builtin_type_int = {.kind = TYPE_INT, .size = 4, .base = NULL};
+Type builtin_type_unsigned = {
+    .kind = TYPE_INT, .size = 4, .is_unsigned = true, .base = NULL};
 Type builtin_type_void = {.kind = TYPE_VOID, .size = 0, .base = NULL};
 
 bool is_integer(const Type *type) {
@@ -35,6 +39,8 @@ bool is_integer(const Type *type) {
  */
 bool same_type(const Type *a, const Type *b) {
   if (a->kind != b->kind)
+    return false;
+  if (is_integer(a) && a->is_unsigned != b->is_unsigned)
     return false;
   return a->kind != TYPE_PTR || same_type(a->base, b->base);
 }

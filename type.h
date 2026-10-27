@@ -31,11 +31,14 @@ typedef enum {
 typedef struct Type {
   TypeKind kind;
   int size; /* In bytes. */
+  bool is_unsigned; /* Meaningful for integer types only. */
   struct Type *base; /* Pointed-to type for TYPE_PTR */
 } Type;
 
 extern Type builtin_type_char;
+extern Type builtin_type_unsigned_char;
 extern Type builtin_type_int;
+extern Type builtin_type_unsigned;
 extern Type builtin_type_void;
 
 extern bool is_integer(const Type *type);

@@ -69,14 +69,20 @@ static void codegen_addr(AstNode *expr) {
 
 /*
  * Load through the address in %rax into a 64-bit destination register.
- * Signed char and int loads sign-extend; pointer loads preserve all bits.
+ * Signed loads sign-extend, unsigned loads zero-extend. Clobbers %r11.
  */
 static void codegen_load(Type *type, const char *dst) {
   if (type->kind == TYPE_PTR)
     fprintf(out, "\tmovq (%%rax), %s\n", dst);
   else if (type->kind == TYPE_CHAR)
-    fprintf(out, "\tmovsbq (%%rax), %s\n", dst);
-  else
+    fprintf(out,
+            type->is_unsigned ? "\tmovzbq (%%rax), %s\n"
+                              : "\tmovsbq (%%rax), %s\n",
+            dst);
+  else if (type->is_unsigned) {
+    fprintf(out, "\tmovl (%%rax), %%r11d\n");
+    fprintf(out, "\tmovq %%r11, %s\n", dst);
+  } else
     fprintf(out, "\tmovslq (%%rax), %s\n", dst);
 }
 
@@ -91,6 +97,18 @@ static void codegen_store(Type *type) {
     fprintf(out, "\tmovb %%cl, (%%rax)\n");
   else
     fprintf(out, "\tmovl %%ecx, (%%rax)\n");
+}
+
+/*
+ * Normalize the value in %rax to its integer type: truncate to the type's
+ * width, then sign- or zero-extend. Pointer and void values need no change.
+ */
+static void codegen_normalize(Type *type) {
+  if (type->kind == TYPE_CHAR)
+    fprintf(out, type->is_unsigned ? "\tmovzbq %%al, %%rax\n"
+                                   : "\tmovsbq %%al, %%rax\n");
+  else if (type->kind == TYPE_INT)
+    fprintf(out, type->is_unsigned ? "\tmovl %%eax, %%eax\n" : "\tcltq\n");
 }
 
 static void codegen_expr(AstNode *expr) {
@@ -115,17 +133,12 @@ static void codegen_expr(AstNode *expr) {
     fprintf(out, "\tpopq %%rcx\n");
     push_depth--;
     codegen_store(expr->type);
-    if (expr->type->kind == TYPE_PTR)
-      fprintf(out, "\tmovq %%rcx, %%rax\n");
-    else if (expr->type->kind == TYPE_CHAR)
-      fprintf(out, "\tmovsbl %%cl, %%eax\n");
-    else
-      fprintf(out, "\tmovl %%ecx, %%eax\n");
+    fprintf(out, "\tmovq %%rcx, %%rax\n");
+    codegen_normalize(expr->type);
     break;
   case AST_CONVERT:
     codegen_expr(expr->d.unary.operand);
-    if (expr->type->kind == TYPE_CHAR)
-      fprintf(out, "\tmovsbl %%al, %%eax\n");
+    codegen_normalize(expr->type);
     break;
   case AST_INT_LITERAL:
     /* movl $VAL, %eax */
@@ -151,7 +164,8 @@ static void codegen_expr(AstNode *expr) {
   case AST_PTR_SUB: {
     /* Pointer +- integer, scaled by the pointee's size. */
     codegen_expr(expr->d.binary.rhs);
-    fprintf(out, "\tcltq\n");
+    fprintf(out, expr->d.binary.rhs->type->is_unsigned ? "\tmovl %%eax, %%eax\n"
+                                                       : "\tcltq\n");
     fprintf(out, "\tpushq %%rax\n");
     push_depth++;
     codegen_expr(expr->d.binary.lhs);
@@ -196,17 +210,21 @@ static void codegen_expr(AstNode *expr) {
       /* %eax = %eax * %ecx */
       fprintf(out, "\timull %%ecx, %%eax\n");
     } else if (expr->kind == AST_DIV || expr->kind == AST_MOD) {
-      /* idivl divides 64-bit value in %edx:%eax by operand (%ecx) */
-      fprintf(out, "\tcltd\n");        /* Sign-extend %eax into %edx:%eax */
-      fprintf(out, "\tidivl %%ecx\n"); /* Quotient in %eax, remainder in %edx */
+      if (expr->type->is_unsigned) {
+        fprintf(out, "\txorl %%edx, %%edx\n");
+        fprintf(out, "\tdivl %%ecx\n");
+      } else {
+        fprintf(out, "\tcltd\n");
+        fprintf(out, "\tidivl %%ecx\n");
+      }
       if (expr->kind == AST_MOD)
         fprintf(out, "\tmovl %%edx, %%eax\n"); /* Remainder is the result */
     } else if (expr->kind == AST_LSHIFT) {
       /* The shift count comes from %cl, the low byte of %ecx. */
       fprintf(out, "\tsall %%cl, %%eax\n");
     } else if (expr->kind == AST_RSHIFT) {
-      /* Arithmetic shift: C requires sign-fill for signed '>>'. */
-      fprintf(out, "\tsarl %%cl, %%eax\n");
+      fprintf(out, expr->type->is_unsigned ? "\tshrl %%cl, %%eax\n"
+                                           : "\tsarl %%cl, %%eax\n");
     } else if (expr->kind == AST_BIT_AND) {
       fprintf(out, "\tandl %%ecx, %%eax\n");
     } else if (expr->kind == AST_BIT_XOR) {
@@ -242,16 +260,20 @@ static void codegen_expr(AstNode *expr) {
       fprintf(out, "\tsetne %%al\n");
       break;
     case AST_LT:
-      fprintf(out, "\tsetl %%al\n");
+      fprintf(out, expr->d.binary.lhs->type->is_unsigned ? "\tsetb %%al\n"
+                                                         : "\tsetl %%al\n");
       break;
     case AST_LE:
-      fprintf(out, "\tsetle %%al\n");
+      fprintf(out, expr->d.binary.lhs->type->is_unsigned ? "\tsetbe %%al\n"
+                                                         : "\tsetle %%al\n");
       break;
     case AST_GT:
-      fprintf(out, "\tsetg %%al\n");
+      fprintf(out, expr->d.binary.lhs->type->is_unsigned ? "\tseta %%al\n"
+                                                         : "\tsetg %%al\n");
       break;
     case AST_GE:
-      fprintf(out, "\tsetge %%al\n");
+      fprintf(out, expr->d.binary.lhs->type->is_unsigned ? "\tsetae %%al\n"
+                                                         : "\tsetge %%al\n");
       break;
     default:
       fprintf(stderr, "unrecognized comparison operator\n");
@@ -354,8 +376,7 @@ static void codegen_expr(AstNode *expr) {
     if (slots)
       fprintf(out, "\taddq $%d, %%rsp\n", slots * 8);
     push_depth -= slots;
-    if (expr->type->kind == TYPE_CHAR)
-      fprintf(out, "\tmovsbl %%al, %%eax\n");
+    codegen_normalize(expr->type);
     break;
   }
   case AST_NEG:
@@ -378,13 +399,8 @@ static void codegen_expr(AstNode *expr) {
   case AST_PRE_INCREMENT:
   case AST_PRE_DECREMENT: {
     int is_ptr = expr->type->kind == TYPE_PTR;
-    int is_char = expr->type->kind == TYPE_CHAR;
     /* Pointers step by the pointee's size, integers by 1. */
     int step = is_ptr ? expr->type->base->size : 1;
-    const char *result = is_ptr    ? "\tmovq %rcx, %rax\n"
-                         : is_char ? "\tmovsbl %cl, %eax\n"
-                                   : "\tmovl %ecx, %eax\n";
-
     codegen_addr(expr->d.unary.operand);
     codegen_load(expr->type, "%rcx");
     fprintf(out, "\t%s $%d, %s\n",
@@ -392,7 +408,8 @@ static void codegen_expr(AstNode *expr) {
                                             : (is_ptr ? "subq" : "subl"),
             step, is_ptr ? "%rcx" : "%ecx");
     codegen_store(expr->type);
-    fprintf(out, "%s", result);
+    fprintf(out, "\tmovq %%rcx, %%rax\n");
+    codegen_normalize(expr->type);
     break;
   }
   case AST_POST_INCREMENT:

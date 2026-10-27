@@ -38,6 +38,7 @@ extern void check_gotos(Parser *p);
 extern Function *declare_function(Parser *p, Token name, Type *return_type,
                                        Type **param_types, int nparams,
                                        bool has_prototype, bool definition);
+extern AstNode *sema_switch_condition(Parser *p, AstNode *expr);
 extern void sema_check_nonvoid_expr(Parser *p, AstNode *expr);
 extern AstNode *sema_convert_expr(Parser *p, Type *target, AstNode *expr,
                                   Token loc, const char *context);

@@ -362,20 +362,50 @@ static AstNode *parse_primary(Parser *p) {
 }
 
 /*
- * The supported declaration type is char, int, or void followed by pointer
- * stars. Names and function parameter lists are parsed by the caller.
+ * Consume declaration specifiers and return the base type only.
+ * Unsigned may precede or follow int or char.
  */
-static Type *parse_decl_type(Parser *p) {
-  Type *type;
-  if (p->current.kind == TOKEN_INT)
-    type = &builtin_type_int;
-  else if (p->current.kind == TOKEN_CHAR)
-    type = &builtin_type_char;
-  else if (p->current.kind == TOKEN_VOID)
-    type = &builtin_type_void;
-  else
+static Type *parse_declspecs(Parser *p) {
+  Type *type = NULL;
+  bool seen_unsigned = false;
+  if (p->current.kind == TOKEN_VOID) {
+    parser_advance(p);
+    return &builtin_type_void;
+  }
+  if (p->current.kind != TOKEN_INT && p->current.kind != TOKEN_CHAR &&
+      p->current.kind != TOKEN_UNSIGNED)
     parse_error(p, "expect 'int'");
-  parser_advance(p);
+  while (p->current.kind == TOKEN_INT || p->current.kind == TOKEN_CHAR ||
+         p->current.kind == TOKEN_UNSIGNED) {
+    if (p->current.kind == TOKEN_UNSIGNED) {
+      if (seen_unsigned)
+        parse_error(p, "duplicate unsigned type specifier");
+      seen_unsigned = true;
+    } else {
+      Type *specifier =
+          p->current.kind == TOKEN_INT ? &builtin_type_int : &builtin_type_char;
+      if (type == specifier)
+        parse_error(p, "duplicate %s type specifier",
+                    type->kind == TYPE_INT ? "int" : "char");
+      if (type)
+        parse_error(p, "invalid combination of type specifiers");
+      type = specifier;
+    }
+    parser_advance(p);
+  }
+  if (!type)
+    type = &builtin_type_int;
+  if (seen_unsigned)
+    return type->kind == TYPE_CHAR ? &builtin_type_unsigned_char
+                                   : &builtin_type_unsigned;
+  return type;
+}
+
+/*
+ * Consume pointer stars separately from declaration specifiers until a full
+ * declarator parser handles pointers, arrays, and function declarators.
+ */
+static Type *parse_pointer_type(Parser *p, Type *type) {
   while (p->current.kind == TOKEN_STAR) {
     type = pointer_to(type);
     if (!type)
@@ -395,7 +425,8 @@ static AstNode *parse_decl(Parser *p) {
   Token name;
   Type *type;
 
-  type = parse_decl_type(p);
+  type = parse_declspecs(p);
+  type = parse_pointer_type(p, type);
   if (type->kind == TYPE_VOID)
     parse_error(p, "variable has void type");
 
@@ -889,7 +920,8 @@ static AstNode *parse_external_declaration(Parser *p) {
 
   reset_function_state(p);
   fn = new_ast_node(p, AST_FUNCTION);
-  return_type = parse_decl_type(p);
+  return_type = parse_declspecs(p);
+  return_type = parse_pointer_type(p, return_type);
   if (p->current.kind != TOKEN_IDENTIFIER)
     parse_error(p, "expect function name");
 
@@ -918,7 +950,8 @@ static AstNode *parse_external_declaration(Parser *p) {
           parse_error(p, "out of memory");
         param_types = types;
       }
-      param_type = parse_decl_type(p);
+      param_type = parse_declspecs(p);
+      param_type = parse_pointer_type(p, param_type);
       if (param_type->kind == TYPE_VOID)
         parse_error(p, "parameter has void type");
       param_types[nparams] = param_type;
@@ -1052,7 +1085,7 @@ static AstNode *parse_for_stmt(Parser *p) {
   ++p->scope_depth;
 
   if (p->current.kind == TOKEN_INT || p->current.kind == TOKEN_CHAR ||
-      p->current.kind == TOKEN_VOID) {
+      p->current.kind == TOKEN_UNSIGNED || p->current.kind == TOKEN_VOID) {
     /* parse_decl consumes the declaration's own ';'. */
     for_node->d.for_stmt.init = parse_decl(p);
   } else if (p->current.kind == TOKEN_SEMICOLON) {
@@ -1216,8 +1249,8 @@ static AstNode *parse_switch_stmt(Parser *p) {
   parse_expect(p, TOKEN_SWITCH, "expect 'switch'");
   parse_expect(p, TOKEN_LPAREN, "expect '('");
   switch_node = new_ast_node(p, AST_SWITCH);
-  switch_node->d.switch_stmt.cond = parse_expression(p);
-  sema_check_nonvoid_expr(p, switch_node->d.switch_stmt.cond);
+  switch_node->d.switch_stmt.cond =
+      sema_switch_condition(p, parse_expression(p));
   parse_expect(p, TOKEN_RPAREN, "expect ')'");
 
   /*
@@ -1241,6 +1274,7 @@ static AstNode *parse_switch_stmt(Parser *p) {
  */
 static AstNode *parse_case_stmt(Parser *p) {
   AstNode *case_node;
+  AstNode *expr;
   CaseList *entry;
   int64_t val;
   Token case_tok;
@@ -1251,7 +1285,12 @@ static AstNode *parse_case_stmt(Parser *p) {
 
   case_tok = p->current;
   parse_expect(p, TOKEN_CASE, "expect 'case'");
-  val = eval_const_expr(p, parse_assignment(p));
+  expr = parse_assignment(p);
+  if (!is_integer(expr->type))
+    error_at(p, expr->loc, "case label must have integer type");
+  expr = sema_convert_expr(p, p->current_switch->d.switch_stmt.cond->type, expr,
+                           case_tok, "case label");
+  val = eval_const_expr(p, expr);
 
   for (entry = p->current_switch->d.switch_stmt.cases; entry;
        entry = entry->next)
@@ -1357,6 +1396,7 @@ static AstNode *parse_stmt(Parser *p, bool allow_decl) {
     return parse_block(p);
   case TOKEN_CHAR:
   case TOKEN_INT:
+  case TOKEN_UNSIGNED:
   case TOKEN_VOID:
     if (allow_decl)
       return parse_decl(p);

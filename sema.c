@@ -45,6 +45,13 @@ static AstNode *integer_promotion(Parser *p, AstNode *expr) {
   return node;
 }
 
+AstNode *sema_switch_condition(Parser *p, AstNode *expr) {
+  sema_check_nonvoid_expr(p, expr);
+  if (!is_integer(expr->type))
+    error_at(p, expr->loc, "switch condition must have integer type");
+  return integer_promotion(p, expr);
+}
+
 Function *declare_function(Parser *p, Token name, Type *return_type,
                            Type **param_types, int nparams, bool has_prototype,
                            bool definition) {
@@ -249,7 +256,7 @@ AstNode *sema_unary(Parser *p, AstKind op, AstNode *operand, Token loc) {
       error_at(p, loc, "out of memory");
   } else if (op == AST_DEREF) {
     type = operand->type->base;
-  } else if (op == AST_NEG || op == AST_BITWISE_NOT || op == AST_LOGICAL_NOT) {
+  } else if (op == AST_LOGICAL_NOT) {
     type = &builtin_type_int;
   } else {
     type = operand->type;
@@ -262,11 +269,27 @@ AstNode *sema_unary(Parser *p, AstKind op, AstNode *operand, Token loc) {
 AstNode *sema_binary(Parser *p, AstKind kind, AstNode *left, AstNode *right,
                      Token loc) {
   AstNode *node;
+  Type *type = &builtin_type_int;
   if (kind != AST_COMMA) {
     sema_check_nonvoid_expr(p, left);
     sema_check_nonvoid_expr(p, right);
     left = integer_promotion(p, left);
     right = integer_promotion(p, right);
+  }
+  if (is_integer(left->type) && is_integer(right->type) && kind != AST_COMMA &&
+      kind != AST_LOGICAL_AND && kind != AST_LOGICAL_OR) {
+    if (kind == AST_LSHIFT || kind == AST_RSHIFT) {
+      type = left->type;
+    } else {
+      type = left->type->is_unsigned || right->type->is_unsigned
+                 ? &builtin_type_unsigned
+                 : &builtin_type_int;
+      left = sema_convert_expr(p, type, left, loc, "operand");
+      right = sema_convert_expr(p, type, right, loc, "operand");
+      if (kind == AST_LT || kind == AST_LE || kind == AST_GT ||
+          kind == AST_GE || kind == AST_EQ || kind == AST_NE)
+        type = &builtin_type_int;
+    }
   }
   if (kind == AST_ADD || kind == AST_SUB) {
     if ((left->type->kind == TYPE_PTR && left->type->base->kind == TYPE_VOID) ||
@@ -299,11 +322,10 @@ AstNode *sema_binary(Parser *p, AstKind kind, AstNode *left, AstNode *right,
     } else if (right->type->kind == TYPE_PTR) {
       error_at(p, loc, "invalid operands to binary -");
     } else {
-      node = new_expr(p, kind, &builtin_type_int, loc);
+      node = new_expr(p, kind, type, loc);
     }
   } else {
-    node = new_expr(p, kind,
-                    kind == AST_COMMA ? right->type : &builtin_type_int, loc);
+    node = new_expr(p, kind, kind == AST_COMMA ? right->type : type, loc);
   }
   node->d.binary.lhs = left;
   node->d.binary.rhs = right;
@@ -396,7 +418,11 @@ AstNode *sema_conditional(Parser *p, AstNode *cond, AstNode *then_expr,
     else_expr = integer_promotion(p, else_expr);
   }
   type = then_expr->type;
-  if (!same_type(type, else_expr->type)) {
+  if (is_integer(type) && is_integer(else_expr->type)) {
+    type = type->is_unsigned || else_expr->type->is_unsigned
+               ? &builtin_type_unsigned
+               : &builtin_type_int;
+  } else if (!same_type(type, else_expr->type)) {
     if (compatible_pointers(type, else_expr->type)) {
       if (else_expr->type->base->kind == TYPE_VOID)
         type = else_expr->type;
@@ -422,8 +448,12 @@ AstNode *sema_conditional(Parser *p, AstNode *cond, AstNode *then_expr,
   return node;
 }
 
-/* Every value in a constant expression must fit an int. */
-static int64_t checked_int(Parser *p, int64_t val) {
+/*
+ * Unsigned arithmetic wraps modulo 2^32; signed overflow is diagnosed.
+ */
+static int64_t checked_integer(Parser *p, Type *type, int64_t val) {
+  if (type->is_unsigned)
+    return (uint32_t)val;
   if (val < INT32_MIN || val > INT32_MAX)
     parse_error(p, "integer overflow in constant expression");
   return val;
@@ -439,7 +469,13 @@ int64_t eval_const_expr(Parser *p, AstNode *expr) {
     int64_t val = eval_const_expr(p, expr->d.unary.operand);
     if (expr->type->kind == TYPE_CHAR) {
       val &= 255;
-      return val < 128 ? val : val - 256;
+      return expr->type->is_unsigned || val < 128 ? val : val - 256;
+    }
+    if (expr->type->kind == TYPE_INT) {
+      uint32_t bits = (uint32_t)val;
+      return expr->type->is_unsigned || bits <= INT32_MAX
+                 ? (int64_t)bits
+                 : (int64_t)bits - 4294967296;
     }
     return val;
   }
@@ -448,9 +484,11 @@ int64_t eval_const_expr(Parser *p, AstNode *expr) {
                ? eval_const_expr(p, expr->d.conditional.then_expr)
                : eval_const_expr(p, expr->d.conditional.else_expr);
   case AST_NEG:
-    return checked_int(p, -eval_const_expr(p, expr->d.unary.operand));
+    return checked_integer(p, expr->type,
+                           -eval_const_expr(p, expr->d.unary.operand));
   case AST_BITWISE_NOT:
-    return checked_int(p, ~eval_const_expr(p, expr->d.unary.operand));
+    return checked_integer(p, expr->type,
+                           ~eval_const_expr(p, expr->d.unary.operand));
   case AST_LOGICAL_NOT:
     return !eval_const_expr(p, expr->d.unary.operand);
   case AST_LOGICAL_AND: {
@@ -489,23 +527,28 @@ int64_t eval_const_expr(Parser *p, AstNode *expr) {
 
   switch (expr->kind) {
   case AST_ADD:
-    return checked_int(p, lhs + rhs);
+    return checked_integer(p, expr->type, lhs + rhs);
   case AST_SUB:
-    return checked_int(p, lhs - rhs);
+    return checked_integer(p, expr->type, lhs - rhs);
   case AST_MUL:
-    return checked_int(p, lhs * rhs);
+    if (expr->type->is_unsigned)
+      return (uint32_t)((uint64_t)lhs * (uint64_t)rhs);
+    return checked_integer(p, expr->type, lhs * rhs);
   case AST_DIV:
   case AST_MOD:
     if (rhs == 0)
       parse_error(p, "division by zero in constant expression");
-    return checked_int(p, expr->kind == AST_DIV ? lhs / rhs : lhs % rhs);
+    if (!expr->type->is_unsigned && lhs == INT32_MIN && rhs == -1)
+      parse_error(p, "integer overflow in constant expression");
+    return checked_integer(p, expr->type,
+                           expr->kind == AST_DIV ? lhs / rhs : lhs % rhs);
   case AST_LSHIFT:
     if (rhs < 0 || rhs >= 32)
       parse_error(p, "invalid shift count in constant expression");
     if (lhs < 0)
       parse_error(p, "left shift of negative value in constant expression");
-    checked_int(p, lhs);
-    return checked_int(p, lhs << rhs);
+    checked_integer(p, expr->type, lhs);
+    return checked_integer(p, expr->type, lhs << rhs);
   case AST_RSHIFT:
     if (rhs < 0 || rhs >= 32)
       parse_error(p, "invalid shift count in constant expression");
@@ -523,11 +566,11 @@ int64_t eval_const_expr(Parser *p, AstNode *expr) {
   case AST_NE:
     return lhs != rhs;
   case AST_BIT_AND:
-    return checked_int(p, lhs & rhs);
+    return checked_integer(p, expr->type, lhs & rhs);
   case AST_BIT_XOR:
-    return checked_int(p, lhs ^ rhs);
+    return checked_integer(p, expr->type, lhs ^ rhs);
   case AST_BIT_OR:
-    return checked_int(p, lhs | rhs);
+    return checked_integer(p, expr->type, lhs | rhs);
   default:
     parse_error(p, "invalid constant expression");
   }

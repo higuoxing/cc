@@ -82,6 +82,7 @@ typedef enum {
   TOKEN_STAR_EQ,  /* '*=' */
   TOKEN_SWITCH,   /* 'switch' */
   TOKEN_TILDE,    /* '~' */
+  TOKEN_UNSIGNED, /* 'unsigned' */
   TOKEN_VOID, /* 'void' */
   TOKEN_WHILE, /* 'while' */
 } TokenKind;

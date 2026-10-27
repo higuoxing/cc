@@ -73,7 +73,7 @@ static const Keyword keywords[] = {
     KW("switch", TOKEN_SWITCH),
     KW("typedef", TOKEN_RESERVED),
     KW("union", TOKEN_RESERVED),
-    KW("unsigned", TOKEN_RESERVED),
+    KW("unsigned", TOKEN_UNSIGNED),
     KW("void", TOKEN_VOID),
     KW("volatile", TOKEN_RESERVED),
     KW("while", TOKEN_WHILE),

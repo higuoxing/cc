@@ -565,6 +565,94 @@ check_error character-literal-raw-newline $'int main(void) { return \'\n\'; }' "
 check_error character-literal-raw-crlf $'int main(void) { return \'\r\n\'; }' "1:25: error: unterminated character literal"
 check_error character-literal-escaped-newline $'int main(void) { return \'\\\n\'; }' "1:25: error: unterminated character literal"
 
+# Unsigned char occupies one byte and promotes to int.
+check 255 'int main(void) { unsigned char c = -1; return c; }' unsigned-char-load
+check 255 'int main(void) { char unsigned c = -1; return c; }' char-unsigned-order
+check 1 'int main(void) { unsigned char c = 128; return c > 0 && c == 128; }' unsigned-char-high-bit
+check 1 'int main(void) { unsigned char c = 511; return c == 255; }' unsigned-char-truncate
+check 1 'int main(void) { unsigned char c = 256; return c == 0; }' unsigned-char-truncate-zero
+check 1 'int main(void) { unsigned char c = 0; return (c = -1) == 255 && c == 255; }' unsigned-char-assignment-result
+check 1 'int main(void) { unsigned char c = 255; return c + 1 == 256 && c - 256 == -1; }' unsigned-char-integer-promotion
+check 1 'int main(void) { unsigned char c = 255; return ~c == -256 && -c == -255; }' unsigned-char-unary-promotion
+check 1 'int main(void) { unsigned char c = 255; return c / 2 == 127 && (c >> 1) == 127 && (c << 1) == 510; }' unsigned-char-shift-promotion
+check 1 'int main(void) { unsigned char c = 255; return (1 ? c : -1) == 255 && (0 ? c : -1) < 0; }' unsigned-char-conditional-promotion
+check 1 'int main(void) { unsigned char c = 255; char s = -1; return c > s && c + s == 254; }' unsigned-char-signed-char-mix
+check 1 'int main(void) { unsigned char c = 255; unsigned u = 0; return c < -1 == 0 && c > u && c + u == 255; }' unsigned-char-unsigned-mix
+check 1 'int main(void) { unsigned char c = 255; char s = c; unsigned char d = s; return s == -1 && d == 255; }' unsigned-char-signed-conversion
+check 1 'int main(void) { unsigned char c = 255; c += 1; c -= 1; c *= 2; return c == 254; }' unsigned-char-compound-truncate
+check 1 'int main(void) { unsigned char c = 255; c >>= 1; c /= 2; c %= 7; return c == 0; }' unsigned-char-compound-divmod
+check 1 'int main(void) { unsigned char c = 255; return c++ == 255 && c == 0 && --c == 255 && ++c == 0 && c-- == 0 && c == 255; }' unsigned-char-increment
+check 1 'int main(void) { unsigned char c = 128; unsigned char *p = &c; return *p == 128 && (*p = -1) == 255 && c == 255; }' unsigned-char-pointer-store
+check 1 'int main(void) { unsigned char c = 255; unsigned char *p = &c; return (*p)++ == 255 && c == 0 && --*p == 255; }' unsigned-char-pointer-increment
+check 1 'int main(void) { unsigned char c = 255; unsigned char *p = &c; return (p + 1) - p == 1; }' unsigned-char-pointer-size
+check 1 'unsigned char id(char unsigned c); char unsigned id(unsigned char c) { return c; } int main(void) { return id(-1) == 255 && id(256) == 0; }' unsigned-char-call-signatures
+check 1 'unsigned char f(void) { return -1; } int main(void) { return f() > 0 && f() + 1 == 256; }' unsigned-char-return
+check 1 'int f(unsigned char c) { return c == 255; } int main(void) { return f(511); }' unsigned-char-argument-truncate
+check 1 'int f(int a, int b, int c, int d, int e, int f, unsigned char g, unsigned char h) { return g == 255 && h == 128; } int main(void) { return f(1, 2, 3, 4, 5, 6, -1, 384); }' unsigned-char-stack-arguments
+check 1 'int f(); int main(void) { unsigned char c = 255; return f(c); } int f(int c) { return c == 255; }' unsigned-char-default-promotion
+check 42 'int main(void) { unsigned char c = -1; switch (c) { case 255: return 42; case -1: return 1; default: return 0; } }' unsigned-char-switch-promotion
+check 1 'int main(void) { int n = 0; for (char unsigned c = 254; c; c++) n++; return n == 2; }' unsigned-char-for-declaration
+
+check_error duplicate-char-specifier 'int main(void) { char char c; return 0; }' '1:23: error: duplicate char type specifier'
+check_error unsigned-char-int-specifier 'int main(void) { unsigned char int c; return 0; }' '1:32: error: invalid combination of type specifiers'
+check_error int-unsigned-char-specifier 'int main(void) { int unsigned char c; return 0; }' '1:31: error: invalid combination of type specifiers'
+check_error unsigned-char-duplicate-unsigned 'int main(void) { unsigned char unsigned c; return 0; }' '1:32: error: duplicate unsigned type specifier'
+check_error unsigned-char-conflicting-param 'int f(unsigned char); int f(char);' '1:27: error: conflicting declaration of function '"'"'f'"'"''
+check_error unsigned-char-conflicting-return 'unsigned char f(void); char f(void);' '1:29: error: conflicting declaration of function '"'"'f'"'"''
+check_error unsigned-char-prototype-promotion 'int f(); int f(unsigned char);' '1:14: error: conflicting declaration of function '"'"'f'"'"''
+check_error unsigned-char-prototype-promotion-reverse 'int f(unsigned char); int f();' '1:27: error: conflicting declaration of function '"'"'f'"'"''
+check_error unsigned-char-incompatible-pointer 'int main(void) { char c; unsigned char *p = &c; return 0; }' '1:41: error: incompatible initializer type'
+
+# Unsigned arithmetic and the usual arithmetic conversions.
+check 1 'int main(void) { unsigned u = -1; return u > 2147483647; }' unsigned-high-bit
+check 1 'int main(void) { unsigned u = 0; return -1 > u; }' unsigned-mixed-comparison
+check 1 'int main(void) { unsigned u = -1; return u == -1; }' unsigned-mixed-equality
+check 1 'int main(void) { unsigned u = 0; return u < -1 && u <= -1 && -1 >= u; }' unsigned-relations
+check 0 'int main(void) { unsigned u = -1; return u < 0 || u <= 0 || 0 > u || 0 >= u; }' unsigned-relations-false
+check 1 'int main(void) { unsigned u = -1; return u + 1 == 0 && u * u == 1; }' unsigned-wraparound
+check 1 'int main(void) { unsigned u = 0; return u - 1 > 0; }' unsigned-subtract-type
+check 1 'int main(void) { unsigned u = -1; return u / 2 == 2147483647 && u % 3 == 0; }' unsigned-divmod
+check 1 'int main(void) { unsigned u = -1; return u / -1 == 1 && u % -1 == 0; }' unsigned-mixed-divmod
+check 1 'int main(void) { unsigned u = -1; return (u >> 1) == 2147483647; }' unsigned-right-shift
+check 1 'int main(void) { unsigned n = 1; return (-4 >> n) == -2; }' signed-shift-unsigned-count
+check 1 'int main(void) { unsigned u = 1; return (u << 31) > 0; }' unsigned-left-shift
+check 1 'int main(void) { unsigned u = 1; return -u > 0 && ~u > 0; }' unsigned-unary-type
+check 1 'int main(void) { unsigned u = 0; return (1 ? -1 : u) > 0 && (0 ? u : -1) > 0; }' unsigned-conditional-type
+check 1 'int main(void) { unsigned u = 0; char c = -1; return c > u && (c + u) > 0; }' unsigned-char-promotion
+check 1 'int main(void) { unsigned u = -1; char c = u; int i = u; return c == -1 && i == -1 && i < 0; }' unsigned-conversion
+check 1 'int main(void) { unsigned u = 0; return (u = -1) > 0; }' unsigned-assignment-value
+check 1 'int main(void) { unsigned u = -1; u += 1; u -= 1; u *= 2; u /= 2; return u == 2147483647; }' unsigned-compound-arithmetic
+check 1 'int main(void) { unsigned u = -1; u >>= 1; u %= 7; return u == 1; }' unsigned-compound-divmod-shift
+check 1 'int main(void) { unsigned u = 0; return (u | -1) > 0 && (u ^ -1) > 0 && ((u - 1) & -1) > 0; }' unsigned-bitwise-type
+check 1 'int main(void) { unsigned u = -1; return !u == 0 && (u && 1) == 1 && (u || 0) == 1; }' unsigned-logical
+check 1 'int main(void) { unsigned u = -1; return (u > 0) - 2 < 0; }' unsigned-comparison-result-int
+check 1 'int main(void) { unsigned u = -1; return u++ > 0 && u == 0 && --u > 0 && ++u == 0 && u-- == 0 && u > 0; }' unsigned-increment
+check 1 'int main(void) { unsigned u = -1; unsigned *p = &u; *p = *p / 2; return *p == 2147483647; }' unsigned-dereference
+check 1 'int main(void) { unsigned u = -1; unsigned *p = &u; return (*p)++ > 0 && u == 0 && --*p > 0; }' unsigned-increment-dereference
+check 1 'unsigned id(unsigned u) { return u; } int main(void) { return id(-1) / 2 == 2147483647; }' unsigned-call-return
+check 1 'unsigned f(void) { return -1; } int g(int x) { return x < 0; } int main(void) { return g(f()); }' unsigned-return-conversion
+check 1 'unsigned f(int a, int b, int c, int d, int e, int f, unsigned g, unsigned h) { return g / h; } int main(void) { return f(1, 2, 3, 4, 5, 6, -1, 2) == 2147483647; }' unsigned-stack-arguments
+check 1 'int main(void) { int x = 42; int *p = &x; unsigned u = 1; return *((p + u) - u) == 42; }' unsigned-pointer-offset
+check 42 'int main(void) { unsigned u = -1; switch (u) { case -1: return 42; default: return 0; } }' unsigned-switch-negative-case
+check 42 'int main(void) { char c = -1; switch (c) { case -1: return 42; default: return 0; } }' char-switch-promotion
+
+check_error unsigned-switch-duplicate 'int main(void) { unsigned u = 0; switch (u) { case -1: return 1; case ~0: return 2; } return 0; }' '1:66: error: duplicate case value'
+check_error switch-pointer 'int main(void) { int x; switch (&x) { default: return 0; } }' '1:33: error: switch condition must have integer type'
+check_error case-overflow-mod 'int main(void) { switch (0) { case (-2147483647 - 1) % -1: return 1; } return 0; }' '1:58: error: integer overflow in constant expression'
+
+# Both orders of the unsigned int declaration specifiers denote one type.
+check 42 'int main(void) { unsigned int x = 42; return x; }' unsigned-int-local
+check 42 'int main(void) { int unsigned x = 42; return x; }' int-unsigned-local
+check 42 'unsigned int id(int unsigned x); int unsigned id(unsigned int x) { return x; } int main(void) { return id(42); }' unsigned-specifier-signatures
+check 42 'unsigned int *id(int unsigned *p) { return p; } int main(void) { unsigned int x = 42; int unsigned *p = &x; return *id(p); }' unsigned-specifier-pointers
+check 42 'int main(void) { int n = 0; for (int unsigned i = 0; i < 6; i++) n += 7; return n; }' unsigned-specifier-for
+check_error unsigned-missing-name 'int main() { int unsigned; return 0; }' '1:26: error: expect variable name'
+check_error duplicate-int-specifier 'int main(void) { int int x; return 0; }' '1:22: error: duplicate int type specifier'
+check_error duplicate-unsigned-specifier 'int main(void) { unsigned unsigned x; return 0; }' '1:27: error: duplicate unsigned type specifier'
+check_error duplicate-int-after-unsigned 'int main(void) { int unsigned int x; return 0; }' '1:31: error: duplicate int type specifier'
+check_error duplicate-unsigned-after-int 'int main(void) { unsigned int unsigned x; return 0; }' '1:31: error: duplicate unsigned type specifier'
+check_error invalid-unsigned-void 'int main(void) { unsigned void x; return 0; }' '1:27: error: expect variable name'
+
 check_error missing-plus-rhs 'int main() { return 1 +; }' '1:24: error: expect expr'
 check_error missing-sub-rhs 'int main() { return 1 -; }' '1:24: error: expect expr'
 check_error missing-mul-rhs 'int main() { return 1 *; }' '1:24: error: expect expr'
@@ -619,12 +707,13 @@ check_error use-post-scope-shadow 'int main() { { int x = 1; } x = 42; return 0;
 check_error redecl-after-nested 'int main() { int a; { int a; } int a; }' '1:36: error: duplicate local variable'
 check_error unsupported-comma-decl 'int main() { int a, b; return 0; }' "1:19: error: expect ';'"
 check 42 'int main() { int a = 42; a == 3; return a; }'
+check_error invalid-int-char-specifiers 'int main() { int char; return 0; }' '1:18: error: invalid combination of type specifiers'
 for kw in \
     _Alignas _Alignof _Atomic _Bool _Complex _Generic _Imaginary \
 	     _Noreturn _Static_assert _Thread_local \
-	     auto break case char const continue default do double else enum extern \
+	     auto break case const continue default do double else enum extern \
 	     float for goto if inline long register restrict short signed sizeof \
-	     static struct switch typedef union unsigned void volatile while; do
+	     static struct switch typedef union void volatile while; do
     check_error "reserved-kw-$kw" \
 		"int main() { int $kw; return 0; }" \
 		'1:18: error: expect variable name'
