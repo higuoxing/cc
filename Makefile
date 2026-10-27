@@ -23,11 +23,8 @@ clean:
 test: $(TARGET)
 	./test.sh
 
-test-qemu:
-	./test-qemu.sh
-
 fmt:
 	@echo "Formatting ..."
 	@clang-format -i $(SRCS)
 
-.PHONY: all test test-qemu clean fmt
+.PHONY: all test clean fmt
