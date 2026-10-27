@@ -4,9 +4,24 @@ set -euo pipefail
 
 SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 
-GCC="${GCC:-gcc}"
-CC="${TEST_CC:-$SCRIPT_DIR/cc}"
+CC="${CC:-gcc}"
+TEST_CC="${TEST_CC:-$SCRIPT_DIR/cc}"
 TEST_KEEP_TMP="${TEST_KEEP_TMP:-0}"
+
+compare=0
+for arg in "$@"; do
+    case "$arg" in
+        --compare) compare=1 ;;
+        -h|--help)
+            printf 'Usage: %s [--compare]\nCompare exit codes with CC (default: gcc) when --compare is specified.\n' "$0"
+            exit 0
+            ;;
+        *)
+            printf 'Unknown option: %s\nUsage: %s [--compare]\n' "$arg" "$0" >&2
+            exit 2
+            ;;
+    esac
+done
 
 passed=0
 rejected=0
@@ -35,9 +50,10 @@ function check() {
     local base="$WORK_DIR/execute-$((passed + 1))"
     local input="$base.c"
     local actual_code
+    local reference_code
 
     printf '%s' "$source" > "$input"
-    if "$CC" "$input" -o "$base.s" 2> "$base.compile.err"; then
+    if "$TEST_CC" "$input" -o "$base.s" 2> "$base.compile.err"; then
 	:
     else
 	actual_code=$?
@@ -47,7 +63,7 @@ function check() {
 
     # Don't allow a stale executable to hide a linker that produced no output.
     rm -f -- "$base.out"
-    if "$GCC" "$base.s" -o "$base.out" > "$base.link.log" 2>&1; then
+    if "$CC" "$base.s" -o "$base.out" > "$base.link.log" 2>&1; then
 	:
     else
 	actual_code=$?
@@ -62,13 +78,40 @@ function check() {
 	actual_code=$?
     fi
     if [[ "$actual_code" -ne "$expected" ]]; then
-	cat "$base.stdout" "$base.stderr" >&2
-	printf 'Source: %q\n' "$source" >&2
-	fail "$name (exit code $actual_code, expected $expected)"
+        cat "$base.stdout" "$base.stderr" >&2
+        printf 'Source: %q\n' "$source" >&2
+        fail "$name (exit code $actual_code, expected $expected)"
+    fi
+
+    if ((compare)); then
+        if "$CC" -std=c11 -O0 "$input" -o "$base.reference.out" > "$base.reference.compile.log" 2>&1; then
+            :
+        else
+            reference_code=$?
+            cat "$base.reference.compile.log" >&2
+            printf 'Source: %q\n' "$source" >&2
+            fail "$name: reference compiler ($CC) exited with status $reference_code"
+        fi
+        [[ -f "$base.reference.out" && -x "$base.reference.out" ]] || fail "$name: reference compiler produced no executable"
+
+        if "$base.reference.out" > "$base.reference.stdout" 2> "$base.reference.stderr"; then
+            reference_code=0
+        else
+            reference_code=$?
+        fi
+        if [[ "$actual_code" -ne "$reference_code" ]]; then
+            cat "$base.stdout" "$base.stderr" "$base.reference.stdout" "$base.reference.stderr" >&2
+            printf 'Source: %q\n' "$source" >&2
+            fail "$name: $TEST_CC exit code $actual_code, $CC exit code $reference_code, expected $expected"
+        fi
     fi
 
     passed=$((passed + 1))
-    printf '[PASS] %s (exit code %s)\n' "$name" "$actual_code"
+    if ((compare)); then
+        printf '[PASS] %s (exit code %s, matches %s)\n' "$name" "$actual_code" "$CC"
+    else
+        printf '[PASS] %s (exit code %s)\n' "$name" "$actual_code"
+    fi
 }
 
 function check_error() {
@@ -80,7 +123,7 @@ function check_error() {
     local actual_code
 
     printf '%s' "$source" > "$input"
-    if "$CC" "$input" -o "$base.s" 2> "$base.err"; then
+    if "$TEST_CC" "$input" -o "$base.s" 2> "$base.err"; then
 	actual_code=0
     else
 	actual_code=$?
@@ -356,18 +399,19 @@ check 2 'int main() { int x = 1; int *p; p = &x; *p = *p + 1; return x; }'
 check 42 'int main() { int x = 42; int *p; int **pp; p = &x; pp = &p; return **pp; }'
 check 42 'int main() { int x = 42; int *p; p = &x; return *(&x); }'
 check 42 'int main() { int x = 42; int *p; p = &x; *p = *p; return x; }'
-check 24 'int main() { int a = 24; int b = 42; int *p; p = &b; return *(p + 1); }'
-check 24 'int main() { int a = 24; int b = 42; int *p; p = &b; return *(1 + p); }'
-check 42 'int main() { int a = 24; int b = 42; int *p; p = &a; return *(p - 1); }'
-check 1 'int main() { int a; int b; int *p; int *q; p = &a; q = &b; return p - q; }'
-check 255 'int main() { int a; int b; int *p; int *q; p = &a; q = &b; return q - p; }'
-check 3 'int main() { int a; int b; int c; int d; int *p; int *q; p = &a; q = &d; return p - q; }'
-check 6 'int main() { int a; int b; int c; int d; int *p; int *q; p = &a; q = &d; return (p - q) * 2; }'
-check 7 'int main() { int a = 24; int b = 42; int *p; p = &b; *(p + 1) = 7; return a; }'
-check 24 'int main() { int a = 24; int b = 42; int *p; p = &b; p++; return *p; }'
-check 42 'int main() { int a = 24; int b = 42; int *p; p = &a; p--; return *p; }'
-check 24 'int main() { int a = 24; int b = 42; int *p; p = &b; ++p; return *p; }'
-check 6 'int main() { int a = 1; int b = 2; int c = 3; int *p; int s = 0; p = &c; s = s + *p; p++; s = s + *p; p++; s = s + *p; return s; }'
+# A scalar object permits pointer arithmetic up to one past its end.
+check 24 'int main() { int a = 24; int *p = &a; return *((p + 1) - 1); }' pointer-add
+check 24 'int main() { int a = 24; int *p = &a; return *((1 + p) - 1); }' integer-add-pointer
+check 42 'int main() { int a = 42; int *p = &a + 1; return *(p - 1); }' pointer-subtract
+check 1 'int main() { int a; int *p = &a + 1; int *q = &a; return p - q; }' pointer-difference-positive
+check 255 'int main() { int a; int *p = &a + 1; int *q = &a; return q - p; }' pointer-difference-negative
+check 3 'int main() { int a; int *p = &a + 1; int *q = &a; return (p - q) * 3; }' pointer-difference-scale
+check 6 'int main() { int a; int *p = &a + 1; int *q = &a; return (p - q) * 6; }' pointer-difference-expression
+check 7 'int main() { int a = 24; int *p = &a + 1; *(p - 1) = 7; return a; }' pointer-arithmetic-store
+check 24 'int main() { int a = 24; int *p = &a; p++; p--; return *p; }' pointer-postincrement
+check 42 'int main() { int a = 42; int *p = &a + 1; p--; return *p; }' pointer-postdecrement
+check 24 'int main() { int a = 24; int *p = &a; ++p; --p; return *p; }' pointer-preincrement
+check 6 'int main() { int a = 3; int *p = &a; int s = *p; p++; p--; return s + *p; }' pointer-increment-roundtrip
 check 42 'int main() { return 1, 42; }'
 check 42 'int main() { int a = 0; a = 1, a = a + 41; return a; }'
 check 6 'int main() { int i; int j; int n = 0; for (i = 0, j = 0; i < 3; i = i + 1, j = j + 1) n = n + i + j; return n; }'
@@ -456,7 +500,7 @@ check 42 'void set(int *p) { *p = 42; } int f(int a, int b, int c, int d, int e,
 check 42 'int f(int a, int b, int c, int d, int e, int z, int g) { if (a) return f(a - 1, b, c, d, e, z, g); return g; } int main(void) { return f(4, 2, 3, 4, 5, 6, 42); }' stack-argument-recursion
 check 42 'int f(int a, int b, int c, int d, int e, int f, int g) { return g; } int main(void) { int i; int n = 0; for (i = 0; i < 100; i++) n = f(1, 2, 3, 4, 5, 6, 42); return n; }' stack-argument-cleanup
 check 42 'int f(int a, int b, int c, int d, int e, int f, int g) { return a + g; } int main(void) { return f(1, 2, 3, 4, 5, 6, f(7, 8, 9, 10, 11, 12, 34)); }' stack-argument-nested-call
-check 42 'int f(int a, int b, int c, int d, int e, int f, int g) { return a + g; } int main(void) { int x = 0; return f(x = 20, 2, 3, 4, 5, 6, x + 2); }' stack-argument-evaluation-order
+check 42 'int f(int a, int b, int c, int d, int e, int f, int g) { return a + g; } int main(void) { int x = 20; return f(20, 2, 3, 4, 5, 6, (x += 2)); }' stack-argument-side-effect
 check_error stack-argument-too-few 'int f(int, int, int, int, int, int, int); int main(void) { return f(1,2,3,4,5,6); }' '1:67: error: wrong number of arguments to function '\''f'\'''
 check_error stack-argument-too-many 'int f(int, int, int, int, int, int, int); int main(void) { return f(1,2,3,4,5,6,7,8); }' '1:67: error: wrong number of arguments to function '\''f'\'''
 check_error stack-argument-type 'int f(int, int, int, int, int, int, int *); int main(void) { return f(1,2,3,4,5,6,42); }' '1:83: error: incompatible argument type'
