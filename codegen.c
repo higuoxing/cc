@@ -21,6 +21,7 @@
 
 #include "codegen.h"
 #include "parser.h"
+#include "type.h"
 
 /*
  * Counts generated labels so that each control-flow construct gets unique

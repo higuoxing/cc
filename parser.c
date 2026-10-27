@@ -24,6 +24,7 @@
 #include "lexer.h"
 #include "parser.h"
 #include "sema.h"
+#include "type.h"
 
 static LocalVar *declare_local_var(Parser *p, Token name, Type *type);
 static AstNode *new_ast_node(Parser *p, AstKind kind);
@@ -376,7 +377,9 @@ static Type *parse_decl_type(Parser *p) {
     parse_error(p, "expect 'int'");
   parser_advance(p);
   while (p->current.kind == TOKEN_STAR) {
-    type = sema_ptr_type(p, type);
+    type = pointer_to(type);
+    if (!type)
+      parse_error(p, "out of memory");
     parser_advance(p);
   }
   return type;

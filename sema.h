@@ -29,13 +29,8 @@
  * Parser remains the shared context during this incremental extraction.
  */
 
-extern Type builtin_type_char;
-extern Type builtin_type_int;
-extern Type builtin_type_void;
-
 extern bool same_identifier(Token a, Token b);
 extern Function *find_function(Parser *p, Token name);
-extern int type_size(Type *type);
 extern int64_t eval_const_expr(Parser *p, AstNode *expr);
 extern void check_calls(Parser *p);
 extern void check_gotos(Parser *p);
@@ -49,7 +44,6 @@ extern AstNode *sema_convert_expr(Parser *p, Type *target, AstNode *expr,
 extern void sema_check_call(Parser *p, Function *func, AstNode *call, int nargs);
 extern void sema_check_return(Parser *p, AstNode *stmt);
 
-extern Type *sema_ptr_type(Parser *p, Type *base);
 extern AstNode *sema_unary(Parser *p, AstKind op, AstNode *operand, Token loc);
 extern AstNode *sema_binary(Parser *p, AstKind kind, AstNode *lhs, AstNode *rhs,
                            Token loc);

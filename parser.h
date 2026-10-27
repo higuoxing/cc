@@ -20,21 +20,9 @@
 #define _PARSER_H_
 
 #include "lexer.h"
+#include "type.h"
 
 typedef struct AstNode AstNode;
-
-typedef enum {
-  TYPE_CHAR,
-  TYPE_INT,
-  TYPE_PTR,
-  TYPE_VOID,
-} TypeKind;
-
-typedef struct Type {
-  TypeKind kind;
-  int size; /* In bytes. */
-  struct Type *base; /* Pointed-to type for TYPE_PTR */
-} Type;
 
 typedef struct LocalVar {
   Token name;

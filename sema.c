@@ -19,10 +19,7 @@
 #include <string.h>
 
 #include "sema.h"
-
-Type builtin_type_char = {.kind = TYPE_CHAR, .size = 1, .base = NULL};
-Type builtin_type_int = {.kind = TYPE_INT, .size = 4, .base = NULL};
-Type builtin_type_void = {.kind = TYPE_VOID, .size = 0, .base = NULL};
+#include "type.h"
 
 bool same_identifier(Token a, Token b) {
   return a.len == b.len && strncmp(a.start, b.start, a.len) == 0;
@@ -37,22 +34,7 @@ Function *find_function(Parser *p, Token name) {
   return NULL;
 }
 
-/*
- * Declaration compatibility is structural: separately parsed pointer types
- * need not share an address. A void pointer is convertible, not identical,
- * to a pointer to another object type.
- */
-static bool same_type(Type *a, Type *b) {
-  if (a->kind != b->kind)
-    return false;
-  return a->kind != TYPE_PTR || same_type(a->base, b->base);
-}
-
 static AstNode *new_expr(Parser *p, AstKind kind, Type *type, Token loc);
-
-static bool is_integer(Type *type) {
-  return type->kind == TYPE_CHAR || type->kind == TYPE_INT;
-}
 
 static AstNode *integer_promotion(Parser *p, AstNode *expr) {
   AstNode *node;
@@ -171,12 +153,6 @@ static bool null_pointer_constant(Parser *p, AstNode *expr) {
   return constant_integer_tree(expr) && eval_const_expr(p, expr) == 0;
 }
 
-static bool compatible_pointers(Type *a, Type *b) {
-  return a->kind == TYPE_PTR && b->kind == TYPE_PTR &&
-         (same_type(a, b) || a->base->kind == TYPE_VOID ||
-          b->base->kind == TYPE_VOID);
-}
-
 AstNode *sema_convert_expr(Parser *p, Type *target, AstNode *expr, Token loc,
                            const char *context) {
   AstNode *node;
@@ -224,12 +200,6 @@ void sema_check_return(Parser *p, AstNode *stmt) {
       sema_convert_expr(p, return_type, expr, stmt->loc, "return");
 }
 
-/*
- * Sizes are stored in Type: an array's or struct's size is data, not
- * derivable from its kind. Void must never reach this.
- */
-int type_size(Type *type) { return type->size; }
-
 static bool is_lvalue(AstKind ty) { return ty == AST_VAR || ty == AST_DEREF; }
 
 static bool is_increment_op(AstKind ty) {
@@ -246,19 +216,9 @@ static AstNode *new_expr(Parser *p, AstKind kind, Type *type, Token loc) {
   return node;
 }
 
-Type *sema_ptr_type(Parser *p, Type *base) {
-  Type *type;
-  type = (Type *)calloc(1, sizeof(Type));
-  if (!type)
-    parse_error(p, "out of memory");
-  type->kind = TYPE_PTR;
-  type->size = 8;
-  type->base = base;
-  return type;
-}
-
 AstNode *sema_unary(Parser *p, AstKind op, AstNode *operand, Token loc) {
   AstNode *node;
+  Type *type;
   sema_check_nonvoid_expr(p, operand);
   if (((op == AST_PRE_INCREMENT || op == AST_PRE_DECREMENT ||
         op == AST_POST_INCREMENT || op == AST_POST_DECREMENT) &&
@@ -283,14 +243,18 @@ AstNode *sema_unary(Parser *p, AstKind op, AstNode *operand, Token loc) {
   if (op == AST_NEG || op == AST_BITWISE_NOT || op == AST_LOGICAL_NOT)
     operand = integer_promotion(p, operand);
 
-  node =
-      new_expr(p, op,
-               op == AST_DEREF  ? operand->type->base
-               : op == AST_ADDR ? sema_ptr_type(p, operand->type)
-               : op == AST_NEG || op == AST_BITWISE_NOT || op == AST_LOGICAL_NOT
-                   ? &builtin_type_int
-                   : operand->type /* pre/post increment */,
-               loc);
+  if (op == AST_ADDR) {
+    type = pointer_to(operand->type);
+    if (!type)
+      error_at(p, loc, "out of memory");
+  } else if (op == AST_DEREF) {
+    type = operand->type->base;
+  } else if (op == AST_NEG || op == AST_BITWISE_NOT || op == AST_LOGICAL_NOT) {
+    type = &builtin_type_int;
+  } else {
+    type = operand->type;
+  }
+  node = new_expr(p, op, type, loc);
   node->d.unary.operand = operand;
   return node;
 }
