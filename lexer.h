@@ -92,6 +92,7 @@ typedef enum {
 enum {
   INT_SUFFIX_UNSIGNED = 1 << 0,
   INT_SUFFIX_LONG = 1 << 1,
+  INT_SUFFIX_LONG_LONG = 1 << 2,
 };
 
 typedef struct {

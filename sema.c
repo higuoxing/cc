@@ -233,13 +233,21 @@ AstNode *sema_integer_literal(Parser *p, Token loc) {
   uint64_t value = loc.int_literal_val;
   bool is_unsigned = (loc.int_literal_suffix & INT_SUFFIX_UNSIGNED) != 0;
   bool is_long = (loc.int_literal_suffix & INT_SUFFIX_LONG) != 0;
+  bool is_long_long = (loc.int_literal_suffix & INT_SUFFIX_LONG_LONG) != 0;
   bool decimal = loc.start[0] != '0';
   Type *type;
   AstNode *node;
 
   if (loc.start[0] == '\'')
     type = &builtin_type_int;
-  else if (is_unsigned)
+  else if (is_long_long) {
+    if (is_unsigned || (!decimal && value > INT64_MAX))
+      type = &builtin_type_unsigned_long_long;
+    else if (value <= INT64_MAX)
+      type = &builtin_type_long_long;
+    else
+      error_at(p, loc, "integer literal out of range for supported signed types");
+  } else if (is_unsigned)
     type = !is_long && value <= UINT32_MAX ? &builtin_type_unsigned
                                            : &builtin_type_unsigned_long;
   else if (!is_long && value <= INT32_MAX)

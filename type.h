@@ -26,6 +26,7 @@ typedef enum {
   TYPE_SHORT,
   TYPE_INT,
   TYPE_LONG,
+  TYPE_LONG_LONG,
   TYPE_PTR,
   TYPE_VOID,
 } TypeKind;
@@ -45,6 +46,8 @@ extern Type builtin_type_int;
 extern Type builtin_type_unsigned;
 extern Type builtin_type_long;
 extern Type builtin_type_unsigned_long;
+extern Type builtin_type_long_long;
+extern Type builtin_type_unsigned_long_long;
 extern Type builtin_type_void;
 
 extern bool is_integer(const Type *type);

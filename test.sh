@@ -205,7 +205,7 @@ check 7 'int main() { return 07; }' octal-seven
 check 8 'int main() { return 010; }' octal-ten
 check 42 'int main() { return 052; }' octal-fifty-two
 # Integer suffix spelling and token boundaries.
-for suffix in U u L l UL Ul uL ul LU Lu lU lu; do
+for suffix in U u L l UL Ul uL ul LU Lu lU lu LL ll ULL Ull uLL ull LLU LLu llU llu; do
     check 42 "int main(void) { return 42$suffix; }" "integer-suffix-decimal-$suffix"
     check 42 "int main(void) { return 052$suffix; }" "integer-suffix-octal-$suffix"
 done
@@ -214,10 +214,10 @@ check 0 'int main(void) { return 0uL; }' integer-suffix-zero
 check_error integer-suffix-duplicate-unsigned 'int main(void) { return 42UU; }' '1:25: error: invalid integer suffix'
 check_error integer-suffix-duplicate-unsigned-case 'int main(void) { return 42Uu; }' '1:25: error: invalid integer suffix'
 check_error integer-suffix-duplicate-unsigned-after-long 'int main(void) { return 42ULU; }' '1:25: error: invalid integer suffix'
-check_error integer-suffix-long-long 'int main(void) { return 42LL; }' '1:25: error: long long integer literals not supported'
-check_error integer-suffix-long-long-lowercase 'int main(void) { return 42ll; }' '1:25: error: long long integer literals not supported'
-check_error integer-suffix-long-long-mixed-case 'int main(void) { return 42lL; }' '1:25: error: long long integer literals not supported'
-check_error integer-suffix-unsigned-long-long 'int main(void) { return 42uLL; }' '1:25: error: long long integer literals not supported'
+check_error integer-suffix-long-long-mixed-case 'int main(void) { return 42lL; }' '1:25: error: invalid integer suffix'
+for suffix in Ll ULl lLU LLL lll lUl LuL ULLU LLUU LL2 ll_name; do
+    check_error "integer-suffix-invalid-$suffix" "int main(void) { return 42$suffix; }" '1:25: error: invalid integer suffix'
+done
 check_error integer-suffix-trailing-letter 'int main(void) { return 42ULx; }' '1:25: error: invalid integer suffix'
 check_error integer-suffix-trailing-digit 'int main(void) { return 42U2; }' '1:25: error: invalid integer suffix'
 check_error integer-suffix-trailing-underscore 'int main(void) { return 42L_name; }' '1:25: error: invalid integer suffix'
@@ -630,6 +630,35 @@ check_error character-literal-raw-newline $'int main(void) { return \'\n\'; }' "
 check_error character-literal-raw-crlf $'int main(void) { return \'\r\n\'; }' "1:25: error: unterminated character literal"
 check_error character-literal-escaped-newline $'int main(void) { return \'\\\n\'; }' "1:25: error: unterminated character literal"
 
+# Long long literal types and boundaries.
+check 1 'int main(void) { return 1LL << 40 == 1099511627776L; }' literal-long-long-width
+check 1 'int main(void) { return 1LL - 2 < 0 && 0ll == 0; }' literal-long-long-signed
+check 1 'int main(void) { return 1ULL - 2 > 0 && 0llu - 1 == 18446744073709551615ULL; }' literal-unsigned-long-long-type
+check 1 'int main(void) { long long x = 9223372036854775807LL; return x >> 62 == 1 && x > 2147483647; }' literal-long-long-max
+check 1 'int main(void) { long long x = -9223372036854775807LL - 1; return x >> 63 == -1 && x < 0; }' literal-long-long-min
+check 1 'int main(void) { unsigned long long x = 18446744073709551615ULL; return x / 2 == 9223372036854775807LL && x + 1 == 0; }' literal-unsigned-long-long-max
+check 1 'int main(void) { return 037777777777LL > -1 && 040000000000LL >> 32 == 1; }' literal-octal-long-long-small
+check 1 'int main(void) { return 0777777777777777777777LL == 9223372036854775807LL; }' literal-octal-long-long-max
+check 1 'int main(void) { return 01000000000000000000000LL >> 63 == 1 && 01000000000000000000000LL > 0; }' literal-octal-long-long-unsigned-fallback
+check 1 'int main(void) { return 01777777777777777777777ll == 18446744073709551615ULL; }' literal-octal-long-long-unsigned-max
+check 1 'int main(void) { return -1LL < 1U && -1LL > 1UL && -1L > 1ULL; }' literal-long-long-mixed-signedness
+check 1 'int main(void) { return (1 ? -1LL : 1U) < 0 && (1 ? -1LL : 1UL) > 0; }' literal-long-long-conditional-type
+check 1 'int main(void) { unsigned u = 18446744073709551615ULL; short s = 65535LL; return u == 4294967295U && s == -1; }' literal-long-long-narrow-conversions
+check 1 'long long f(long long x) { return x; } int main(void) { return f(9223372036854775807LL) == 9223372036854775807LL; }' literal-long-long-call
+check 1 'unsigned long long f(int a, int b, int c, int d, int e, int f, unsigned long long g) { return g; } int main(void) { return f(1,2,3,4,5,6,18446744073709551615ULL) == 18446744073709551615ULL; }' literal-long-long-stack-argument
+check 42 'int main(void) { switch (9223372036854775807LL) { case 9223372036854775807LL: return 42; default: return 0; } }' case-long-long-max
+check 42 'int main(void) { switch (-9223372036854775807LL - 1) { case -9223372036854775807LL - 1: return 42; default: return 0; } }' case-long-long-min
+check 42 'int main(void) { switch (0) { case 18446744073709551615ULL + 1: return 42; default: return 0; } }' case-long-long-wraparound
+check 42 'int main(void) { switch (1) { case -1LL < 1U: return 42; default: return 0; } }' case-long-long-mixed-signedness
+check 1 'int main(void) { int *p = 18446744073709551615ULL + 1; return p == 0; }' literal-long-long-null-constant
+check_error literal-over-signed-long-long 'int main(void) { return 9223372036854775808LL; }' '1:25: error: integer literal out of range for supported signed types'
+check_error literal-negative-over-signed-long-long 'int main(void) { return -9223372036854775808ll; }' '1:26: error: integer literal out of range for supported signed types'
+check_error literal-over-uint64-long-long 'int main(void) { return 18446744073709551616ULL; }' '1:25: error: integer literal out of range for 64-bit unsigned integer'
+check_error literal-over-uint64-octal-long-long 'int main(void) { return 02000000000000000000000LL; }' '1:25: error: integer literal out of range for 64-bit unsigned integer'
+check_error case-long-long-overflow-add 'int main(void) { switch (0) { case 9223372036854775807LL + 1LL: return 1; } return 0; }' '1:63: error: integer overflow in constant expression'
+check_error case-long-long-overflow-div 'int main(void) { switch (0) { case (-9223372036854775807LL - 1) / -1LL: return 1; } return 0; }' '1:71: error: integer overflow in constant expression'
+check_error case-long-long-duplicate 'int main(void) { switch (0ULL) { case -1LL: return 1; case 18446744073709551615ULL: return 2; } return 0; }' '1:55: error: duplicate case value'
+
 # Integer literal ranges, suffix types, and 64-bit constant expressions.
 check 1 'int main(void) { return 2147483648 > -1; }' literal-decimal-above-int
 check 1 'int main(void) { return 4294967295 > -1 && ~4294967295 == -4294967296L; }' literal-decimal-uses-long
@@ -847,7 +876,7 @@ check 1 'int main(void) { long x; long *p = &x; return (p + 1) - p; }' long-poin
 check_error long-missing-name 'int main() { int long; return 0; }' '1:22: error: expect variable name'
 check_error long-char-specifiers 'int main(void) { long char x; return 0; }' '1:23: error: invalid combination of type specifiers'
 check_error char-long-specifiers 'int main(void) { char long x; return 0; }' '1:23: error: invalid combination of type specifiers'
-check_error long-long-unsupported 'int main(void) { long long x; return 0; }' '1:23: error: long long is not supported'
+check_error long-long-long-specifiers 'int main(void) { long long long x; return 0; }' '1:28: error: duplicate long type specifier'
 check_error long-duplicate-int 'int main(void) { long int int x; return 0; }' '1:27: error: duplicate int type specifier'
 check_error long-duplicate-unsigned 'int main(void) { unsigned long unsigned x; return 0; }' '1:32: error: duplicate unsigned type specifier'
 check_error long-conflicting-return 'long f(void); int f(void);' '1:19: error: conflicting declaration of function '"'"'f'"'"''
@@ -856,6 +885,31 @@ check_error long-conflicting-signedness 'long f(long); unsigned long f(long);' '
 check_error long-conflicting-parameter-signedness 'int f(long); int f(unsigned long);' '1:18: error: conflicting declaration of function '"'"'f'"'"''
 check_error long-incompatible-pointer 'int main(void) { int x; long *p = &x; return 0; }' '1:31: error: incompatible initializer type'
 check_error long-declaration-as-statement 'int main(void) { if (1) long x; return 0; }' '1:25: error: expect statement'
+
+# Long long declaration specifiers, including nonadjacent long keywords.
+for spec in 'long long' 'long long int' 'long int long' 'int long long' \
+    'unsigned long long' 'long unsigned long' 'long long unsigned' \
+    'unsigned int long long' 'unsigned long int long' 'unsigned long long int' \
+    'int unsigned long long' 'int long unsigned long' 'int long long unsigned' \
+    'long unsigned int long' 'long unsigned long int' 'long int unsigned long' \
+    'long int long unsigned' 'long long unsigned int' 'long long int unsigned'; do
+    check 42 "$spec f($spec); $spec f($spec x) { return x; } int main(void) { $spec x = 42; return f(x); }" "long-long-declspecs-$spec"
+done
+check 42 'int main(void) { for (long long i = 42; i;) return i; return 0; }' long-long-for-declaration
+check 42 'int main(void) { for (unsigned long long i = 42; i;) return i; return 0; }' unsigned-long-long-for-declaration
+check 42 'int main(void) { long long x = 42; long long *p = &x; return *p; }' long-long-pointer-declaration
+check 1 'int main(void) { long long x = 1; x <<= 40; return x + x == 2199023255552L; }' long-long-common-type-width
+check 1 'int main(void) { long long x = -1; unsigned y = 1; return x < y; }' long-long-unsigned-int-common-type
+check 1 'int main(void) { long long x = -1; unsigned long y = 1; return x > y; }' long-long-unsigned-long-common-type
+check 1 'int main(void) { long x = -1; unsigned long long y = 1; return x > y; }' long-unsigned-long-long-common-type
+check_error long-long-short-specifiers 'int main(void) { long long short x; return 0; }' '1:28: error: invalid combination of type specifiers'
+check_error long-long-char-specifiers 'int main(void) { long long char x; return 0; }' '1:28: error: invalid combination of type specifiers'
+check_error long-long-duplicate-int 'int main(void) { long long int int x; return 0; }' '1:32: error: duplicate int type specifier'
+check_error long-long-duplicate-unsigned 'int main(void) { unsigned long long unsigned x; return 0; }' '1:37: error: duplicate unsigned type specifier'
+check_error long-long-conflicting-return 'long f(void); long long f(void);' '1:25: error: conflicting declaration of function '"'"'f'"'"''
+check_error long-long-conflicting-parameter 'int f(long); int f(long long);' '1:18: error: conflicting declaration of function '"'"'f'"'"''
+check_error long-long-conflicting-signedness 'int f(long long); int f(unsigned long long);' '1:23: error: conflicting declaration of function '"'"'f'"'"''
+check_error long-long-incompatible-pointer 'int main(void) { long x; long long *p = &x; return 0; }' '1:37: error: incompatible initializer type'
 
 # Unsigned char occupies one byte and promotes to int.
 check 255 'int main(void) { unsigned char c = -1; return c; }' unsigned-char-load

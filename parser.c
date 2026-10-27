@@ -371,6 +371,7 @@ static Type *parse_declspecs(Parser *p) {
     DECLSPEC_UNSIGNED = 1 << 2,
     DECLSPEC_LONG = 1 << 3,
     DECLSPEC_SHORT = 1 << 4,
+    DECLSPEC_LONG_LONG = 1 << 5,
   };
   unsigned specs = 0;
 
@@ -393,9 +394,9 @@ static Type *parse_declspecs(Parser *p) {
     else
       flag = DECLSPEC_SHORT;
 
+    if (flag == DECLSPEC_LONG && (specs & DECLSPEC_LONG))
+      flag = DECLSPEC_LONG_LONG;
     if (specs & flag) {
-      if (flag == DECLSPEC_LONG)
-        parse_error(p, "long long is not supported");
       parse_error(p, "duplicate %.*s type specifier", p->current.len,
                   p->current.start);
     }
@@ -429,6 +430,12 @@ static Type *parse_declspecs(Parser *p) {
   case DECLSPEC_UNSIGNED | DECLSPEC_LONG:
   case DECLSPEC_UNSIGNED | DECLSPEC_LONG | DECLSPEC_INT:
     return &builtin_type_unsigned_long;
+  case DECLSPEC_LONG | DECLSPEC_LONG_LONG:
+  case DECLSPEC_LONG | DECLSPEC_LONG_LONG | DECLSPEC_INT:
+    return &builtin_type_long_long;
+  case DECLSPEC_UNSIGNED | DECLSPEC_LONG | DECLSPEC_LONG_LONG:
+  case DECLSPEC_UNSIGNED | DECLSPEC_LONG | DECLSPEC_LONG_LONG | DECLSPEC_INT:
+    return &builtin_type_unsigned_long_long;
   default:
     parse_error(p, "expect 'int'");
   }

@@ -177,22 +177,30 @@ static void lexer_error(Lexer *l, Token loc, const char *message) {
 }
 
 /*
- * Integer suffixes allow one U and one L, in either order and either case.
+ * Integer suffixes allow one U and one L, LL, or ll, in either order.
  * Keep the flags on the token for literal type selection in the parser.
  */
 static unsigned read_int_suffix(Lexer *l, Token loc) {
   unsigned suffix = 0;
   while (*l->cursor == 'u' || *l->cursor == 'U' || *l->cursor == 'l' ||
          *l->cursor == 'L') {
-    unsigned flag = *l->cursor == 'u' || *l->cursor == 'U' ? INT_SUFFIX_UNSIGNED
-                                                           : INT_SUFFIX_LONG;
-    if (suffix & flag) {
-      if (flag == INT_SUFFIX_LONG)
-        lexer_error(l, loc, "long long integer literals not supported");
-      lexer_error(l, loc, "invalid integer suffix");
+    if (*l->cursor == 'u' || *l->cursor == 'U') {
+      if (suffix & INT_SUFFIX_UNSIGNED)
+        lexer_error(l, loc, "invalid integer suffix");
+      suffix |= INT_SUFFIX_UNSIGNED;
+      lexer_advance(l);
+    } else {
+      char letter = *l->cursor;
+      if (suffix & (INT_SUFFIX_LONG | INT_SUFFIX_LONG_LONG))
+        lexer_error(l, loc, "invalid integer suffix");
+      lexer_advance(l);
+      if (*l->cursor == letter) {
+        suffix |= INT_SUFFIX_LONG_LONG;
+        lexer_advance(l);
+      } else {
+        suffix |= INT_SUFFIX_LONG;
+      }
     }
-    suffix |= flag;
-    lexer_advance(l);
   }
   if (isalnum((unsigned char)*l->cursor) || *l->cursor == '_')
     lexer_error(l, loc, "invalid integer suffix");
