@@ -58,6 +58,8 @@ static AstNode *parse_default_stmt(Parser *p);
 static AstNode *parse_stmt(Parser *p, bool allow_decl);
 static AstNode *parse_block(Parser *p);
 static AstNode *parse_external_declaration(Parser *p);
+static Type *parse_declspecs(Parser *p);
+static Type *parse_declarator(Parser *p, Type *type, Token *name);
 
 /* assignment-operator: = += -= *= /= %= <<= >>= &= ^= |=  (C11 6.5.16) */
 static bool is_assignment_op(TokenKind ty) {
@@ -83,6 +85,8 @@ static LocalVar *declare_local_var(Parser *p, Token name, Type *type) {
   int alignment;
 
   size = type_size(type);
+  if (size < 0)
+    error_at(p, name, "variable has incomplete type");
   alignment = type_alignment(type);
   for (var = p->locals; var && var->scope_depth == p->scope_depth;
        var = var->next) {
@@ -151,6 +155,7 @@ static void reset_function_state(Parser *p) {
 
 static void parser_init(Parser *p, const char *filename, const char *source) {
   p->locals = NULL;
+  p->tags = NULL;
   p->labels = NULL;
   p->goto_refs = NULL;
   p->functions = NULL;
@@ -410,6 +415,132 @@ static AstNode *parse_primary(Parser *p) {
   return NULL;
 }
 
+static Tag *find_tag(Parser *p, Token name, bool current_scope) {
+  Tag *tag;
+  for (tag = p->tags; tag; tag = tag->next) {
+    if (same_identifier(tag->name, name)) {
+      if (!current_scope || tag->scope_depth == p->scope_depth)
+        return tag;
+    }
+  }
+  return NULL;
+}
+
+/*
+ * Parse one member declarator and update the struct's size and alignment.
+ * The caller links the returned member before parsing the next declarator.
+ */
+static Member *parse_struct_member(Parser *p, Type *type, Type *base, int *size) {
+  Token name;
+  Type *member_type = parse_declarator(p, base, &name);
+  Member *member;
+  int alignment;
+  int padding;
+
+  if (name.kind != TOKEN_IDENTIFIER)
+    parse_error(p, "expect member name");
+  if (member_type->kind == TYPE_VOID)
+    error_at(p, name, "member has void type");
+  if (member_type->size < 0)
+    error_at(p, name, "member has incomplete type");
+  for (member = type->members; member; member = member->next)
+    if (same_identifier(member->name, name))
+      error_at(p, name, "duplicate struct member");
+  alignment = type_alignment(member_type);
+  padding = (alignment - *size % alignment) % alignment;
+  if (*size > INT_MAX - padding ||
+      member_type->size > INT_MAX - *size - padding)
+    error_at(p, name, "struct size exceeds supported limit");
+  member = calloc(1, sizeof(Member));
+  if (!member)
+    error_at(p, name, "out of memory");
+  member->name = name;
+  member->type = member_type;
+  member->offset = *size + padding;
+  *size = member->offset + member_type->size;
+  if (alignment > type->alignment)
+    type->alignment = alignment;
+  return member;
+}
+
+/*
+ * struct-specifier:
+ *   'struct' identifier
+ *   'struct' identifier_opt '{' struct-declaration+ '}'
+ * struct-declaration:
+ *   declaration-specifiers declarator (',' declarator)* ';'
+ * (C11 6.7.2.1, excluding bit-fields and anonymous members.)
+ */
+static Type *parse_struct_specifier(Parser *p) {
+  Token loc = p->current;
+  Token name = {0};
+  Tag *tag = NULL;
+  Type *type;
+  Member **tail;
+  int size = 0;
+
+  parser_advance(p);
+  if (p->current.kind == TOKEN_IDENTIFIER) {
+    name = p->current;
+    parser_advance(p);
+    tag = find_tag(p, name,
+                   p->current.kind == TOKEN_LBRACE ||
+                       p->current.kind == TOKEN_SEMICOLON);
+  } else if (p->current.kind != TOKEN_LBRACE) {
+    parse_error(p, "expect struct tag or '{'");
+  }
+
+  if (tag) {
+    type = tag->type;
+  } else {
+    type = struct_type();
+    if (!type)
+      error_at(p, loc, "out of memory");
+    if (name.kind == TOKEN_IDENTIFIER) {
+      tag = calloc(1, sizeof(Tag));
+      if (!tag)
+        error_at(p, name, "out of memory");
+      tag->name = name;
+      tag->type = type;
+      tag->scope_depth = p->scope_depth;
+      tag->next = p->tags;
+      p->tags = tag;
+    }
+  }
+  if (p->current.kind != TOKEN_LBRACE)
+    return type;
+  if (type->size >= 0 || (tag && tag->is_defining))
+    error_at(p, name, "redefinition of struct '%.*s'", name.len, name.start);
+  if (tag)
+    tag->is_defining = true;
+  parser_advance(p);
+  tail = &type->members;
+  while (p->current.kind != TOKEN_RBRACE) {
+    Type *base;
+    if (p->current.kind == TOKEN_EOF)
+      parse_error(p, "expect '}'");
+    base = parse_declspecs(p);
+    for (;;) {
+      *tail = parse_struct_member(p, type, base, &size);
+      tail = &(*tail)->next;
+      if (p->current.kind != TOKEN_COMMA)
+        break;
+      parser_advance(p);
+    }
+    parse_expect(p, TOKEN_SEMICOLON, "expect ';'");
+  }
+  if (!type->members)
+    parse_error(p, "empty structs are not supported");
+  int padding = (type->alignment - size % type->alignment) % type->alignment;
+  if (size > INT_MAX - padding)
+    error_at(p, loc, "struct size exceeds supported limit");
+  type->size = size + padding;
+  if (tag)
+    tag->is_defining = false;
+  parser_advance(p);
+  return type;
+}
+
 /*
  * Consume declaration specifiers and return the base type only.
  * Unsigned, short and long may precede or follow the base type specifier.
@@ -425,6 +556,8 @@ static Type *parse_declspecs(Parser *p) {
   };
   unsigned specs = 0;
 
+  if (p->current.kind == TOKEN_STRUCT)
+    return parse_struct_specifier(p);
   if (p->current.kind == TOKEN_VOID) {
     parser_advance(p);
     return &builtin_type_void;
@@ -525,6 +658,8 @@ static Type *parse_declarator(Parser *p, Type *type, Token *name) {
     parser_advance(p);
     if (type->kind == TYPE_VOID)
       error_at(p, loc, "array element has void type");
+    if (type->size < 0)
+      error_at(p, loc, "array element has incomplete type");
     if (p->current.kind == TOKEN_RBRACKET)
       parse_error(p, "array bound is required");
     bound = parse_conditional(p);
@@ -556,6 +691,11 @@ static AstNode *parse_decl(Parser *p) {
   Type *type;
 
   type = parse_declspecs(p);
+  if (type->kind == TYPE_STRUCT && p->current.kind == TOKEN_SEMICOLON) {
+    decl = new_ast_node(p, AST_DECL);
+    parser_advance(p);
+    return decl;
+  }
   type = parse_declarator(p, type, &name);
   if (type->kind == TYPE_VOID)
     error_at(p, name.kind == TOKEN_IDENTIFIER ? name : p->current,
@@ -569,6 +709,8 @@ static AstNode *parse_decl(Parser *p) {
   decl->d.decl.var = declare_local_var(p, name, type);
 
   if (p->current.kind == TOKEN_ASSIGN) {
+    if (type->kind == TYPE_STRUCT)
+      parse_error(p, "struct initializers are not supported yet");
     if (type->kind == TYPE_ARRAY)
       parse_error(p, "array initializers are not supported yet");
     /* Consume '=' */
@@ -940,6 +1082,14 @@ static AstNode *parse_condition(Parser *p) {
   return sema_check_condition(p, parse_expression(p));
 }
 
+/* Struct values need aggregate codegen, including in discarded expressions. */
+static AstNode *parse_discarded_expression(Parser *p) {
+  AstNode *expr = parse_expression(p);
+  if (expr->type->kind == TYPE_STRUCT)
+    error_at(p, expr->loc, "struct values are not supported yet");
+  return expr;
+}
+
 /*
  * conditional-expression:
  *   logical-OR-expression
@@ -1019,6 +1169,7 @@ static AstNode *parse_block(Parser *p) {
   AstNode *block;
   AstNode **tail;
   LocalVar *outer_locals = p->locals;
+  Tag *outer_tags = p->tags;
 
   block = new_ast_node(p, AST_BLOCK);
   tail = &block->d.block.first_stmt;
@@ -1035,6 +1186,7 @@ static AstNode *parse_block(Parser *p) {
 
   parse_expect(p, TOKEN_RBRACE, "expect '}'");
   p->locals = outer_locals;
+  p->tags = outer_tags;
   --p->scope_depth;
   return block;
 }
@@ -1055,11 +1207,16 @@ static AstNode *parse_external_declaration(Parser *p) {
   int definition = 0;
   int explicit_params = 0;
   int unamed_param = 0;
+  Tag *outer_tags;
 
   reset_function_state(p);
   vector_init(&param_types, sizeof(Type *));
   fn = new_ast_node(p, AST_FUNCTION);
   return_type = parse_declspecs(p);
+  if (return_type->kind == TYPE_STRUCT && p->current.kind == TOKEN_SEMICOLON) {
+    parser_advance(p);
+    return NULL;
+  }
   return_type = parse_declarator(p, return_type, &func_name);
   if (func_name.kind != TOKEN_IDENTIFIER)
     parse_error(p, "expect function name");
@@ -1067,8 +1224,12 @@ static AstNode *parse_external_declaration(Parser *p) {
   fn->d.function.name = func_name;
   if (return_type->kind == TYPE_ARRAY)
     error_at(p, func_name, "function cannot return an array");
+  if (return_type->kind == TYPE_STRUCT)
+    error_at(p, func_name, "returning structs by value is not supported yet");
 
   parse_expect(p, TOKEN_LPAREN, "expect '('");
+  outer_tags = p->tags;
+  p->scope_depth = 1;
 
   if (p->current.kind == TOKEN_VOID && p->lookahead.kind == TOKEN_RPAREN) {
     explicit_params = 1;
@@ -1091,6 +1252,10 @@ static AstNode *parse_external_declaration(Parser *p) {
         error_at(p,
                  param_name.kind == TOKEN_IDENTIFIER ? param_name : p->current,
                  "parameter has void type");
+      if (param_type->kind == TYPE_STRUCT)
+        error_at(p,
+                 param_name.kind == TOKEN_IDENTIFIER ? param_name : p->current,
+                 "passing structs by value is not supported yet");
       if (param_types.len >= (size_t)((INT_MAX - 15) / 8))
         parse_error(p, "too many function parameters");
       if (!vector_push(&param_types, &param_type))
@@ -1141,13 +1306,17 @@ static AstNode *parse_external_declaration(Parser *p) {
   if (!definition) {
     /* Consume ';' */
     parser_advance(p);
+    p->tags = outer_tags;
+    p->scope_depth = 0;
     return NULL;
   }
 
   p->current_function = func;
   fn->d.function.params = p->locals;
   p->stack_size = 8 * nparams;
+  p->scope_depth = 0;
   fn->d.function.body = parse_block(p);
+  p->tags = outer_tags;
   check_gotos(p);
   fn->d.function.stack_size = p->stack_size;
   return fn;
@@ -1207,6 +1376,7 @@ static AstNode *parse_while_stmt(Parser *p) {
 static AstNode *parse_for_stmt(Parser *p) {
   AstNode *for_node;
   LocalVar *outer_locals;
+  Tag *outer_tags;
 
   parse_expect(p, TOKEN_FOR, "expect 'for'");
   parse_expect(p, TOKEN_LPAREN, "expect '('");
@@ -1215,11 +1385,13 @@ static AstNode *parse_for_stmt(Parser *p) {
 
   /* A declaration in the init clause is scoped to the whole loop. */
   outer_locals = p->locals;
+  outer_tags = p->tags;
   ++p->scope_depth;
 
   if (p->current.kind == TOKEN_INT || p->current.kind == TOKEN_CHAR ||
       p->current.kind == TOKEN_UNSIGNED || p->current.kind == TOKEN_LONG ||
-      p->current.kind == TOKEN_SHORT || p->current.kind == TOKEN_VOID) {
+      p->current.kind == TOKEN_SHORT || p->current.kind == TOKEN_VOID ||
+      p->current.kind == TOKEN_STRUCT) {
     /* parse_decl consumes the declaration's own ';'. */
     for_node->d.for_stmt.init = parse_decl(p);
   } else if (p->current.kind == TOKEN_SEMICOLON) {
@@ -1227,7 +1399,7 @@ static AstNode *parse_for_stmt(Parser *p) {
     parser_advance(p);
   } else {
     AstNode *init = new_ast_node(p, AST_EXPR_STMT);
-    init->d.expr_stmt.expr = parse_expression(p);
+    init->d.expr_stmt.expr = parse_discarded_expression(p);
     parse_expect(p, TOKEN_SEMICOLON, "expect ';'");
     for_node->d.for_stmt.init = init;
   }
@@ -1238,13 +1410,14 @@ static AstNode *parse_for_stmt(Parser *p) {
   parse_expect(p, TOKEN_SEMICOLON, "expect ';'");
 
   if (p->current.kind != TOKEN_RPAREN)
-    for_node->d.for_stmt.post = parse_expression(p);
+    for_node->d.for_stmt.post = parse_discarded_expression(p);
   parse_expect(p, TOKEN_RPAREN, "expect ')'");
 
   ++p->loop_depth;
   for_node->d.for_stmt.body = parse_stmt(p, /*allow_decl=*/false);
   --p->loop_depth;
   p->locals = outer_locals;
+  p->tags = outer_tags;
   --p->scope_depth;
 
   return for_node;
@@ -1530,6 +1703,7 @@ static AstNode *parse_stmt(Parser *p, bool allow_decl) {
   case TOKEN_INT:
   case TOKEN_LONG:
   case TOKEN_SHORT:
+  case TOKEN_STRUCT:
   case TOKEN_UNSIGNED:
   case TOKEN_VOID:
     if (allow_decl)
@@ -1545,7 +1719,7 @@ static AstNode *parse_stmt(Parser *p, bool allow_decl) {
     return stmt;
   default:
     stmt = new_ast_node(p, AST_EXPR_STMT);
-    stmt->d.expr_stmt.expr = parse_expression(p);
+    stmt->d.expr_stmt.expr = parse_discarded_expression(p);
     parse_expect(p, TOKEN_SEMICOLON, "expect ';'");
     return stmt;
   }

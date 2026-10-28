@@ -85,6 +85,7 @@ typedef enum {
   TOKEN_STAR,     /* '*' */
   TOKEN_STAR_EQ,  /* '*=' */
   TOKEN_STRING_LITERAL,
+  TOKEN_STRUCT,   /* 'struct' */
   TOKEN_SWITCH,   /* 'switch' */
   TOKEN_TILDE,    /* '~' */
   TOKEN_UNSIGNED, /* 'unsigned' */

@@ -43,6 +43,8 @@ static AstNode *new_expr(Parser *p, AstKind kind, Type *type, Token loc);
 static AstNode *convert_to_value(Parser *p, AstNode *expr) {
   AstNode *node;
   Type *type;
+  if (expr->type->kind == TYPE_STRUCT)
+    error_at(p, expr->loc, "struct values are not supported yet");
   if (expr->type->kind != TYPE_ARRAY)
     return expr;
   type = pointer_to(expr->type->base);
@@ -223,6 +225,8 @@ void sema_check_call(Parser *p, Function *func, AstNode *call, int nargs) {
     AstNode *arg = *link;
     AstNode *next = arg->next;
     arg->next = NULL;
+    if (arg->type->kind == TYPE_STRUCT)
+      error_at(p, arg->loc, "passing structs by value is not supported yet");
     sema_check_nonvoid_expr(p, arg);
     if (func->has_prototype)
       *link =
@@ -356,12 +360,14 @@ AstNode *sema_unary(Parser *p, AstKind op, AstNode *operand, Token loc) {
   case AST_PRE_DECREMENT:
   case AST_POST_INCREMENT:
   case AST_POST_DECREMENT:
-    if (!is_modifiable_lvalue(operand))
+    if (!is_modifiable_lvalue(operand) || operand->type->kind == TYPE_STRUCT)
       error_at(p, loc, "invalid %s target",
                is_increment_op(op) ? "increment" : "decrement");
     if (operand->type->kind == TYPE_PTR &&
         operand->type->base->kind == TYPE_VOID)
       error_at(p, loc, "pointer arithmetic on void pointer");
+    if (operand->type->kind == TYPE_PTR && operand->type->base->size < 0)
+      error_at(p, loc, "pointer arithmetic on incomplete type");
     type = operand->type;
     break;
   default:
@@ -415,6 +421,9 @@ static AstNode *sema_additive(Parser *p, AstKind kind, AstNode *left,
   if ((left->type->kind == TYPE_PTR && left->type->base->kind == TYPE_VOID) ||
       (right->type->kind == TYPE_PTR && right->type->base->kind == TYPE_VOID))
     error_at(p, loc, "pointer arithmetic on void pointer");
+  if ((left->type->kind == TYPE_PTR && left->type->base->size < 0) ||
+      (right->type->kind == TYPE_PTR && right->type->base->size < 0))
+    error_at(p, loc, "pointer arithmetic on incomplete type");
   if (kind == AST_ADD && left->type->kind != TYPE_PTR &&
       right->type->kind == TYPE_PTR) {
     AstNode *tmp = left;
@@ -522,6 +531,8 @@ AstNode *sema_assignment(Parser *p, Token operator, AstNode *left,
   if (op != TOKEN_ASSIGN) {
     if (left->type->kind == TYPE_PTR && left->type->base->kind == TYPE_VOID)
       error_at(p, loc, "pointer arithmetic on void pointer");
+    if (left->type->kind == TYPE_PTR && left->type->base->size < 0)
+      error_at(p, loc, "pointer arithmetic on incomplete type");
     /*
      * Compound assignment desugars to 'E1 = E1 <op> E2', where E1
      * is the left operand and E2 the right one (C11 6.5.16.2p3).

@@ -690,6 +690,62 @@ check_error array-initializer 'int main(void) { int a[2] = {1, 2}; return 0; }' 
 check_error array-function-return 'int f[3](void);' '1:5: error: function cannot return an array'
 check_error array-parameter-conflict 'int f(int a[3]); int f(char *a);' '1:22: error: conflicting declaration of function '\''f'\'''
 
+# Struct declarations, layout, and the tag namespace.
+check 42 'struct S { int x; }; int main(void) { struct S s; return 42; }' struct-local-declaration
+check 42 'struct S; struct S { int x; }; struct S; int main(void) { return 42; }' struct-forward-definition
+check 42 'struct Node { int value; struct Node *next; }; int main(void) { struct Node n; struct Node *p = &n; return p == &n ? 42 : 0; }' struct-self-pointer
+check 42 'struct A; struct B { struct A *a; }; struct A { struct B *b; }; int main(void) { struct A a; struct B b; return 42; }' struct-mutual-pointers
+check 42 'int main(void) { struct { int x; char y; } s; return 42; }' struct-anonymous
+check 42 'int main(void) { struct S { int x, y; char *p, bytes[3]; }; struct S s; return 42; }' struct-multiple-members
+check 42 'struct S { struct { int x; } inner; long a[2]; }; int main(void) { struct S s; return 42; }' struct-nested-members
+check 42 'struct S { int x; }; int main(void) { int S = 42; struct S s; return S; }' struct-separate-namespace
+check 16 'struct S { char c; long n; }; int main(void) { struct S a[2]; void *v = a; char *p = v; v = a + 1; char *q = v; return q - p; }' struct-padding-and-alignment
+check 16 'struct S { long n; char c; }; int main(void) { struct S a[2]; void *v = a; char *p = v; v = a + 1; char *q = v; return q - p; }' struct-tail-padding
+check 24 'struct Inner { int x; char c; }; struct S { char c; struct Inner inner; long n; }; int main(void) { struct S a[2]; void *v = a; char *p = v; v = a + 1; char *q = v; return q - p; }' struct-nested-layout
+check 42 'struct S { int x; }; struct S *id(struct S *p) { return p; } int main(void) { struct S s; return id(&s) == &s ? 42 : 0; }' struct-pointer-function
+check 42 'struct S; int f(struct S *p) { return p == 0 ? 42 : 0; } int main(void) { return f(0); }' struct-incomplete-pointer-parameter
+check 42 'struct S { int x; }; int main(void) { struct S s; struct S *p = &s; { struct S { char c; }; struct S t; } struct S *q = &s; return p == q ? 42 : 0; }' struct-tag-shadowing
+check 42 'int main(void) { { struct S { int x; }; } { struct S { char c; }; } return 42; }' struct-sibling-scopes
+check 42 'int main(void) { for (struct S { int x; } *p = 0; p; ) {} struct S { char c; }; return 42; }' struct-for-scope
+check 42 'int f(struct S { int x; } *p) { struct S s; return p == 0 ? 42 : 0; } int main(void) { struct S { char c; }; return f(0); }' struct-parameter-tag-scope
+
+check_error struct-redefinition 'struct S { int x; }; struct S { int y; };' '1:29: error: redefinition of struct '\''S'\'''
+check_error struct-recursive-definition 'struct S { struct S { int x; } member; };' '1:19: error: redefinition of struct '\''S'\'''
+check_error struct-empty 'struct S {};' '1:11: error: empty structs are not supported'
+check_error struct-duplicate-member 'struct S { int x; char x; };' '1:24: error: duplicate struct member'
+check_error struct-void-member 'struct S { void x; };' '1:17: error: member has void type'
+check_error struct-incomplete-member 'struct S { struct Missing x; };' '1:27: error: member has incomplete type'
+check_error struct-self-value-member 'struct S { struct S next; };' '1:21: error: member has incomplete type'
+check_error struct-incomplete-array-member 'struct S { struct Missing x[2]; };' '1:28: error: array element has incomplete type'
+check_error struct-missing-member-name 'struct S { int; };' '1:15: error: expect member name'
+check_error struct-missing-member-semicolon 'struct S { int x };' '1:18: error: expect '\'';'\'''
+check_error struct-missing-brace 'struct S { int x;' '1:18: error: expect '\''}'\'''
+check_error struct-missing-tag-or-body 'struct;' '1:7: error: expect struct tag or '\''{'\'''
+check_error struct-bit-field 'struct S { int x:3; };' '1:17: error: expect '\'';'\'''
+check_error struct-flexible-array 'struct S { int x; char data[]; };' '1:29: error: array bound is required'
+check_error struct-member-initializer 'struct S { int x = 1; };' '1:18: error: expect '\'';'\'''
+check_error struct-incomplete-local 'int main(void) { struct S s; return 0; }' '1:27: error: variable has incomplete type'
+check_error struct-incomplete-array 'int main(void) { struct S a[2]; return 0; }' '1:28: error: array element has incomplete type'
+check_error struct-array-overflow 'struct S { long x[268435455]; long y[2]; };' '1:36: error: struct size exceeds supported limit'
+check_error struct-tail-padding-overflow 'struct S { long x; char a[2147483639]; };' '1:1: error: struct size exceeds supported limit'
+check_error struct-initializer 'struct S { int x; }; int main(void) { struct S s = 0; return 0; }' '1:50: error: struct initializers are not supported yet'
+check_error struct-return-by-value 'struct S { int x; }; struct S f(void);' '1:31: error: returning structs by value is not supported yet'
+check_error struct-parameter-by-value 'struct S { int x; }; int f(struct S s);' '1:37: error: passing structs by value is not supported yet'
+check_error struct-pointer-type-mismatch 'struct A { int x; }; struct B { int x; }; int main(void) { struct A *a; struct B *b = a; return 0; }' '1:83: error: incompatible initializer type'
+check_error struct-anonymous-type-identity 'int main(void) { struct { int x; } a; struct { int x; } *p = &a; return 0; }' '1:58: error: incompatible initializer type'
+check_error struct-local-tag-outside-block 'int main(void) { { struct S { int x; }; } struct S s; return 0; }' '1:52: error: variable has incomplete type'
+check_error struct-function-tag-scope 'int f(void) { struct S { int x; }; return 0; } int main(void) { struct S s; return 0; }' '1:74: error: variable has incomplete type'
+check_error struct-forward-shadow 'struct S { int x; }; int main(void) { struct S; struct S s; return 0; }' '1:58: error: variable has incomplete type'
+check_error struct-prototype-tag-scope 'int f(struct S *p); struct S { int x; }; int f(struct S *p);' '1:46: error: conflicting declaration of function '\''f'\'''
+check_error struct-incomplete-pointer-add 'int main(void) { struct S *p; p + 1; return 0; }' '1:33: error: pointer arithmetic on incomplete type'
+check_error struct-incomplete-pointer-increment 'int main(void) { struct S *p; p++; return 0; }' '1:32: error: pointer arithmetic on incomplete type'
+check_error struct-incomplete-pointer-compound 'int main(void) { struct S *p; p += 1; return 0; }' '1:33: error: pointer arithmetic on incomplete type'
+check_error struct-assignment-by-value 'struct S { int x; }; int main(void) { struct S a; struct S b; a = b; return 0; }' '1:67: error: struct values are not supported yet'
+check_error struct-unprototyped-call 'int f(); struct S { int x; }; int main(void) { struct S a; return f(a); }' '1:69: error: passing structs by value is not supported yet'
+check_error struct-condition 'struct S { int x; }; int main(void) { struct S a; if (a) return 1; return 0; }' '1:55: error: struct values are not supported yet'
+check_error struct-prefix-increment 'struct S { int x; }; int main(void) { struct S a; ++a; return 0; }' '1:51: error: invalid increment target'
+check_error struct-comparison 'struct S { int x; }; int main(void) { struct S a; return a == a; }' '1:58: error: struct values are not supported yet'
+
 # String literals have static storage and decay to pointers in value contexts.
 check 97 'int main(void) { return "abc"[0]; }' string-first-byte
 check 99 'int main(void) { return 2["abc"]; }' string-reversed-subscript

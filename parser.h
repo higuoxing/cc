@@ -24,6 +24,15 @@
 
 typedef struct AstNode AstNode;
 
+/* Struct tags have their own namespace and follow block scope. */
+typedef struct Tag {
+  Token name;
+  Type *type;
+  int scope_depth;
+  bool is_defining;
+  struct Tag *next;
+} Tag;
+
 typedef struct LocalVar {
   Token name;
   Type *type;
@@ -92,6 +101,7 @@ typedef struct {
   Token lookahead;
 
   LocalVar *locals;
+  Tag *tags;
   Label *labels;
   GotoRef *goto_refs;
   Function *functions;

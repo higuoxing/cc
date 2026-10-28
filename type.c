@@ -79,13 +79,14 @@ Type *common_integer_type(const Type *a, const Type *b) {
 }
 
 /*
- * Declaration compatibility is structural: separately parsed pointer types
- * need not share an address. A void pointer is convertible, not identical,
- * to a pointer to another object type.
+ * Structs have distinct identities; other supported types compare structurally.
+ * A void pointer is convertible, not identical, to another object pointer.
  */
 bool same_type(const Type *a, const Type *b) {
   if (a->kind != b->kind)
     return false;
+  if (a->kind == TYPE_STRUCT)
+    return a == b;
   if (is_integer(a) && a->is_unsigned != b->is_unsigned)
     return false;
   if (a->kind == TYPE_ARRAY)
@@ -106,7 +107,19 @@ bool compatible_pointers(const Type *a, const Type *b) {
 int type_size(const Type *type) { return type->size; }
 
 int type_alignment(const Type *type) {
+  if (type->kind == TYPE_STRUCT)
+    return type->alignment;
   return type->kind == TYPE_ARRAY ? type_alignment(type->base) : type->size;
+}
+
+Type *struct_type(void) {
+  Type *type = calloc(1, sizeof(Type));
+  if (!type)
+    return NULL;
+  type->kind = TYPE_STRUCT;
+  type->size = -1; /* Incomplete until the definition is finished. */
+  type->alignment = 1;
+  return type;
 }
 
 /*

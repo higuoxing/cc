@@ -21,6 +21,10 @@
 
 #include <stdbool.h>
 
+#include "lexer.h"
+
+typedef struct Member Member;
+
 typedef enum {
   TYPE_CHAR,
   TYPE_SHORT,
@@ -29,16 +33,26 @@ typedef enum {
   TYPE_LONG_LONG,
   TYPE_ARRAY,
   TYPE_PTR,
+  TYPE_STRUCT,
   TYPE_VOID,
 } TypeKind;
 
 typedef struct Type {
   TypeKind kind;
-  int size; /* In bytes. */
+  int size; /* In bytes; -1 for an incomplete struct. */
   bool is_unsigned; /* Meaningful for integer types only. */
   struct Type *base; /* Element type for TYPE_ARRAY; pointed-to type for TYPE_PTR. */
   int array_len; /* Element count for TYPE_ARRAY. */
+  Member *members; /* Declaration order for TYPE_STRUCT. */
+  int alignment; /* Required alignment for TYPE_STRUCT. */
 } Type;
+
+struct Member {
+  Token name;
+  Type *type;
+  int offset;
+  Member *next;
+};
 
 extern Type builtin_type_char;
 extern Type builtin_type_unsigned_char;
@@ -61,5 +75,6 @@ extern int type_size(const Type *type);
 extern int type_alignment(const Type *type);
 extern Type *pointer_to(Type *base);
 extern Type *array_of(Type *base, int length);
+extern Type *struct_type(void);
 
 #endif
