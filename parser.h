@@ -97,6 +97,7 @@ typedef struct CaseList {
 
 typedef struct {
   Lexer lexer;
+  Token previous; /* Last consumed token, for missing-token diagnostics. */
   Token current;
   Token lookahead;
 

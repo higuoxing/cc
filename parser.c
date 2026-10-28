@@ -138,6 +138,7 @@ static AstNode *new_expr(Parser *p, AstKind kind, Type *type) {
 }
 
 static void parser_advance(Parser *p) {
+  p->previous = p->current;
   p->current = p->lookahead;
   p->lookahead = lexer_next_token(&p->lexer);
 }
@@ -166,6 +167,7 @@ static void parser_init(Parser *p, const char *filename, const char *source) {
   p->loop_depth = 0;
   p->stack_size = 0;
   lexer_init(&p->lexer, filename, source);
+  p->previous = (Token){0};
   p->current = lexer_next_token(&p->lexer);
   p->lookahead = lexer_next_token(&p->lexer);
 }
@@ -197,6 +199,22 @@ static void parse_expect(Parser *p, TokenKind t, const char *msg) {
     parse_error(p, "%s", msg);
   }
 
+  parser_advance(p);
+}
+
+/*
+ * A missing statement terminator belongs immediately after the last token,
+ * even when the next token is on another line or follows a comment.
+ * Semicolons separating for clauses still use parse_expect at the next token.
+ */
+static void parse_semicolon(Parser *p) {
+  if (p->current.kind != TOKEN_SEMICOLON) {
+    Token loc = p->previous;
+    loc.start += loc.len;
+    loc.col += loc.len;
+    loc.len = 0;
+    error_at(p, loc, "expect ';'");
+  }
   parser_advance(p);
 }
 
@@ -452,7 +470,7 @@ static Member *parse_struct_member(Parser *p, Type *type, Type *base,
   int padding;
 
   if (name.kind != TOKEN_IDENTIFIER)
-    parse_error(p, "expect member name");
+    error_at(p, name, "expect member name");
   if (member_type->kind == TYPE_VOID)
     error_at(p, name, "member has void type");
   if (member_type->size < 0)
@@ -541,7 +559,7 @@ static Type *parse_struct_specifier(Parser *p) {
         break;
       parser_advance(p);
     }
-    parse_expect(p, TOKEN_SEMICOLON, "expect ';'");
+    parse_semicolon(p);
   }
   if (!type->members)
     parse_error(p, "empty structs are not supported");
@@ -650,19 +668,20 @@ static Type *parse_declspecs(Parser *p) {
  * (C11 6.7.6, supported subset; _opt means optional.)
  *
  * The name may be omitted for a parameter declaration; callers enforce where
- * it is required. Only fixed-size, one-dimensional arrays are supported.
+ * it is required. An omitted name retains the token at its expected position
+ * for diagnostics, even if an array suffix is subsequently consumed.
+ * Only fixed-size, one-dimensional arrays are supported.
  * Function and parenthesized declarators come later.
  */
 static Type *parse_declarator(Parser *p, Type *type, Token *name) {
-  *name = (Token){0};
   while (p->current.kind == TOKEN_STAR) {
     type = pointer_to(type);
     if (!type)
       parse_error(p, "out of memory");
     parser_advance(p);
   }
+  *name = p->current;
   if (p->current.kind == TOKEN_IDENTIFIER) {
-    *name = p->current;
     parser_advance(p);
   }
   if (p->current.kind == TOKEN_LBRACKET) {
@@ -716,7 +735,7 @@ static AstNode *parse_decl(Parser *p) {
              "variable has void type");
 
   if (name.kind != TOKEN_IDENTIFIER)
-    parse_error(p, "expect variable name");
+    error_at(p, name, "expect variable name");
 
   decl = new_ast_node(p, AST_DECL);
   decl->loc = name;
@@ -734,7 +753,7 @@ static AstNode *parse_decl(Parser *p) {
         sema_convert_expr(p, type, decl->d.decl.init, name, "initializer");
   }
 
-  parse_expect(p, TOKEN_SEMICOLON, "expect ';'");
+  parse_semicolon(p);
 
   return decl;
 }
@@ -1162,14 +1181,14 @@ static AstNode *parse_return_stmt(Parser *p) {
   parse_expect(p, TOKEN_RETURN, "expect 'return'");
   if (p->current.kind == TOKEN_SEMICOLON &&
       p->current_function->return_type->kind != TYPE_VOID)
-    parse_error(p, "expect return expr");
+    error_at(p, loc, "expect return expr");
 
   ast = new_ast_node(p, AST_RETURN);
   ast->loc = loc;
   if (p->current.kind != TOKEN_SEMICOLON)
     ast->d.ret.expr = parse_expression(p);
   sema_check_return(p, ast);
-  parse_expect(p, TOKEN_SEMICOLON, "expect ';'");
+  parse_semicolon(p);
 
   return ast;
 }
@@ -1220,7 +1239,7 @@ static AstNode *parse_external_declaration(Parser *p) {
   int nparams;
   int definition = 0;
   int explicit_params = 0;
-  int unamed_param = 0;
+  Token unnamed_param = {0};
   Tag *outer_tags;
 
   reset_function_state(p);
@@ -1233,7 +1252,7 @@ static AstNode *parse_external_declaration(Parser *p) {
   }
   return_type = parse_declarator(p, return_type, &func_name);
   if (func_name.kind != TOKEN_IDENTIFIER)
-    parse_error(p, "expect function name");
+    error_at(p, func_name, "expect function name");
 
   fn->d.function.name = func_name;
   if (return_type->kind == TYPE_ARRAY)
@@ -1253,6 +1272,7 @@ static AstNode *parse_external_declaration(Parser *p) {
     for (;;) {
       LocalVar *param;
       Token param_name;
+      Token param_loc = p->current;
       Type *param_type;
 
       param_type = parse_declspecs(p);
@@ -1293,7 +1313,8 @@ static AstNode *parse_external_declaration(Parser *p) {
       } else {
         if (p->current.kind != TOKEN_COMMA && p->current.kind != TOKEN_RPAREN)
           parse_error(p, "expect parameter name");
-        unamed_param = 1;
+        if (!unnamed_param.start)
+          unnamed_param = param_loc;
       }
 
       if (p->current.kind == TOKEN_COMMA) {
@@ -1309,8 +1330,8 @@ static AstNode *parse_external_declaration(Parser *p) {
     parse_error(p, "expect ';' or '{'");
 
   definition = p->current.kind == TOKEN_LBRACE;
-  if (definition && unamed_param)
-    parse_error(p, "expect parameter name in function definition");
+  if (definition && unnamed_param.start)
+    error_at(p, unnamed_param, "expect parameter name in function definition");
 
   nparams = (int)param_types.len;
   func = declare_function(p, func_name, return_type, param_types.data, nparams,
@@ -1455,7 +1476,7 @@ static AstNode *parse_do_stmt(Parser *p) {
   do_node->d.do_stmt.cond = parse_condition(p);
   parse_expect(p, TOKEN_RPAREN, "expect ')'");
   /* The trailing ';' is part of the do-statement itself. */
-  parse_expect(p, TOKEN_SEMICOLON, "expect ';'");
+  parse_semicolon(p);
   return do_node;
 }
 
@@ -1469,7 +1490,7 @@ static AstNode *parse_break_stmt(Parser *p) {
   if (p->loop_depth == 0 && !p->current_switch)
     parse_error(p, "break statement not within loop or switch");
   parse_expect(p, TOKEN_BREAK, "expect 'break'");
-  parse_expect(p, TOKEN_SEMICOLON, "expect ';'");
+  parse_semicolon(p);
   return new_ast_node(p, AST_BREAK);
 }
 
@@ -1483,7 +1504,7 @@ static AstNode *parse_continue_stmt(Parser *p) {
   if (p->loop_depth == 0)
     parse_error(p, "continue statement not within loop");
   parse_expect(p, TOKEN_CONTINUE, "expect 'continue'");
-  parse_expect(p, TOKEN_SEMICOLON, "expect ';'");
+  parse_semicolon(p);
   return new_ast_node(p, AST_CONTINUE);
 }
 
@@ -1515,7 +1536,7 @@ static AstNode *parse_goto_stmt(Parser *p) {
   goto_node->d.goto_stmt.name = p->current;
   /* Consume the label name. */
   parser_advance(p);
-  parse_expect(p, TOKEN_SEMICOLON, "expect ';'");
+  parse_semicolon(p);
   return goto_node;
 }
 
@@ -1734,7 +1755,7 @@ static AstNode *parse_stmt(Parser *p, bool allow_decl) {
   default:
     stmt = new_ast_node(p, AST_EXPR_STMT);
     stmt->d.expr_stmt.expr = parse_discarded_expression(p);
-    parse_expect(p, TOKEN_SEMICOLON, "expect ';'");
+    parse_semicolon(p);
     return stmt;
   }
 }

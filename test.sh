@@ -497,7 +497,7 @@ check_error typed-void-parameter 'int f(void x);' '1:12: error: parameter has vo
 check_error typed-pointer-arity 'int f(int *); int main(void) { return f(); }' '1:39: error: wrong number of arguments to function '\''f'\'''
 check_error typed-deferred-argument 'int f(); int main(void) { return f(1); } int f(int *p) { return 0; }' '1:36: error: incompatible argument type'
 check_error typed-void-double-pointer 'int f(void **p) { return 0; } int main(void) { int *p = 0; return f(&p); }' '1:69: error: incompatible argument type'
-check_error typed-missing-pointer-return 'int *f(void) { return; }' '1:22: error: expect return expr'
+check_error typed-missing-pointer-return 'int *f(void) { return; }' '1:16: error: expect return expr'
 
 check 1 'int f(int *p) { return p == 0; } int main(void) { return f(1 ? 0 : 1 / 0); }' typed-conditional-null
 check 42 'int *f(int *p) { return p; } int main(void) { int x = 42; return *(f(&x) + 0); }' typed-call-pointer-arithmetic
@@ -656,7 +656,7 @@ check_error string-invalid-addition 'int main(void) { "a" + "b"; return 0; }' '1
 check_error string-switch-condition 'int main(void) { switch ("abc") { default: return 0; } }' '1:26: error: switch condition must have integer type'
 check_error string-case-label 'int main(void) { switch (0) { case "a": return 0; } return 1; }' '1:36: error: case label must have integer type'
 check_error string-array-bound 'int main(void) { char a["abc"]; return 0; }' '1:25: error: array bound must have integer type'
-check_error string-parenthesized-concat 'int main(void) { ("a") "b"; return 0; }' '1:24: error: expect '\'';'\'''
+check_error string-parenthesized-concat 'int main(void) { ("a") "b"; return 0; }' '1:23: error: expect '\'';'\'''
 
 # Fixed-size array declarations and array parameter adjustment.
 for spec in 'char' 'unsigned char' 'short' 'unsigned short' 'int' 'unsigned' \
@@ -718,12 +718,12 @@ check_error struct-incomplete-member 'struct S { struct Missing x; };' '1:27: er
 check_error struct-self-value-member 'struct S { struct S next; };' '1:21: error: member has incomplete type'
 check_error struct-incomplete-array-member 'struct S { struct Missing x[2]; };' '1:28: error: array element has incomplete type'
 check_error struct-missing-member-name 'struct S { int; };' '1:15: error: expect member name'
-check_error struct-missing-member-semicolon 'struct S { int x };' '1:18: error: expect '\'';'\'''
+check_error struct-missing-member-semicolon 'struct S { int x };' '1:17: error: expect '\'';'\'''
 check_error struct-missing-brace 'struct S { int x;' '1:18: error: expect '\''}'\'''
 check_error struct-missing-tag-or-body 'struct;' '1:7: error: expect struct tag or '\''{'\'''
 check_error struct-bit-field 'struct S { int x:3; };' '1:17: error: expect '\'';'\'''
 check_error struct-flexible-array 'struct S { int x; char data[]; };' '1:29: error: array bound is required'
-check_error struct-member-initializer 'struct S { int x = 1; };' '1:18: error: expect '\'';'\'''
+check_error struct-member-initializer 'struct S { int x = 1; };' '1:17: error: expect '\'';'\'''
 check_error struct-incomplete-local 'int main(void) { struct S s; return 0; }' '1:27: error: variable has incomplete type'
 check_error struct-incomplete-array 'int main(void) { struct S a[2]; return 0; }' '1:28: error: array element has incomplete type'
 check_error struct-array-overflow 'struct S { long x[268435455]; long y[2]; };' '1:36: error: struct size exceeds supported limit'
@@ -1259,6 +1259,48 @@ check_error duplicate-int-after-unsigned 'int main(void) { int unsigned int x; r
 check_error duplicate-unsigned-after-int 'int main(void) { unsigned int unsigned x; return 0; }' '1:31: error: duplicate unsigned type specifier'
 check_error invalid-unsigned-void 'int main(void) { unsigned void x; return 0; }' '1:27: error: expect variable name'
 
+# Diagnostic locations audited against GCC and Clang. Expected diagnostics
+# check our filename, line, and byte column.
+check_error location-return-semicolon $'int main(void) {\n  return 42\n}\n' '2:12: error: expect '\'';'\'''
+check_error location-decl-semicolon $'int main(void) {\n  int a = 3\n  return a;\n}\n' '2:12: error: expect '\'';'\'''
+check_error location-expression-semicolon $'int main(void) {\n  int a;\n  a = 3\n  return a;\n}\n' '3:8: error: expect '\'';'\'''
+check_error location-semicolon-after-comment $'int main(void) {\n  return 42 /* comment\n  spans lines */\n}\n' '2:12: error: expect '\'';'\'''
+check_error location-missing-member-semicolon $'struct S {\n  int x\n};\n' '2:8: error: expect '\'';'\'''
+check_error location-break-semicolon $'int main(void) {\n  while (1) {\n    break\n  }\n}\n' '3:10: error: expect '\'';'\'''
+check_error location-continue-semicolon $'int main(void) {\n  while (1) {\n    continue\n  }\n}\n' '3:13: error: expect '\'';'\'''
+check_error location-goto-semicolon $'int main(void) {\n  L: ;\n  goto L\n}\n' '3:9: error: expect '\'';'\'''
+check_error location-do-semicolon $'int main(void) {\n  do {} while (0)\n}\n' '2:18: error: expect '\'';'\'''
+check_error location-string-token-end $'int main(void) {\n  char *p = "a\\n" "bc"\n  return 0;\n}\n' '2:23: error: expect '\'';'\'''
+check_error location-return-keyword $'int main(void) {\n  return;\n}\n' '2:3: error: expect return expr'
+check_error location-unnamed-parameter $'int f(\n  int,\n  char\n) { return 0; }' '2:3: error: expect parameter name in function definition'
+check_error location-unnamed-array-parameter $'int f(\n  int [2]\n) { return 0; }' '2:3: error: expect parameter name in function definition'
+check_error location-missing-array-variable-name $'int main(void) {\n  int [3];\n}\n' '2:7: error: expect variable name'
+check_error location-missing-array-member-name $'struct S {\n  int [3];\n};\n' '2:7: error: expect member name'
+check_error location-missing-pointer-name $'int main(void) {\n  int *;\n}\n' '2:8: error: expect variable name'
+check_error location-bad-parameter $'int f(\n  int +\n) { return 0; }' '2:7: error: expect parameter name'
+check_error location-expression-lf $'int main(void) {\n  return 1 +;\n}\n' '2:13: error: expect expr'
+check_error location-expression-crlf $'int main(void) {\r\n  return 1 +;\r\n}\r\n' '2:13: error: expect expr'
+check_error location-expression-cr $'int main(void) {\r  return 1 +;\r}\r' '2:13: error: expect expr'
+check_error location-expression-tab $'int main(void) {\n\treturn 1 +;\n}\n' '2:12: error: expect expr'
+check_error location-expression-utf8-comment $'int main(void) {\n  /* 中文 */ return 1 +;\n}\n' '2:26: error: expect expr'
+check_error location-expression-comment $'int main(void) {\n  /* comment\n  end */ return 1 +;\n}\n' '3:20: error: expect expr'
+check_error location-comment-start $'int main(void) {\n  /* broken\n  comment\n' '2:3: error: unterminated comment'
+check_error location-comment-only $'/*' '1:1: error: unterminated comment'
+check_error location-missing-rparen $'int main(void) {\n  return (1 + 2\n    ;\n}\n' '3:5: error: expect '\'')'\'''
+check_error location-missing-rbracket $'int main(void) {\n  int a[2\n  ;\n}\n' '3:3: error: expect '\'']'\'''
+check_error location-missing-colon $'int main(void) {\n  return 1 ? 2\n    ;\n}\n' '3:5: error: expect '\'':'\'''
+check_error location-member-name $'struct S { int x; };\nint main(void) {\n  struct S s;\n  return s.\n    ;\n}\n' '5:5: error: expect member name'
+check_error location-arrow-name $'struct S { int x; };\nint main(void) {\n  struct S *p;\n  return p->\n    ;\n}\n' '5:5: error: expect member name'
+check_error location-function-eof $'int main(void) {\n  return 0;\n\n' '4:1: error: expect '\''}'\'''
+check_error location-struct-eof $'struct S {\n  int x;\n\n' '4:1: error: expect '\''}'\'''
+check_error location-empty-condition $'int main(void) {\n  if (\n    ) return 0;\n}\n' '3:5: error: expect expr'
+check_error location-for-separator $'int main(void) {\n for (1) return 0;\n}\n' '2:8: error: expect '\'';'\'''
+check_error location-call-comma $'int f(int x);\nint main(void) {\n  return f(1,\n    );\n}\n' '4:5: error: expect expr'
+check_error location-subscript-expression $'int main(void) {\n  int a[2];\n  return a[\n    ];\n}\n' '4:5: error: expect expr'
+check_error location-label-name $'int main(void) {\n  goto\n    ;\n}\n' '3:5: error: expect label name'
+check_error location-unterminated-string $'int main(void) {\n  return "abc\n}\n' '2:10: error: unterminated string literal'
+check_error location-unterminated-character $'int main(void) {\n  return \'a\n}\n' '2:10: error: unterminated character literal'
+
 check_error missing-plus-rhs 'int main() { return 1 +; }' '1:24: error: expect expr'
 check_error missing-sub-rhs 'int main() { return 1 -; }' '1:24: error: expect expr'
 check_error missing-mul-rhs 'int main() { return 1 *; }' '1:24: error: expect expr'
@@ -1281,12 +1323,12 @@ check_error missing-neg-eof 'int main() { return - }' '1:23: error: expect expr'
 check_error missing-expr-eof 'int main() { return }' '1:21: error: expect expr'
 check_error missing-rparen 'int main() { return (1 + 2; }' "1:27: error: expect ')'"
 check_error missing-rparen-eof 'int main() { return (1 + 2 }' "1:28: error: expect ')'"
-check_error missing-semicolon 'int main() { return 42 }' "1:24: error: expect ';'"
+check_error missing-semicolon 'int main() { return 42 }' "1:23: error: expect ';'"
 check_error extra-rparen 'int main() { return (1+2)); }' "1:26: error: expect ';'"
-check_error adjacent-literals 'int main() { return 1 2; }' "1:23: error: expect ';'"
+check_error adjacent-literals 'int main() { return 1 2; }' "1:22: error: expect ';'"
 check_error trailing-identifier 'int main() { return 42; garbage }' "1:25: error: undeclared identifier"
 check_error trailing-token 'int main() { return 42; @ }' "1:25: error: expect expr"
-check_error trailing-after-bare-return 'int main() { return; garbage }' '1:20: error: expect return expr'
+check_error trailing-after-bare-return 'int main() { return; garbage }' '1:14: error: expect return expr'
 check_error empty-input '' "1:1: error: expect 'int'"
 check_error whitespace-only $' \t\n' "2:1: error: expect 'int'"
 check_error undeclared-read 'int main() { return a; }' '1:21: error: undeclared identifier'
@@ -1302,11 +1344,11 @@ check_error invalid-lvalue-unary 'int main() { int a; -a = 3; return 0; }' '1:24
 check_error bad-assign-rhs 'int main() { int a; a =; return 0; }' '1:24: error: expect expr'
 check_error bad-assign-rhs-eof 'int main() { int a; a=' '1:23: error: expect expr'
 check_error missing-decl-name 'int main() { int = 3; return 0; }' '1:18: error: expect variable name'
-check_error missing-decl-semicolon 'int main() { int a = 3 return a; }' "1:24: error: expect ';'"
+check_error missing-decl-semicolon 'int main() { int a = 3 return a; }' "1:23: error: expect ';'"
 check_error missing-decl-init 'int main() { int a =; return 0; }' '1:21: error: expect expr'
 check_error nested-invalid 'int main() { int a; { int a; int a; } }' '1:34: error: duplicate local variable'
 check_error bad-assignment-nested 'int main() { int a; a = 1 = 2; }' '1:27: error: invalid assignment target'
-check_error missing-expr-semicolon 'int main() { int a; a = 3 return a; }' "1:27: error: expect ';'"
+check_error missing-expr-semicolon 'int main() { int a; a = 3 return a; }' "1:26: error: expect ';'"
 check_error missing-identifier-after-int 'int main() { int; return 0; }' '1:17: error: expect variable name'
 check_error declare-keyword 'int main() { int return; return 0; }' '1:18: error: expect variable name'
 check_error use-post-scope-shadow 'int main() { { int x = 1; } x = 42; return 0; }' '1:29: error: undeclared identifier'
@@ -1393,11 +1435,11 @@ check_error missing-do-cond 'int main() { do return 0; while (); }' \
 check_error missing-do-rparen 'int main() { do return 0; while (1; }' \
 	    "1:35: error: expect ')'"
 check_error missing-do-semi 'int main() { do return 0; while (1) }' \
-	    "1:37: error: expect ';'"
+	    "1:36: error: expect ';'"
 check_error missing-do-body 'int main() { do }' \
 	    '1:17: error: expect expr'
 check_error unterminated-comment 'int main() { /* comment' \
-	    '1:24: error: unterminated comment'
+	    '1:14: error: unterminated comment'
 check_error break-outside-loop 'int main() { break; }' \
 	    '1:14: error: break statement not within loop or switch'
 check_error continue-outside-loop 'int main() { continue; }' \
@@ -1457,7 +1499,7 @@ check_error comma-assign 'int main() { int a; (a, a) = 1; return 0; }' \
 check_error case-comma 'int main() { switch (1) { case 1, 2: ; } }' \
 	    "1:33: error: expect ':'"
 check_error missing-break-semi 'int main() { while (1) break }' \
-	    "1:30: error: expect ';'"
+	    "1:29: error: expect ';'"
 check_error goto-undefined 'int main() { goto L; }' \
 	    "1:14: error: label 'L' not defined"
 check_error duplicate-label 'int main() { L: ; L: ; }' \
@@ -1467,7 +1509,7 @@ check_error duplicate-label-scope 'int main() { { L: ; } L: ; }' \
 check_error goto-missing-name 'int main() { goto 1; }' \
 	    '1:19: error: expect label name'
 check_error goto-missing-semi 'int main() { L: ; goto L }' \
-	    "1:26: error: expect ';'"
+	    "1:25: error: expect ';'"
 check_error octal-invalid-eight 'int main() { return 08; }' '1:21: error: invalid digit in octal integer literal'
 check_error case-shift-negative 'int main() { switch (0) { case 1 << -1: return 1; default: return 0; } }' '1:39: error: invalid shift count in constant expression'
 check_error case-shift-32 'int main() { switch (0) { case 1 << 32: return 1; default: return 0; } }' '1:39: error: invalid shift count in constant expression'

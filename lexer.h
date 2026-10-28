@@ -106,7 +106,7 @@ typedef struct {
   const char *start;
   int len;
   int line;
-  int col;
+  int col; /* One-based byte column; tabs count as one byte. */
   uint64_t int_literal_val;
   unsigned int_literal_suffix;
   unsigned char *string_literal_val; /* Owned decoded bytes, including final zero. */

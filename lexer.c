@@ -125,6 +125,9 @@ void lexer_advance(Lexer *l) {
   }
 }
 
+static void lexer_error(Lexer *l, Token loc, const char *message)
+    __attribute__((noreturn));
+
 /*
  * Skip whitespace and comments (C11 6.4.9: each comment is replaced by one
  * space character).
@@ -145,15 +148,14 @@ void skip_whitespace(Lexer *l) {
     }
 
     if (*l->cursor == '/' && l->cursor[1] == '*') {
+      Token loc = {.start = l->cursor, .len = 2,
+                   .line = l->line, .col = lexer_column(l)};
       /* Block comment: skip to the closing delimiter. */
       lexer_advance(l);
       lexer_advance(l);
       for (;;) {
-        if (*l->cursor == '\0') {
-          fprintf(stderr, "%s:%d:%d: error: unterminated comment\n",
-                  l->filename, l->line, lexer_column(l));
-          exit(1);
-        }
+        if (*l->cursor == '\0')
+          lexer_error(l, loc, "unterminated comment");
         if (*l->cursor == '*' && l->cursor[1] == '/') {
           lexer_advance(l);
           lexer_advance(l);
@@ -167,9 +169,6 @@ void skip_whitespace(Lexer *l) {
     return;
   }
 }
-
-static void lexer_error(Lexer *l, Token loc, const char *message)
-    __attribute__((noreturn));
 
 static void lexer_error(Lexer *l, Token loc, const char *message) {
   fprintf(stderr, "%s:%d:%d: error: %s\n", l->filename, loc.line, loc.col,
