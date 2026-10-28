@@ -310,6 +310,8 @@ static AstNode *parse_call_expr(Parser *p) {
  *   primary-expression
  *   identifier '(' ')'
  *   postfix-expression '[' expression ']'
+ *   postfix-expression '.' identifier
+ *   postfix-expression '->' identifier
  *   postfix-expression '++' | postfix-expression '--'
  */
 static AstNode *parse_postfix(Parser *p) {
@@ -326,8 +328,19 @@ static AstNode *parse_postfix(Parser *p) {
 
   while (p->current.kind == TOKEN_PLUS_PLUS ||
          p->current.kind == TOKEN_MINUS_MINUS ||
-         p->current.kind == TOKEN_LBRACKET) {
+         p->current.kind == TOKEN_LBRACKET || p->current.kind == TOKEN_DOT ||
+         p->current.kind == TOKEN_ARROW) {
     Token op = p->current;
+    if (op.kind == TOKEN_DOT || op.kind == TOKEN_ARROW) {
+      Token name;
+      parser_advance(p);
+      if (p->current.kind != TOKEN_IDENTIFIER)
+        parse_error(p, "expect member name");
+      name = p->current;
+      parser_advance(p);
+      left = sema_member(p, left, op, name);
+      continue;
+    }
     if (op.kind == TOKEN_LBRACKET) {
       AstNode *index;
       parser_advance(p);
@@ -430,7 +443,8 @@ static Tag *find_tag(Parser *p, Token name, bool current_scope) {
  * Parse one member declarator and update the struct's size and alignment.
  * The caller links the returned member before parsing the next declarator.
  */
-static Member *parse_struct_member(Parser *p, Type *type, Type *base, int *size) {
+static Member *parse_struct_member(Parser *p, Type *type, Type *base,
+                                   int *size) {
   Token name;
   Type *member_type = parse_declarator(p, base, &name);
   Member *member;

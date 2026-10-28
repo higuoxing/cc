@@ -26,6 +26,7 @@ typedef enum {
   TOKEN_UNKNOW = -1,
   TOKEN_EOF = 0,
   TOKEN_AND_AND,    /* '&&' */
+  TOKEN_ARROW,      /* '->' */
   TOKEN_ASSIGN,     /* '=' */
   TOKEN_BANG,       /* '!' */
   TOKEN_BIT_AND,    /* '&' */
@@ -42,6 +43,7 @@ typedef enum {
   TOKEN_CONTINUE,   /* 'continue' */
   TOKEN_DEFAULT,    /* 'default' */
   TOKEN_DO,         /* 'do' */
+  TOKEN_DOT,        /* '.' */
   TOKEN_ELSE,       /* 'else' */
   TOKEN_EQ_EQ,      /* '==' */
   TOKEN_FOR,        /* 'for' */

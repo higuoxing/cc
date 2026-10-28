@@ -429,7 +429,11 @@ Token lexer_next_token(Lexer *l) {
     return tok;
   case '-':
     lexer_advance(l);
-    if (*l->cursor == '-') {
+    if (*l->cursor == '>') {
+      lexer_advance(l);
+      tok.kind = TOKEN_ARROW;
+      tok.len = 2;
+    } else if (*l->cursor == '-') {
       lexer_advance(l);
       tok.kind = TOKEN_MINUS_MINUS;
       tok.len = 2;
@@ -491,6 +495,11 @@ Token lexer_next_token(Lexer *l) {
     return tok;
   case ']':
     tok.kind = TOKEN_RBRACKET;
+    tok.len = 1;
+    lexer_advance(l);
+    return tok;
+  case '.':
+    tok.kind = TOKEN_DOT;
     tok.len = 1;
     lexer_advance(l);
     return tok;

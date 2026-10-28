@@ -58,6 +58,13 @@ static void codegen_addr(AstNode *expr) {
   case AST_VAR:
     fprintf(out, "\tleaq -%d(%%rbp), %%rax\n", expr->d.variable.var->offset);
     break;
+  case AST_MEMBER:
+    /*
+     * Both '.' and '->' use the struct object's address plus its field offset.
+     */
+    codegen_addr(expr->d.member.base);
+    fprintf(out, "\taddq $%d, %%rax\n", expr->d.member.member->offset);
+    break;
   case AST_STRING_LITERAL: {
     int seq = label_seq++;
     int i;
@@ -214,8 +221,9 @@ static void codegen_expr(AstNode *expr) {
   case AST_VAR:
   case AST_DEREF:
   case AST_STRING_LITERAL:
+  case AST_MEMBER:
     codegen_addr(expr);
-    if (expr->type->kind != TYPE_ARRAY)
+    if (expr->type->kind != TYPE_ARRAY && expr->type->kind != TYPE_STRUCT)
       codegen_load(expr->type, "%rax");
     break;
   case AST_ADDR:

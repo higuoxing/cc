@@ -249,12 +249,20 @@ void sema_check_return(Parser *p, AstNode *stmt) {
       sema_convert_expr(p, return_type, expr, stmt->loc, "return");
 }
 
-static bool is_lvalue(AstKind ty) {
-  return ty == AST_VAR || ty == AST_DEREF || ty == AST_STRING_LITERAL;
+static bool is_lvalue(const AstNode *expr) {
+  /*
+   * A '.' member is an lvalue only if its struct operand is an lvalue
+   * (C11 6.5.2.3). A member of a struct returned by value is not an lvalue.
+   * We represent p->member as (*p).member; AST_DEREF is an lvalue.
+   */
+  if (expr->kind == AST_MEMBER)
+    return is_lvalue(expr->d.member.base);
+  return expr->kind == AST_VAR || expr->kind == AST_DEREF ||
+         expr->kind == AST_STRING_LITERAL;
 }
 
 static bool is_modifiable_lvalue(const AstNode *expr) {
-  return is_lvalue(expr->kind) && expr->type->kind != TYPE_ARRAY;
+  return is_lvalue(expr) && expr->type->kind != TYPE_ARRAY;
 }
 
 static bool is_increment_op(AstKind ty) {
@@ -350,7 +358,7 @@ AstNode *sema_unary(Parser *p, AstKind op, AstNode *operand, Token loc) {
     type = operand->type->base;
     break;
   case AST_ADDR:
-    if (!is_lvalue(operand->kind))
+    if (!is_lvalue(operand))
       error_at(p, loc, "invalid address-of target");
     type = pointer_to(operand->type);
     if (!type)
@@ -518,6 +526,35 @@ AstNode *sema_subscript(Parser *p, AstNode *base, AstNode *index, Token loc) {
     error_at(p, loc, "subscript requires a pointer and an integer");
   return sema_unary(p, AST_DEREF, sema_binary(p, AST_ADD, base, index, loc),
                     loc);
+}
+
+/*
+ * C11 6.5.2.3: p->member is (*p).member. Keep struct and array member
+ * types intact so further member access, address-of, and array decay work.
+ */
+AstNode *sema_member(Parser *p, AstNode *base, Token op, Token name) {
+  Member *member;
+  AstNode *node;
+
+  if (op.kind == TOKEN_ARROW) {
+    base = convert_to_value(p, base);
+    if (base->type->kind != TYPE_PTR || base->type->base->kind != TYPE_STRUCT)
+      error_at(p, op, "'->' requires a pointer to struct");
+    base = sema_unary(p, AST_DEREF, base, op);
+  } else if (base->type->kind != TYPE_STRUCT) {
+    error_at(p, op, "'.' requires a struct operand");
+  }
+  if (base->type->size < 0)
+    error_at(p, op, "member access on incomplete struct");
+  for (member = base->type->members; member; member = member->next)
+    if (same_identifier(member->name, name))
+      break;
+  if (!member)
+    error_at(p, name, "no member named '%.*s' in struct", name.len, name.start);
+  node = new_expr(p, AST_MEMBER, member->type, op);
+  node->d.member.base = base;
+  node->d.member.member = member;
+  return node;
 }
 
 AstNode *sema_assignment(Parser *p, Token operator, AstNode *left,

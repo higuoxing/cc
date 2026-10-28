@@ -746,6 +746,62 @@ check_error struct-condition 'struct S { int x; }; int main(void) { struct S a; 
 check_error struct-prefix-increment 'struct S { int x; }; int main(void) { struct S a; ++a; return 0; }' '1:51: error: invalid increment target'
 check_error struct-comparison 'struct S { int x; }; int main(void) { struct S a; return a == a; }' '1:58: error: struct values are not supported yet'
 
+# Struct member addresses reuse scalar loads, stores, and pointer arithmetic.
+for spec in 'char' 'unsigned char' 'short' 'unsigned short' 'int' 'unsigned' 'long' 'unsigned long' 'long long' 'unsigned long long'; do
+    check 42 "struct S { char before; $spec value; char after; }; int main(void) { struct S s; struct S *p = &s; s.before = 7; s.after = 9; s.value = 20; p->value = p->value + 22; return s.before == 7 && s.after == 9 ? s.value : 0; }" "member-load-store-$spec"
+done
+check 42 'struct Point { int x; int y; }; int main(void) { struct Point p; struct Point *ptr = &p; p.x = 20; ptr->y = 22; return p.x + p.y; }' member-dot-and-arrow
+check 1 'struct S { char a; unsigned char b; short c; unsigned short d; int e; unsigned f; }; int main(void) { struct S s; s.a = 255; s.b = 511; s.c = 65535; s.d = 131071; s.e = -1; s.f = 4294967295U; return s.a == -1 && s.b == 255 && s.c == -1 && s.d == 65535 && s.e < 0 && s.f > 0; }' member-narrow-and-signed-values
+check 1 'struct S { long x; unsigned long y; long long z; unsigned long long w; }; int main(void) { struct S s; s.x = -4294967296L; s.y = 18446744073709551615UL; s.z = 1LL << 40; s.w = 1ULL << 63; return s.x < 0 && s.y >> 63 == 1 && s.z >> 40 == 1 && s.w >> 63 == 1; }' member-wide-values
+check 42 'struct I { char c; int x; }; struct O { char c; struct I inner; }; int main(void) { struct O o; struct O *p = &o; o.c = 1; p->inner.c = 2; o.inner.x = 39; return o.c + o.inner.c + p->inner.x; }' member-nested-struct
+check 42 'struct I { int x; }; struct O { char c; struct I *inner; }; int main(void) { struct I i; struct O o; struct O *p = &o; p->inner = &i; p->inner->x = 42; return o.inner->x; }' member-arrow-chain
+check 42 'struct Node { int value; struct Node *next; }; int main(void) { struct Node a; struct Node b; a.value = 20; b.value = 22; a.next = &b; b.next = 0; struct Node *p = &a; int sum = 0; while (p) { sum += p->value; p = p->next; } return sum; }' member-linked-list
+check 42 'struct S { char c; int values[3]; }; int main(void) { struct S s; struct S *p = &s; s.values[0] = 7; p->values[1] = 11; s.values[2] = 24; return s.values[0] + p->values[1] + s.values[2]; }' member-array-elements
+check 42 'struct S { int x; }; struct O { char c; struct S items[2]; }; int main(void) { struct O o; o.items[0].x = 7; o.items[1].x = 35; return o.items[0].x + o.items[1].x; }' member-array-of-struct
+check 42 'struct S { int x; }; int main(void) { struct S a[2]; a[0].x = 20; a[1].x = 22; struct S *p = a; return p->x + (p + 1)->x; }' member-struct-array-base
+check 42 'struct S { char c; int x; }; int main(void) { struct S s; int *p = &s.x; *p = 42; return (&s)->x; }' member-address-of-scalar
+check 42 'struct I { int x; }; struct O { char c; struct I inner; }; int main(void) { struct O o; struct I *p = &o.inner; p->x = 42; return o.inner.x; }' member-address-of-struct
+check 42 'struct S { int values[2]; }; int main(void) { struct S s; int *p = s.values; p[1] = 42; return (*(&s.values))[1]; }' member-array-decay-and-address
+check 1 'struct S { char c; int x; short y; }; int main(void) { struct S s; void *v = &s; char *base = v; v = &s.x; char *x = v; v = &s.y; char *y = v; return x - base == 4 && y - base == 8; }' member-layout-offsets
+check 1 'struct I { char c; long n; }; struct O { char c; struct I inner; char end; }; int main(void) { struct O o; void *v = &o; char *base = v; v = &o.inner.n; char *n = v; v = &o.end; char *end = v; return n - base == 16 && end - base == 24; }' member-nested-layout-offsets
+check 1 'struct S { char c; unsigned char u; short s; unsigned short t; int i; unsigned j; long l; unsigned long long q; }; int main(void) { struct S x; x.c = 126; x.u = 254; x.s = 100; x.t = 65534; x.i = 40; x.j = 40; x.l = 1L << 40; x.q = 1ULL << 63; return x.c++ == 126 && ++x.c == -128 && x.u++ == 254 && ++x.u == 0 && --x.s == 99 && x.t-- == 65534 && x.i++ == 40 && ++x.j == 41 && x.l++ == 1L << 40 && x.q-- == 1ULL << 63; }' member-increment-decrement
+check 42 'struct S { int x; int *p; }; int main(void) { struct S s; int a[2]; a[1] = 42; s.p = a; s.p++; return *s.p; }' member-pointer-increment
+check 1 'struct S { char x; }; int main(void) { struct S s; return (s.x = 255) == -1 && s.x == -1; }' member-assignment-result
+check 1 'struct S { int x; }; int main(void) { struct S s; struct S t; s.x = t.x = 42; return s.x == 42 && t.x == 42; }' member-chained-assignment
+check 1 'struct S { int x; }; int main(void) { struct S a[2]; int i = 0; a[i++].x = 41; i = 0; int old = a[i++].x++; return old == 41 && i == 1 && a[0].x == 42; }' member-index-evaluated-once
+check 1 'struct S { int x; }; struct S *get(struct S *p, int *n) { (*n)++; return p; } int main(void) { struct S s; int n = 0; get(&s, &n)->x = 41; int old = get(&s, &n)->x++; return n == 2 && old == 41 && s.x == 42; }' member-call-base-evaluated-once
+check 42 'struct S { char c; int x; }; int value(void) { return 42; } struct S *get(struct S *p) { return p; } int main(void) { struct S s; get(&s)->x = value(); return s.x; }' member-call-base-and-rhs
+check 42 'struct S { int x; }; int read(struct S *p) { return p->x; } int main(void) { struct S s; s.x = 42; return read(&s); }' member-pointer-parameter
+check 42 'struct S { int x; }; int last(int a, int b, int c, int d, int e, int f, int g) { return g; } int main(void) { struct S s; s.x = 42; return last(s.x, s.x, s.x, s.x, s.x, s.x, s.x); }' member-stack-call-argument
+check 42 'struct S { char *text; }; int main(void) { struct S s; s.text = "*"; return s.text[0]; }' member-string-pointer
+check 42 'int main(void) { struct { int x; } s; s.x = 42; return s.x; }' member-anonymous-struct
+check 42 'struct S { int x; }; int main(void) { struct S s; struct S t; s.x = 7; t.x = 42; int choose = 0; return (choose ? &s : &t)->x; }' member-conditional-pointer
+check 42 'struct S { int x; }; int main(void) { struct S s; s.x = 42; s.x; return (*(&s)).x; }' member-discarded-scalar
+
+# Struct member access syntax and operand checks.
+check_error member-dot-integer 'int main(void) { int x; return x.y; }' '1:33: error: '\''.'\'' requires a struct operand'
+check_error member-dot-pointer 'struct S { int x; }; int main(void) { struct S *p; return p.x; }' '1:60: error: '\''.'\'' requires a struct operand'
+check_error member-dot-array 'struct S { int x; }; int main(void) { struct S a[2]; return a.x; }' '1:62: error: '\''.'\'' requires a struct operand'
+check_error member-arrow-integer 'int main(void) { int x; return x->y; }' '1:33: error: '\''->'\'' requires a pointer to struct'
+check_error member-arrow-integer-pointer 'int main(void) { int *p; return p->x; }' '1:34: error: '\''->'\'' requires a pointer to struct'
+check_error member-arrow-void-pointer 'int main(void) { void *p; return p->x; }' '1:35: error: '\''->'\'' requires a pointer to struct'
+check_error member-arrow-struct 'struct S { int x; }; int main(void) { struct S s; return s->x; }' '1:58: error: struct values are not supported yet'
+check_error member-arrow-pointer-to-pointer 'struct S { int x; }; int main(void) { struct S **p; return p->x; }' '1:61: error: '\''->'\'' requires a pointer to struct'
+check_error member-incomplete-struct 'int main(void) { struct S *p; return p->x; }' '1:39: error: member access on incomplete struct'
+check_error member-missing-dot 'struct S { int x; }; int main(void) { struct S s; return s.y; }' '1:60: error: no member named '\''y'\'' in struct'
+check_error member-missing-arrow 'struct S { int x; }; int main(void) { struct S *p; return p->y; }' '1:62: error: no member named '\''y'\'' in struct'
+check_error member-name-after-dot 'struct S { int x; }; int main(void) { struct S s; return s.; }' '1:60: error: expect member name'
+check_error member-name-after-arrow 'struct S { int x; }; int main(void) { struct S *p; return p->; }' '1:62: error: expect member name'
+check_error member-keyword-name 'struct S { int x; }; int main(void) { struct S s; return s.int; }' '1:60: error: expect member name'
+check_error member-scalar-chain 'struct S { int x; }; int main(void) { struct S s; return s.x.y; }' '1:61: error: '\''.'\'' requires a struct operand'
+check_error member-array-assignment 'struct S { int a[2]; }; int main(void) { struct S s; s.a = 0; return 0; }' '1:58: error: invalid assignment target'
+check_error member-array-increment 'struct S { int a[2]; }; int main(void) { struct S s; s.a++; return 0; }' '1:57: error: invalid increment target'
+check_error member-struct-increment 'struct T { int x; }; struct S { struct T t; }; int main(void) { struct S s; ++s.t; return 0; }' '1:77: error: invalid increment target'
+check_error member-pointer-type 'struct S { char *p; }; int main(void) { struct S s; int *p = s.p; return 0; }' '1:58: error: incompatible initializer type'
+check_error member-array-address-type 'struct S { int a[2]; }; int main(void) { struct S s; int *p = &s.a; return 0; }' '1:59: error: incompatible initializer type'
+check_error member-compound-assignment 'struct S { int x; }; int main(void) { struct S s; s.x += 1; return 0; }' '1:55: error: compound assignment through pointer not supported'
+check_error member-address-rvalue 'struct S { int x; }; int main(void) { struct S s; int *p = &(s.x + 1); return 0; }' '1:60: error: invalid address-of target'
+
 # String literals have static storage and decay to pointers in value contexts.
 check 97 'int main(void) { return "abc"[0]; }' string-first-byte
 check 99 'int main(void) { return 2["abc"]; }' string-reversed-subscript

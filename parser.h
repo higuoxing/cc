@@ -153,6 +153,7 @@ typedef enum {
   AST_LOGICAL_OR,
   AST_LSHIFT,
   AST_LT,
+  AST_MEMBER,
   AST_MOD,
   AST_MUL,
   AST_NE,
@@ -285,6 +286,11 @@ typedef struct AstNode {
     struct {
       struct AstNode *operand;
     } unary;
+
+    struct {
+      struct AstNode *base; /* Struct expression; arrow uses AST_DEREF. */
+      Member *member;
+    } member;
 
     struct {
       struct AstNode *lhs;
