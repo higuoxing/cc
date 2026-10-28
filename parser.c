@@ -26,6 +26,7 @@
 #include "parser.h"
 #include "sema.h"
 #include "type.h"
+#include "vector.h"
 
 static LocalVar *declare_local_var(Parser *p, Token name, Type *type);
 static AstNode *new_ast_node(Parser *p, AstKind kind);
@@ -1017,14 +1018,14 @@ static AstNode *parse_external_declaration(Parser *p) {
   LocalVar *var;
   Token func_name;
   Type *return_type;
-  Type **param_types = NULL;
-  int param_capacity = 0;
-  int nparams = 0;
+  Vector param_types;
+  int nparams;
   int definition = 0;
   int explicit_params = 0;
   int unamed_param = 0;
 
   reset_function_state(p);
+  vector_init(&param_types, sizeof(Type *));
   fn = new_ast_node(p, AST_FUNCTION);
   return_type = parse_declspecs(p);
   return_type = parse_declarator(p, return_type, &func_name);
@@ -1047,14 +1048,6 @@ static AstNode *parse_external_declaration(Parser *p) {
       Token param_name;
       Type *param_type;
 
-      if (nparams == param_capacity) {
-        Type **types;
-        param_capacity = param_capacity ? param_capacity * 2 : 8;
-        types = realloc(param_types, param_capacity * sizeof(Type *));
-        if (!types)
-          parse_error(p, "out of memory");
-        param_types = types;
-      }
       param_type = parse_declspecs(p);
       param_type = parse_declarator(p, param_type, &param_name);
       if (param_type->kind == TYPE_ARRAY) {
@@ -1066,7 +1059,10 @@ static AstNode *parse_external_declaration(Parser *p) {
         error_at(p,
                  param_name.kind == TOKEN_IDENTIFIER ? param_name : p->current,
                  "parameter has void type");
-      param_types[nparams] = param_type;
+      if (param_types.len >= (size_t)((INT_MAX - 15) / 8))
+        parse_error(p, "too many function parameters");
+      if (!vector_push(&param_types, &param_type))
+        parse_error(p, "out of memory");
 
       if (param_name.kind == TOKEN_IDENTIFIER) {
         for (var = p->locals; var && var->scope_depth == 0; var = var->next) {
@@ -1080,7 +1076,7 @@ static AstNode *parse_external_declaration(Parser *p) {
         param->name = param_name;
         param->type = param_type;
         param->scope_depth = 0;
-        param->offset = 8 * (nparams + 1);
+        param->offset = 8 * (int)param_types.len;
         param->next = p->locals;
         p->locals = param;
       } else {
@@ -1088,8 +1084,6 @@ static AstNode *parse_external_declaration(Parser *p) {
           parse_error(p, "expect parameter name");
         unamed_param = 1;
       }
-
-      nparams++;
 
       if (p->current.kind == TOKEN_COMMA) {
         parser_advance(p);
@@ -1107,9 +1101,10 @@ static AstNode *parse_external_declaration(Parser *p) {
   if (definition && unamed_param)
     parse_error(p, "expect parameter name in function definition");
 
-  func = declare_function(p, func_name, return_type, param_types, nparams,
+  nparams = (int)param_types.len;
+  func = declare_function(p, func_name, return_type, param_types.data, nparams,
                           explicit_params || definition, definition);
-  free(param_types);
+  vector_free(&param_types);
 
   if (!definition) {
     /* Consume ';' */
