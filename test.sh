@@ -516,6 +516,86 @@ check_error compound-result-address 'int main(void) { int a = 0; int *p = &(a +=
 check_error compound-result-not-null-constant 'int main(void) { int a = 0; int *p = (a += 0); return 0; }' '1:34: error: incompatible initializer type'
 check_error compound-member-void-rhs 'void f(void); struct S { int x; }; int main(void) { struct S s; s.x += f(); return 0; }' '1:72: error: void expression used as a value'
 
+# sizeof keeps array types and does not evaluate expression operands.
+for entry in 'char:1' 'unsigned char:1' 'short:2' 'short int:2' \
+             'unsigned short int:2' 'int:4' 'unsigned:4' 'int unsigned:4' \
+             'long:8' 'unsigned long int:8' 'long long:8' \
+             'unsigned long long int:8'; do
+    spec=${entry%:*}
+    size=${entry##*:}
+    check "$size" "int main(void) { return sizeof($spec); }" "sizeof-type-$spec"
+    check "$size" "int main(void) { $spec x; return sizeof x; }" "sizeof-variable-$spec"
+done
+check 8 'int main(void) { return sizeof(void *); }' sizeof-void-pointer
+check 8 'int main(void) { return sizeof(int **); }' sizeof-pointer-to-pointer
+check 8 'struct S; int main(void) { return sizeof(struct S *); }' sizeof-incomplete-pointer
+check 12 'int main(void) { return sizeof(int [3]); }' sizeof-array-type
+check 24 'int main(void) { return sizeof(char *[3]); }' sizeof-array-of-pointers-type
+check 1 'int main(void) { return sizeof(char [2147483647]) == 2147483647UL; }' sizeof-large-array-type
+check 12 'int main(void) { int a[3]; return sizeof a; }' sizeof-array-expression
+check 12 'int main(void) { int a[3]; return sizeof((a)); }' sizeof-parenthesized-array
+check 12 'int main(void) { int a[3]; return sizeof *(&a); }' sizeof-dereferenced-array-address
+check 8 'int main(void) { int a[3]; return sizeof(a + 0); }' sizeof-decayed-array-expression
+check 8 'int main(void) { int a[3]; return sizeof(0, a); }' sizeof-comma-array-conversion
+check 4 'int main(void) { return sizeof "abc"; }' sizeof-string-literal
+check 4 'int main(void) { return sizeof("abc"); }' sizeof-parenthesized-string
+check 4 'int main(void) { return sizeof "a" "bc"; }' sizeof-concatenated-string
+check 4 'int main(void) { return sizeof "a\0b"; }' sizeof-string-embedded-zero
+check 1 'int main(void) { return sizeof ""; }' sizeof-empty-string
+check 4 "int main(void) { return sizeof 'a'; }" sizeof-character-constant
+check 16 'struct S { char c; long n; }; int main(void) { return sizeof(struct S); }' sizeof-struct-type
+check 16 'struct S { char c; long n; }; int main(void) { struct S s; return sizeof s; }' sizeof-struct-expression
+check 16 'int main(void) { return sizeof(struct { char c; long n; }); }' sizeof-anonymous-struct
+check 16 'int main(void) { return sizeof(struct S { char c; long n; }); }' sizeof-inline-tag-definition
+check 1 'int main(void) { sizeof(struct S { long x; }); struct S s; return sizeof s == 8; }' sizeof-type-tag-visibility
+check 1 'struct I { char c; long n; }; struct S { char c; struct I inner; int a[3]; }; int main(void) { struct S s; return sizeof s == 40 && sizeof s.inner == 16 && sizeof s.a == 12 && sizeof s.a[0] == 4; }' sizeof-struct-members
+check 1 'struct S { char c; int a[3]; }; int main(void) { struct S *p = 0; return sizeof p->c == 1 && sizeof p->a == 12 && sizeof *p == 16; }' sizeof-null-pointer-members
+check 8 'int f(int a[3]) { return sizeof a; } int main(void) { int a[3]; return f(a); }' sizeof-array-parameter-is-pointer
+check 1 'int main(void) { char c; return sizeof c == 1 && sizeof(c + 0) == 4 && sizeof ~c == 4 && sizeof !c == 4; }' sizeof-expression-promotions
+check 1 'int main(void) { int i = 0; return sizeof(i++) == 4 && i == 0; }' sizeof-postincrement-unevaluated
+check 1 'int main(void) { char c = 0; return sizeof ++c == 1 && c == 0; }' sizeof-preincrement-unevaluated
+check 1 'int main(void) { int i = 0; return sizeof(i = 42) == 4 && i == 0; }' sizeof-assignment-unevaluated
+check 1 'int main(void) { short a[2]; int i = 0; return sizeof(a[i++] += 42) == 2 && i == 0; }' sizeof-compound-assignment-unevaluated
+check 1 'int main(void) { int a[2]; int i = 0; return sizeof a[i++] == 4 && i == 0; }' sizeof-subscript-unevaluated
+check 1 'int main(void) { int a[2]; int *p = a; return sizeof *p++ == 4 && p == a; }' sizeof-pointer-increment-unevaluated
+check 1 'int main(void) { int *p = 0; return sizeof *p == 4; }' sizeof-null-dereference-unevaluated
+check 4 'int main(void) { return sizeof(1 / 0); }' sizeof-division-not-evaluated
+check 8 'int main(void) { return sizeof(9223372036854775807L + 1L); }' sizeof-overflow-not-evaluated
+check 1 'int f(int *p) { (*p)++; return 42; } int main(void) { int n = 0; return sizeof f(&n) == 4 && n == 0; }' sizeof-call-unevaluated
+check 1 'char external(void); int main(void) { return sizeof external(); }' sizeof-call-no-link-reference
+check 4 'struct S { int x; }; struct S *external(void); int main(void) { return sizeof external()->x; }' sizeof-member-call-unevaluated
+check 8 'int main(void) { return sizeof sizeof(char); }' sizeof-result-width
+check 1 'int main(void) { return sizeof(int) > 0 && sizeof(int) < -1; }' sizeof-result-unsigned
+check 6 'int main(void) { return sizeof(int) + 2; }' sizeof-type-precedence
+check 8 'int main(void) { return sizeof 1 + sizeof 2; }' sizeof-unary-precedence
+check 1 'int main(void) { int a[sizeof(int)]; a[3] = 42; return sizeof a == 16 && a[3] == 42; }' sizeof-array-bound
+check 42 'int main(void) { switch (4) { case sizeof(int): return 42; } return 0; }' sizeof-case-constant
+check 1 'int main(void) { int a[2]; return sizeof(sizeof a) == 8 && sizeof(a[0]++) == 4; }' sizeof-nested-expressions
+
+check_error sizeof-void 'int main(void) { return sizeof(void); }' '1:25: error: sizeof cannot be applied to void'
+check_error sizeof-void-expression 'void f(void); int main(void) { return sizeof f(); }' '1:39: error: sizeof cannot be applied to void'
+check_error sizeof-incomplete-struct 'struct S; int main(void) { return sizeof(struct S); }' '1:35: error: sizeof cannot be applied to an incomplete type'
+check_error sizeof-incomplete-dereference 'int main(void) { struct S *p; return sizeof *p; }' '1:38: error: sizeof cannot be applied to an incomplete type'
+check_error sizeof-named-type 'int main(void) { return sizeof(int x); }' '1:36: error: type name cannot contain an identifier'
+check_error sizeof-named-pointer-type 'int main(void) { return sizeof(int *x); }' '1:37: error: type name cannot contain an identifier'
+check_error sizeof-named-array-type 'int main(void) { return sizeof(int x[2]); }' '1:36: error: type name cannot contain an identifier'
+check_error sizeof-empty-operand 'int main(void) { return sizeof(); }' '1:32: error: expect expr'
+check_error sizeof-missing-operand 'int main(void) { return sizeof; }' '1:31: error: expect expr'
+check_error sizeof-type-without-parens 'int main(void) { return sizeof int; }' '1:32: error: expect expr'
+check_error sizeof-missing-rparen 'int main(void) { return sizeof(int; }' '1:35: error: expect '\'')'\'''
+check_error sizeof-missing-array-rbracket 'int main(void) { return sizeof(int[2); }' '1:37: error: expect '\'']'\'''
+check_error sizeof-incomplete-array 'int main(void) { return sizeof(int[]); }' '1:36: error: array bound is required'
+check_error sizeof-void-array 'int main(void) { return sizeof(void[2]); }' '1:36: error: array element has void type'
+check_error sizeof-incomplete-struct-array 'int main(void) { return sizeof(struct S[2]); }' '1:40: error: array element has incomplete type'
+check_error sizeof-zero-array-bound 'int main(void) { return sizeof(int[0]); }' '1:36: error: array bound must be positive'
+check_error sizeof-variable-array-bound 'int main(void) { int n = 3; return sizeof(int[n]); }' '1:48: error: not an integer constant expression'
+check_error sizeof-undeclared-operand 'int main(void) { return sizeof missing; }' '1:32: error: undeclared identifier'
+check_error sizeof-invalid-assignment-operand 'int main(void) { return sizeof(1 = 2); }' '1:34: error: invalid assignment target'
+check_error sizeof-missing-member 'struct S { int x; }; int main(void) { struct S s; return sizeof s.y; }' '1:67: error: no member named '\''y'\'' in struct'
+check_error sizeof-invalid-call 'int f(int x); int main(void) { return sizeof f(); }' '1:46: error: wrong number of arguments to function '\''f'\'''
+check_error sizeof-multiline-void $'int main(void) {\n  return sizeof(void);\n}\n' '2:10: error: sizeof cannot be applied to void'
+check_error sizeof-multiline-type-name $'int main(void) {\n  return sizeof(int name);\n}\n' '2:21: error: type name cannot contain an identifier'
+
 # Typed functions preserve pointer widths and check complete signatures.
 check 42 'int *identity(int *p) { return p; } int main(void) { int x = 42; return *identity(&x); }' typed-pointer-identity
 check 42 'int *identity(int *); int main(void) { int x = 42; return *identity(&x); } int *identity(int *p) { return p; }' typed-pointer-prototype

@@ -60,6 +60,13 @@ static AstNode *parse_block(Parser *p);
 static AstNode *parse_external_declaration(Parser *p);
 static Type *parse_declspecs(Parser *p);
 static Type *parse_declarator(Parser *p, Type *type, Token *name);
+static Type *parse_type_name(Parser *p);
+
+static bool is_type_specifier(TokenKind kind) {
+  return kind == TOKEN_CHAR || kind == TOKEN_SHORT || kind == TOKEN_INT ||
+         kind == TOKEN_LONG || kind == TOKEN_UNSIGNED || kind == TOKEN_VOID ||
+         kind == TOKEN_STRUCT;
+}
 
 /* assignment-operator: = += -= *= /= %= <<= >>= &= ^= |=  (C11 6.5.16) */
 static bool is_assignment_op(TokenKind ty) {
@@ -223,9 +230,24 @@ static void parse_semicolon(Parser *p) {
  *   '-' unary-expression | '~' unary-expression | '!' unary-expression
  *   '++' unary-expression | '--' unary-expression
  *   '&' unary-expression | '*' unary-expression
+ *   'sizeof' unary-expression | 'sizeof' '(' type-name ')'
  *   postfix-expression
  */
 static AstNode *parse_unary(Parser *p) {
+  if (p->current.kind == TOKEN_SIZEOF) {
+    Token loc = p->current;
+    Type *type;
+    parser_advance(p);
+    if (p->current.kind == TOKEN_LPAREN &&
+        is_type_specifier(p->lookahead.kind)) {
+      parser_advance(p);
+      type = parse_type_name(p);
+      parse_expect(p, TOKEN_RPAREN, "expect ')'");
+    } else {
+      type = parse_unary(p)->type;
+    }
+    return sema_sizeof(p, type, loc);
+  }
   if (p->current.kind == TOKEN_MINUS || p->current.kind == TOKEN_TILDE ||
       p->current.kind == TOKEN_BANG || p->current.kind == TOKEN_PLUS_PLUS ||
       p->current.kind == TOKEN_MINUS_MINUS ||
@@ -710,6 +732,21 @@ static Type *parse_declarator(Parser *p, Type *type, Token *name) {
     if (p->current.kind == TOKEN_LBRACKET)
       parse_error(p, "multidimensional arrays are not supported yet");
   }
+  return type;
+}
+
+/*
+ * type-name: specifier-qualifier-list abstract-declarator_opt (C11 6.7.7).
+ * Our supported specifiers share parse_declspecs. Reuse pointer and fixed-array
+ * declarators, but forbid an identifier. Parenthesized abstract declarators
+ * are not supported yet.
+ */
+static Type *parse_type_name(Parser *p) {
+  Token name;
+  Type *type = parse_declspecs(p);
+  type = parse_declarator(p, type, &name);
+  if (name.kind == TOKEN_IDENTIFIER)
+    error_at(p, name, "type name cannot contain an identifier");
   return type;
 }
 
@@ -1423,10 +1460,7 @@ static AstNode *parse_for_stmt(Parser *p) {
   outer_tags = p->tags;
   ++p->scope_depth;
 
-  if (p->current.kind == TOKEN_INT || p->current.kind == TOKEN_CHAR ||
-      p->current.kind == TOKEN_UNSIGNED || p->current.kind == TOKEN_LONG ||
-      p->current.kind == TOKEN_SHORT || p->current.kind == TOKEN_VOID ||
-      p->current.kind == TOKEN_STRUCT) {
+  if (is_type_specifier(p->current.kind)) {
     /* parse_decl consumes the declaration's own ';'. */
     for_node->d.for_stmt.init = parse_decl(p);
   } else if (p->current.kind == TOKEN_SEMICOLON) {

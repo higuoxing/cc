@@ -51,6 +51,7 @@ extern void sema_check_return(Parser *p, AstNode *stmt);
 
 extern AstNode *sema_integer_literal(Parser *p, Token loc);
 extern AstNode *sema_string_literal(Parser *p, Token loc);
+extern AstNode *sema_sizeof(Parser *p, Type *type, Token loc);
 extern AstNode *sema_unary(Parser *p, AstKind op, AstNode *operand, Token loc);
 extern AstNode *sema_binary(Parser *p, AstKind kind, AstNode *lhs, AstNode *rhs,
                            Token loc);

@@ -220,7 +220,7 @@ static void codegen_integer_binary(AstKind kind, Type *type) {
 static void codegen_pointer_offset(AstKind kind, Type *type) {
   fprintf(out, "\timulq $%d, %%rcx\n", type->base->size);
   fprintf(out, kind == AST_PTR_ADD ? "\taddq %%rcx, %%rax\n"
-                                  : "\tsubq %%rcx, %%rax\n");
+                                   : "\tsubq %%rcx, %%rax\n");
 }
 
 static void codegen_expr(AstNode *expr) {

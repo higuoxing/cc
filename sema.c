@@ -332,6 +332,23 @@ AstNode *sema_string_literal(Parser *p, Token loc) {
   return node;
 }
 
+/*
+ * sizeof preserves the operand's type without value conversion or promotion.
+ * All supported complete object types have constant size. size_t is unsigned
+ * long on our LP64 target. Discard the operand tree so codegen cannot evaluate
+ * it.
+ */
+AstNode *sema_sizeof(Parser *p, Type *type, Token loc) {
+  AstNode *node;
+  if (type->kind == TYPE_VOID)
+    error_at(p, loc, "sizeof cannot be applied to void");
+  if (type->size < 0)
+    error_at(p, loc, "sizeof cannot be applied to an incomplete type");
+  node = new_expr(p, AST_INT_LITERAL, &builtin_type_unsigned_long, loc);
+  node->d.int_literal.val = (uint64_t)type_size(type);
+  return node;
+}
+
 AstNode *sema_unary(Parser *p, AstKind op, AstNode *operand, Token loc) {
   AstNode *node;
   Type *type;
