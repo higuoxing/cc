@@ -58,6 +58,29 @@ static void codegen_addr(AstNode *expr) {
   case AST_VAR:
     fprintf(out, "\tleaq -%d(%%rbp), %%rax\n", expr->d.variable.var->offset);
     break;
+  case AST_STRING_LITERAL: {
+    int seq = label_seq++;
+    int i;
+
+    /*
+     * Emit decoded bytes, including embedded zeros and the final terminator.
+     * Restore the text section before generating the address instruction.
+     */
+    fprintf(out, "\t.pushsection .rodata\n");
+    fprintf(out, ".L.string.%d:\n", seq);
+    for (i = 0; i < expr->type->array_len; ++i) {
+      if (i % 16 == 0)
+        fprintf(out, "\t.byte ");
+      else
+        fprintf(out, ", ");
+      fprintf(out, "%u", (unsigned)expr->d.string_literal.val[i]);
+      if (i % 16 == 15 || i == expr->type->array_len - 1)
+        fprintf(out, "\n");
+    }
+    fprintf(out, "\t.popsection\n");
+    fprintf(out, "\tleaq .L.string.%d(%%rip), %%rax\n", seq);
+    break;
+  }
   case AST_DEREF:
     /* The pointer value is the address. */
     codegen_expr(expr->d.unary.operand);
@@ -190,6 +213,7 @@ static void codegen_expr(AstNode *expr) {
   switch (expr->kind) {
   case AST_VAR:
   case AST_DEREF:
+  case AST_STRING_LITERAL:
     codegen_addr(expr);
     if (expr->type->kind != TYPE_ARRAY)
       codegen_load(expr->type, "%rax");

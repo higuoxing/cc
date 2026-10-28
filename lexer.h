@@ -84,6 +84,7 @@ typedef enum {
   TOKEN_SLASH_EQ, /* '/=' */
   TOKEN_STAR,     /* '*' */
   TOKEN_STAR_EQ,  /* '*=' */
+  TOKEN_STRING_LITERAL,
   TOKEN_SWITCH,   /* 'switch' */
   TOKEN_TILDE,    /* '~' */
   TOKEN_UNSIGNED, /* 'unsigned' */
@@ -105,6 +106,8 @@ typedef struct {
   int col;
   uint64_t int_literal_val;
   unsigned int_literal_suffix;
+  unsigned char *string_literal_val; /* Owned decoded bytes, including final zero. */
+  int string_literal_len; /* Decoded byte count, including final zero. */
 } Token;
 
 typedef struct {

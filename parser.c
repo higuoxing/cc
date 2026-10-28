@@ -41,6 +41,7 @@ static AstNode *parse_unary(Parser *p);
 static AstNode *parse_call_expr(Parser *p);
 static AstNode *parse_postfix(Parser *p);
 static AstNode *parse_primary(Parser *p);
+static AstNode *parse_string_literal(Parser *p);
 static AstNode *parse_decl(Parser *p);
 static AstNode *parse_return_stmt(Parser *p);
 static AstNode *parse_if_stmt(Parser *p);
@@ -340,10 +341,41 @@ static AstNode *parse_postfix(Parser *p) {
 }
 
 /*
+ * Concatenate adjacent string tokens (C11 5.1.1.2, translation phase 6).
+ * Keep embedded zeros, append one final terminator, and transfer the combined
+ * buffer to AST while retaining the first token's source location.
+ */
+static AstNode *parse_string_literal(Parser *p) {
+  Token literal = p->current;
+  Vector bytes;
+  unsigned char terminator = 0;
+  vector_init(&bytes, sizeof(unsigned char));
+  do {
+    Token next = p->current;
+    if (bytes.len > (size_t)(INT_MAX - next.string_literal_len))
+      error_at(p, literal, "string literal is too long");
+    if (!vector_append(&bytes, next.string_literal_val,
+                       (size_t)next.string_literal_len - 1))
+      error_at(p, literal, "out of memory");
+    free(next.string_literal_val);
+    parser_advance(p);
+  } while (p->current.kind == TOKEN_STRING_LITERAL);
+  if (!vector_push(&bytes, &terminator))
+    error_at(p, literal, "out of memory");
+  literal.string_literal_len = (int)bytes.len;
+  literal.string_literal_val = vector_release(&bytes);
+  return sema_string_literal(p, literal);
+}
+
+/*
  * primary-expression:
- *   integer-constant | character-constant | '(' expression ')' | identifier
+ *   integer-constant | character-constant | string-literal
+ *   '(' expression ')' | identifier
  */
 static AstNode *parse_primary(Parser *p) {
+  if (p->current.kind == TOKEN_STRING_LITERAL)
+    return parse_string_literal(p);
+
   if (p->current.kind == TOKEN_INT_LITERAL) {
     AstNode *expr;
     expr = sema_integer_literal(p, p->current);

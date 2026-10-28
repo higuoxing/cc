@@ -17,6 +17,7 @@
  */
 
 #include <ctype.h>
+#include <limits.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -221,7 +222,7 @@ static int hex_digit(unsigned char c) {
  * Decode an escape after its backslash. Octal escapes consume up to three
  * digits; hexadecimal escapes consume all following hexadecimal digits.
  */
-static int read_char_escape(Lexer *l, Token loc) {
+static int read_escape(Lexer *l, Token loc) {
   int value = 0;
   int c = (unsigned char)*l->cursor;
   if (c >= '0' && c <= '7') {
@@ -249,7 +250,9 @@ static int read_char_escape(Lexer *l, Token loc) {
   }
 
   if (c == '\0' || c == '\n' || c == '\r')
-    lexer_error(l, loc, "unterminated character literal");
+    lexer_error(l, loc,
+                loc.start[0] == '"' ? "unterminated string literal"
+                                    : "unterminated character literal");
   lexer_advance(l);
   switch (c) {
   case '\'':
@@ -275,7 +278,10 @@ static int read_char_escape(Lexer *l, Token loc) {
   case 'v':
     return '\v';
   default:
-    lexer_error(l, loc, "invalid escape sequence in character literal");
+    lexer_error(l, loc,
+                loc.start[0] == '"'
+                    ? "invalid escape sequence in string literal"
+                    : "invalid escape sequence in character literal");
   }
 }
 
@@ -293,7 +299,7 @@ static Token read_char_literal(Lexer *l, Token tok) {
 
   if (*l->cursor == '\\') {
     lexer_advance(l);
-    value = read_char_escape(l, tok);
+    value = read_escape(l, tok);
   } else {
     value = (unsigned char)*l->cursor;
     lexer_advance(l);
@@ -319,6 +325,51 @@ static Token read_char_literal(Lexer *l, Token tok) {
   return tok;
 }
 
+/*
+ * Locate the closing quote before allocating: the source contents plus one
+ * byte bound the decoded size, even with escapes. Keep embedded zero bytes
+ * and append a separate terminator; strlen cannot describe the decoded data.
+ */
+static Token read_string_literal(Lexer *l, Token tok) {
+  const char *end = l->cursor + 1;
+  int length = 0;
+  while (*end != '"') {
+    if (*end == '\0' || *end == '\n' || *end == '\r')
+      lexer_error(l, tok, "unterminated string literal");
+    if (*end == '\\') {
+      ++end;
+      if (*end == '\0' || *end == '\n' || *end == '\r')
+        lexer_error(l, tok, "unterminated string literal");
+    }
+    ++end;
+  }
+  if (end - tok.start >= INT_MAX)
+    lexer_error(l, tok, "string literal is too long");
+  tok.string_literal_val = malloc((size_t)(end - l->cursor));
+  if (!tok.string_literal_val)
+    lexer_error(l, tok, "out of memory");
+
+  lexer_advance(l);
+  while (l->cursor != end) {
+    int value;
+    if (*l->cursor == '\\') {
+      lexer_advance(l);
+      value = read_escape(l, tok);
+    } else {
+      value = (unsigned char)*l->cursor;
+      lexer_advance(l);
+    }
+    tok.string_literal_val[length++] = (unsigned char)value;
+  }
+  tok.string_literal_val[length++] = 0;
+  lexer_advance(l);
+
+  tok.kind = TOKEN_STRING_LITERAL;
+  tok.len = (int)(l->cursor - tok.start);
+  tok.string_literal_len = length;
+  return tok;
+}
+
 Token lexer_next_token(Lexer *l) {
   Token tok = {0};
 
@@ -337,6 +388,8 @@ Token lexer_next_token(Lexer *l) {
   }
 
   switch (*l->cursor) {
+  case '"':
+    return read_string_literal(l, tok);
   case '\'':
     return read_char_literal(l, tok);
   case ';':

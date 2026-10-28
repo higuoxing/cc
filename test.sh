@@ -630,6 +630,34 @@ check_error character-literal-raw-newline $'int main(void) { return \'\n\'; }' "
 check_error character-literal-raw-crlf $'int main(void) { return \'\r\n\'; }' "1:25: error: unterminated character literal"
 check_error character-literal-escaped-newline $'int main(void) { return \'\\\n\'; }' "1:25: error: unterminated character literal"
 
+# String literal lexer diagnostics.
+check_error string-unterminated 'int main(void) { return "hello; }' '1:25: error: unterminated string literal'
+check_error string-missing-closing-quote 'int main(void) { return "; }' '1:25: error: unterminated string literal'
+check_error string-trailing-backslash 'int main(void) { return "hello\; }' '1:25: error: unterminated string literal'
+check_error string-raw-newline $'int main(void) { return "hello\nworld"; }' '1:25: error: unterminated string literal'
+check_error string-raw-crlf $'int main(void) { return "hello\r\nworld"; }' '1:25: error: unterminated string literal'
+check_error string-escaped-newline $'int main(void) { return "hello\\\nworld"; }' '1:25: error: unterminated string literal'
+check_error string-invalid-escape 'int main(void) { return "\q"; }' '1:25: error: invalid escape sequence in string literal'
+check_error string-invalid-octal-escape 'int main(void) { return "\8"; }' '1:25: error: invalid escape sequence in string literal'
+check_error string-empty-hex-escape 'int main(void) { return "\x"; }' '1:25: error: expect hexadecimal digit in character escape'
+check_error string-invalid-hex-escape 'int main(void) { return "\xg"; }' '1:25: error: expect hexadecimal digit in character escape'
+check_error string-octal-escape-overflow 'int main(void) { return "\400"; }' '1:25: error: character escape out of range'
+check_error string-hex-escape-overflow 'int main(void) { return "\x100"; }' '1:25: error: character escape out of range'
+check_error string-long-hex-escape-overflow 'int main(void) { return "\xffffffffffffffffffff"; }' '1:25: error: character escape out of range'
+
+# String literal types and invalid expression contexts.
+check_error string-integer-initializer 'int main(void) { int x = "abc"; return 0; }' '1:22: error: incompatible initializer type'
+check_error string-pointer-initializer-type 'int main(void) { int *p = "abc"; return 0; }' '1:23: error: incompatible initializer type'
+check_error string-integer-argument 'int f(int); int main(void) { return f("abc"); }' '1:39: error: incompatible argument type'
+check_error string-assignment-target 'int main(void) { "a" = "b"; return 0; }' '1:22: error: invalid assignment target'
+check_error string-increment-target 'int main(void) { ++"abc"; return 0; }' '1:18: error: invalid increment target'
+check_error string-address-pointer-type 'int main(void) { char *p = &"abc"; return 0; }' '1:24: error: incompatible initializer type'
+check_error string-invalid-addition 'int main(void) { "a" + "b"; return 0; }' '1:22: error: invalid operands to binary +'
+check_error string-switch-condition 'int main(void) { switch ("abc") { default: return 0; } }' '1:26: error: switch condition must have integer type'
+check_error string-case-label 'int main(void) { switch (0) { case "a": return 0; } return 1; }' '1:36: error: case label must have integer type'
+check_error string-array-bound 'int main(void) { char a["abc"]; return 0; }' '1:25: error: array bound must have integer type'
+check_error string-parenthesized-concat 'int main(void) { ("a") "b"; return 0; }' '1:24: error: expect '\'';'\'''
+
 # Fixed-size array declarations and array parameter adjustment.
 for spec in 'char' 'unsigned char' 'short' 'unsigned short' 'int' 'unsigned' \
     'long' 'unsigned long' 'long long' 'unsigned long long'; do
@@ -661,6 +689,33 @@ check_error array-multidimensional 'int main(void) { int a[2][3]; return 0; }' '
 check_error array-initializer 'int main(void) { int a[2] = {1, 2}; return 0; }' '1:27: error: array initializers are not supported yet'
 check_error array-function-return 'int f[3](void);' '1:5: error: function cannot return an array'
 check_error array-parameter-conflict 'int f(int a[3]); int f(char *a);' '1:22: error: conflicting declaration of function '\''f'\'''
+
+# String literals have static storage and decay to pointers in value contexts.
+check 97 'int main(void) { return "abc"[0]; }' string-first-byte
+check 99 'int main(void) { return 2["abc"]; }' string-reversed-subscript
+check 0 'int main(void) { return "abc"[3]; }' string-final-terminator
+check 0 'int main(void) { return ""[0]; }' string-empty
+check 1 'int main(void) { char *p = "a\0b"; return p[0] == 97 && p[1] == 0 && p[2] == 98 && p[3] == 0; }' string-embedded-zero
+check 1 'int main(void) { char *p = "\n\t\r\a\b\f\v"; return p[0] == 10 && p[1] == 9 && p[2] == 13 && p[3] == 7 && p[4] == 8 && p[5] == 12 && p[6] == 11 && p[7] == 0; }' string-simple-escapes
+check 1 'int main(void) { char *p = "\"\\\?"; return p[0] == 34 && p[1] == 92 && p[2] == 63 && p[3] == 0; }' string-escaped-punctuation
+check 1 'int main(void) { char *p = "\101\x42\377\x80"; return p[0] == 65 && p[1] == 66 && p[2] == -1 && p[3] == -128 && p[4] == 0; }' string-numeric-escapes
+check 1 'int main(void) { char *p = "ab" /* concatenate */ "cd"; return p[0] == 97 && p[2] == 99 && p[3] == 100 && p[4] == 0; }' string-concatenation
+check 1 'int main(void) { char *p = "a\0" "b"; return p[0] == 97 && p[1] == 0 && p[2] == 98 && p[3] == 0; }' string-concatenated-zero
+check 1 'int main(void) { char *p = "\x4" "1"; return p[0] == 4 && p[1] == 49 && p[2] == 0; }' string-concatenated-escape-boundary
+check 1 'int main(void) { char *p = "" "" "a" ""; return p[0] == 97 && p[1] == 0; }' string-concatenated-empty
+check 1 'int main(void) { char *p = "0123456789abcdefXYZ"; return p[15] == 102 && p[16] == 88 && p[18] == 90 && p[19] == 0; }' string-multiple-byte-directives
+check 98 'int main(void) { char *p; p = "abc"; return *(p + 1); }' string-pointer-assignment
+check 98 'int main(void) { return (*(&"abc"))[1]; }' string-address-of-array
+check 99 'int main(void) { return (*(&"abc" + 1 - 1))[2]; }' string-pointer-to-array-arithmetic
+check 98 'int byte(char *p) { return p[1]; } int main(void) { return byte("abc"); }' string-call-argument
+check 98 'int byte(int a, int b, int c, int d, int e, int f, char *p) { return p[1]; } int main(void) { return byte(0,0,0,0,0,0,"abc"); }' string-stack-argument
+check 1 'char *text(void) { return "abc"; } int main(void) { char *p = text(); int i = 0; while (i++ < 3) { if (text() != p) return 0; } return p[2] == 99; }' string-static-lifetime
+check 1 'char *first(void) { return "abc"; } char *second(void) { return "xyz"; } int main(void) { return first()[0] == 97 && second()[0] == 120; }' string-labels-across-functions
+check 98 'int main(void) { char *p[2]; p[0] = "abc"; p[1] = "xyz"; return p[0][1]; }' string-pointer-array
+check 120 'int main(void) { return (0 ? "abc" : "xyz")[0]; }' string-conditional
+check 1 'int main(void) { if ("") return !!"abc" && ("x" || 0) && ("y" && 1); return 0; }' string-conditions
+check 98 'int main(void) { "discarded"; return (0, "abc")[1]; }' string-discarded-expression
+check 1 'int strcmp(char *a, char *b); int main(void) { return strcmp("hello", "hel" "lo") == 0 && strcmp("a", "b") < 0; }' string-libc-call
 
 # Array expressions, element access, and pointer conversion.
 for spec in 'char' 'unsigned char' 'short' 'unsigned short' 'int' 'unsigned' 'long' 'unsigned long' 'long long' 'unsigned long long'; do

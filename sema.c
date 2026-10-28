@@ -245,7 +245,9 @@ void sema_check_return(Parser *p, AstNode *stmt) {
       sema_convert_expr(p, return_type, expr, stmt->loc, "return");
 }
 
-static bool is_lvalue(AstKind ty) { return ty == AST_VAR || ty == AST_DEREF; }
+static bool is_lvalue(AstKind ty) {
+  return ty == AST_VAR || ty == AST_DEREF || ty == AST_STRING_LITERAL;
+}
 
 static bool is_modifiable_lvalue(const AstNode *expr) {
   return is_lvalue(expr->kind) && expr->type->kind != TYPE_ARRAY;
@@ -305,6 +307,16 @@ AstNode *sema_integer_literal(Parser *p, Token loc) {
 
   node = new_expr(p, AST_INT_LITERAL, type, loc);
   node->d.int_literal.val = value;
+  return node;
+}
+
+AstNode *sema_string_literal(Parser *p, Token loc) {
+  Type *type = array_of(&builtin_type_char, loc.string_literal_len);
+  AstNode *node;
+  if (!type)
+    error_at(p, loc, "out of memory");
+  node = new_expr(p, AST_STRING_LITERAL, type, loc);
+  node->d.string_literal.val = loc.string_literal_val;
   return node;
 }
 

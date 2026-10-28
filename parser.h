@@ -156,6 +156,7 @@ typedef enum {
   AST_PRE_INCREMENT,
   AST_RETURN,
   AST_RSHIFT,
+  AST_STRING_LITERAL,
   AST_SUB,
   AST_SWITCH,
   AST_VAR,
@@ -266,6 +267,10 @@ typedef struct AstNode {
     struct {
       uint64_t val;
     } int_literal;
+
+    struct {
+      unsigned char *val; /* Decoded bytes; type->array_len includes final zero. */
+    } string_literal;
 
     struct {
       struct AstNode *operand;
