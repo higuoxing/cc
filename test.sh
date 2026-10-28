@@ -458,6 +458,64 @@ check 42 'int main() { int x = 42; int *p; p = &x; return *(p += 0); }' compound
 check 42 'int main() { int x = 42; int *p; p = &x; return *p++; }' postfix-pointer-type
 check 0 'int main() { int x; return (&x + 0) - &x; }' binary-pointer-type
 
+# Compound assignments preserve one target address and the operation's type.
+for entry in '+= 20 22 42' '-= 50 8 42' '*= 6 7 42' '/= 84 2 42' \
+             '%= 85 43 42' '<<= 21 1 42' '>>= 84 1 42' \
+             '&= 63 42 42' '^= 43 1 42' '|= 40 2 42'; do
+    read -r op initial rhs expected <<< "$entry"
+    check 1 "int main(void) { int x = $initial; int *p = &x; return (*p $op $rhs) == $expected && x == $expected; }" "compound-dereference-$op"
+    check 1 "int main(void) { int a[2]; a[0] = $initial; a[1] = 99; return (a[0] $op $rhs) == $expected && a[0] == $expected && a[1] == 99; }" "compound-subscript-$op"
+    for target in s.x 'p->x'; do
+        check 1 "struct S { int x; int guard; }; int main(void) { struct S s; struct S *p = &s; s.x = $initial; s.guard = 99; return ($target $op $rhs) == $expected && s.x == $expected && s.guard == 99; }" "compound-member-$target-$op"
+    done
+done
+for spec in 'char' 'unsigned char' 'short' 'unsigned short' 'int' 'unsigned' 'long' 'unsigned long' 'long long' 'unsigned long long'; do
+    check 1 "struct S { char before; $spec x; char after; }; int main(void) { struct S s; $spec *p = &s.x; s.before = 7; s.x = 20; s.after = 9; return (*p += 22) == 42 && s.x == 42 && s.before == 7 && s.after == 9; }" "compound-store-width-$spec"
+done
+check 1 'struct S { char x; unsigned char y; }; int main(void) { struct S s; s.x = 127; s.y = 255; return (s.x += 1) == -128 && s.x == -128 && (s.y += 1) == 0 && s.y == 0; }' compound-member-char-narrowing
+check 1 'int main(void) { short a[2]; a[0] = 32767; a[1] = -32768; return (a[0] += 1) == -32768 && (a[1] -= 1) == 32767 && a[0] == -32768 && a[1] == 32767; }' compound-short-narrowing
+check 1 'int main(void) { unsigned short a[1]; a[0] = 65535; return (a[0] += 1) == 0 && (a[0] -= 1) == 65535; }' compound-unsigned-short-narrowing
+check 1 'struct S { int x; }; int main(void) { struct S s; s.x = -1; return (s.x /= 2U) == 2147483647 && s.x == 2147483647; }' compound-unsigned-calculation
+check 1 'struct S { long x; }; int main(void) { struct S s; s.x = -9; return (s.x /= 2U) == -4 && s.x == -4; }' compound-wide-signed-calculation
+check 1 'int main(void) { int a[1]; a[0] = 9; return (a[0] /= 4294967297L) == 0 && a[0] == 0; }' compound-widen-before-division
+check 1 'int main(void) { int a[1]; a[0] = -1; return (a[0] /= 2UL) == -1 && a[0] == -1; }' compound-wide-unsigned-before-narrowing
+check 1 'int main(void) { char a[1]; a[0] = -9; return (a[0] /= 2U) == -5 && a[0] == -5; }' compound-char-integer-promotion
+check 1 'int main(void) { short a[1]; a[0] = -9; return (a[0] /= 2UL) == -5 && a[0] == -5; }' compound-short-wide-conversion
+check 1 'int main(void) { unsigned short a[1]; a[0] = 65535; return (a[0] /= -1) == 1 && a[0] == 1; }' compound-unsigned-short-promotion
+check 1 'int main(void) { unsigned a[1]; a[0] = 2147483648U; return (a[0] <<= 1ULL) == 0 && a[0] == 0; }' compound-shift-left-type
+check 1 'int main(void) { long a[1]; a[0] = -8; return (a[0] >>= 1ULL) == -4 && a[0] == -4; }' compound-shift-independent-promotions
+check 1 'struct S { long long x; unsigned long long y; }; int main(void) { struct S s; s.x = 1LL << 40; s.y = 1ULL << 63; return (s.x *= 3) == 3LL << 40 && (s.y >>= 1) == 1ULL << 62; }' compound-wide-members
+check 1 'int main(void) { unsigned long long a[1]; a[0] = 18446744073709551615ULL; return (a[0] /= 2) == 9223372036854775807ULL && (a[0] %= 7) == 0; }' compound-wide-unsigned-divmod
+check 1 'int main(void) { int a[2]; a[0] = 20; a[1] = 99; int i = 0; int result = (a[i++] += 22); return result == 42 && i == 1 && a[0] == 42 && a[1] == 99; }' compound-index-evaluated-once
+check 1 'int main(void) { int a[2]; a[0] = 20; a[1] = 99; int *p = a; int result = (*p++ += 22); return result == 42 && p == a + 1 && a[0] == 42 && a[1] == 99; }' compound-pointer-base-evaluated-once
+check 1 'struct S { int x; }; struct S *get(struct S *p, int *n) { (*n)++; return p; } int main(void) { struct S s; s.x = 14; int n = 0; int result = (get(&s, &n)->x *= 3); return result == 42 && n == 1 && s.x == 42; }' compound-call-base-evaluated-once
+check 1 'int *get(int *p, int *n) { (*n)++; return p; } int value(int *n) { (*n)++; return 22; } int main(void) { int x = 20; int n = 0; int m = 0; int result = (*get(&x, &n) += value(&m)); return result == 42 && x == 42 && n == 1 && m == 1; }' compound-both-operands-call
+check 1 'struct S { int x; }; int main(void) { struct S s; int a[1]; s.x = 0; a[0] = 7; return (s.x += (a[0] *= 6)) == 42 && s.x == 42 && a[0] == 42; }' compound-nested-assignment
+check 1 'int main(void) { int a[1]; a[0] = 20; int *p = &(a[0]); return 10 + (*p += 22) == 52 && a[0] == 42; }' compound-result-in-binary-expression
+check 1 'struct S { int *p; }; int main(void) { struct S s; int a[3]; s.p = a; return (s.p += 2) == a + 2 && s.p == a + 2 && (s.p -= 1) == a + 1; }' compound-pointer-member-scaling
+check 42 'int main(void) { int a[3]; a[1] = 42; int *p[1]; p[0] = a; p[0] += 2; return *(p[0] -= 1); }' compound-pointer-array-element
+check 42 'int main(void) { int a[3]; a[2] = 42; int *p = a; int **pp = &p; *pp += 2; return **pp; }' compound-pointer-through-dereference
+check 1 'struct S { char c; long x; }; int main(void) { struct S a[3]; struct S *p = a; struct S **pp = &p; return (*pp += 2) == a + 2 && (*pp -= 1) == a + 1; }' compound-struct-pointer-scaling
+check 42 'int main(void) { int a[3]; a[1] = 42; int *p = a + 2; int **pp = &p; char offset = -1; *pp += offset; return *p; }' compound-negative-pointer-offset
+check 1 'struct S { int a[2]; }; int main(void) { struct S s; s.a[0] = 20; s.a[1] = 99; int i = 0; return (s.a[i++] += 22) == 42 && i == 1 && s.a[1] == 99; }' compound-array-member-index-once
+check 42 'struct S { int x; }; struct O { struct S s[2]; }; int main(void) { struct O o; o.s[1].x = 14; o.s[1].x *= 3; return o.s[1].x; }' compound-nested-array-member
+check 1 'int rhs(int a, int b, int c, int d, int e, int f, int g) { return g; } int *get(int a, int b, int c, int d, int e, int f, int *p) { return p; } int main(void) { int x = 20; return 10 + (*get(0,0,0,0,0,0,&x) += rhs(0,0,0,0,0,0,22)) == 52 && x == 42; }' compound-stack-calls-and-outer-push
+check 1 'int take(int a, int b, int c, int d, int e, int f, int g) { return a + g; } int main(void) { int a[2]; a[0] = 20; a[1] = 14; return take(a[0] += 22,0,0,0,0,0,a[1] *= 3) == 84 && a[0] == 42 && a[1] == 42; }' compound-call-arguments
+
+check_error compound-pointer-plus-pointer 'int main(void) { int a[2]; int *p = a; int *q = a; p += q; return 0; }' '1:54: error: invalid operands to binary +'
+check_error compound-pointer-minus-pointer 'int main(void) { int a[2]; int *p = a; int *q = a; p -= q; return 0; }' '1:54: error: incompatible assignment type'
+check_error compound-integer-plus-pointer 'int main(void) { int a[1]; int x = 0; x += a; return 0; }' '1:41: error: incompatible assignment type'
+check_error compound-pointer-multiply 'int main(void) { int a[1]; int *p = a; p *= 2; return 0; }' '1:42: error: invalid operands to integer operator'
+check_error compound-pointer-shift 'int main(void) { int a[1]; int *p = a; p <<= 1; return 0; }' '1:42: error: invalid operands to integer operator'
+check_error compound-pointer-member-void 'struct S { void *p; }; int main(void) { struct S s; s.p += 1; return 0; }' '1:57: error: pointer arithmetic on void pointer'
+check_error compound-pointer-member-incomplete 'struct S { struct T *p; }; int main(void) { struct S s; s.p += 1; return 0; }' '1:61: error: pointer arithmetic on incomplete type'
+check_error compound-array-member-target 'struct S { int a[2]; }; int main(void) { struct S s; s.a += 1; return 0; }' '1:58: error: invalid assignment target'
+check_error compound-struct-target 'struct S { int x; }; int main(void) { struct S s; s += 1; return 0; }' '1:51: error: struct values are not supported yet'
+check_error compound-result-is-not-lvalue 'int main(void) { int a = 0; (a += 1) += 1; return 0; }' '1:38: error: invalid assignment target'
+check_error compound-result-address 'int main(void) { int a = 0; int *p = &(a += 1); return 0; }' '1:38: error: invalid address-of target'
+check_error compound-result-not-null-constant 'int main(void) { int a = 0; int *p = (a += 0); return 0; }' '1:34: error: incompatible initializer type'
+check_error compound-member-void-rhs 'void f(void); struct S { int x; }; int main(void) { struct S s; s.x += f(); return 0; }' '1:72: error: void expression used as a value'
+
 # Typed functions preserve pointer widths and check complete signatures.
 check 42 'int *identity(int *p) { return p; } int main(void) { int x = 42; return *identity(&x); }' typed-pointer-identity
 check 42 'int *identity(int *); int main(void) { int x = 42; return *identity(&x); } int *identity(int *p) { return p; }' typed-pointer-prototype
@@ -799,7 +857,7 @@ check_error member-array-increment 'struct S { int a[2]; }; int main(void) { str
 check_error member-struct-increment 'struct T { int x; }; struct S { struct T t; }; int main(void) { struct S s; ++s.t; return 0; }' '1:77: error: invalid increment target'
 check_error member-pointer-type 'struct S { char *p; }; int main(void) { struct S s; int *p = s.p; return 0; }' '1:58: error: incompatible initializer type'
 check_error member-array-address-type 'struct S { int a[2]; }; int main(void) { struct S s; int *p = &s.a; return 0; }' '1:59: error: incompatible initializer type'
-check_error member-compound-assignment 'struct S { int x; }; int main(void) { struct S s; s.x += 1; return 0; }' '1:55: error: compound assignment through pointer not supported'
+check 42 'struct S { int x; }; int main(void) { struct S s; s.x = 40; s.x += 2; return s.x; }' member-compound-assignment
 check_error member-address-rvalue 'struct S { int x; }; int main(void) { struct S s; int *p = &(s.x + 1); return 0; }' '1:60: error: invalid address-of target'
 
 # String literals have static storage and decay to pointers in value contexts.
@@ -877,7 +935,7 @@ check_error array-indirect-assignment 'int main(void) { int a[2]; (*(&a)) = a; r
 check_error array-prefix-increment 'int main(void) { int a[2]; ++a; return 0; }' '1:28: error: invalid increment target'
 check_error array-postfix-decrement 'int main(void) { int a[2]; a--; return 0; }' '1:29: error: invalid decrement target'
 check_error array-compound-assignment 'int main(void) { int a[2]; a += 1; return 0; }' '1:30: error: invalid assignment target'
-check_error array-compound-element-assignment 'int main(void) { int a[2]; a[0] += 1; return 0; }' '1:33: error: compound assignment through pointer not supported'
+check 42 'int main(void) { int a[2]; a[0] = 40; a[0] += 2; return a[0]; }' array-compound-element-assignment
 check_error array-invalid-subscript 'int main(void) { int a[2]; int b[2]; return a[b]; }' '1:46: error: subscript requires a pointer and an integer'
 check_error array-integer-subscript 'int main(void) { return 1[2]; }' '1:26: error: subscript requires a pointer and an integer'
 check_error array-void-subscript 'void f(void); int main(void) { int a[2]; return a[f()]; }' '1:50: error: subscript requires a pointer and an integer'

@@ -163,14 +163,14 @@ static void codegen_test(Type *type) {
  * Integer operands are already in %rax and %rcx. Width and signedness
  * select instructions; shifts always take their count from %cl.
  */
-static void codegen_integer_binary(AstNode *expr) {
-  bool wide = expr->type->size == 8;
+static void codegen_integer_binary(AstKind kind, Type *type) {
+  bool wide = type->size == 8;
   char suffix = wide ? 'q' : 'l';
   const char *lhs = wide ? "%rax" : "%eax";
   const char *rhs = wide ? "%rcx" : "%ecx";
   const char *op;
 
-  switch (expr->kind) {
+  switch (kind) {
   case AST_ADD:
     op = "add";
     break;
@@ -194,19 +194,19 @@ static void codegen_integer_binary(AstNode *expr) {
     rhs = "%cl";
     break;
   case AST_RSHIFT:
-    op = expr->type->is_unsigned ? "shr" : "sar";
+    op = type->is_unsigned ? "shr" : "sar";
     rhs = "%cl";
     break;
   case AST_DIV:
   case AST_MOD:
-    if (expr->type->is_unsigned) {
+    if (type->is_unsigned) {
       fprintf(out, "\txorl %%edx, %%edx\n");
       fprintf(out, "\tdiv%c %s\n", suffix, rhs);
     } else {
       fprintf(out, wide ? "\tcqto\n" : "\tcltd\n");
       fprintf(out, "\tidiv%c %s\n", suffix, rhs);
     }
-    if (expr->kind == AST_MOD)
+    if (kind == AST_MOD)
       fprintf(out, "\tmov%c %s, %s\n", suffix, wide ? "%rdx" : "%edx", lhs);
     return;
   default:
@@ -214,6 +214,13 @@ static void codegen_integer_binary(AstNode *expr) {
     exit(1);
   }
   fprintf(out, "\t%s%c %s, %s\n", op, suffix, rhs, lhs);
+}
+
+/* Pointer operands are in %rax and %rcx; sema has checked the pointee type. */
+static void codegen_pointer_offset(AstKind kind, Type *type) {
+  fprintf(out, "\timulq $%d, %%rcx\n", type->base->size);
+  fprintf(out, kind == AST_PTR_ADD ? "\taddq %%rcx, %%rax\n"
+                                  : "\tsubq %%rcx, %%rax\n");
 }
 
 static void codegen_expr(AstNode *expr) {
@@ -241,6 +248,38 @@ static void codegen_expr(AstNode *expr) {
     fprintf(out, "\tmovq %%rcx, %%rax\n");
     codegen_normalize(expr->type);
     break;
+  case AST_COMPOUND_ASSIGN: {
+    AstKind op = expr->d.compound_assign.op;
+    Type *operation_type = expr->d.compound_assign.operation_type;
+
+    /*
+     * Evaluate rhs first, as for ordinary assignment, and preserve it while
+     * computing the target address. Calls in either operand may clobber
+     * registers. Once the address is saved, load and update the object once.
+     */
+    codegen_expr(expr->d.compound_assign.rhs);
+    codegen_normalize(expr->d.compound_assign.rhs->type);
+    fprintf(out, "\tpushq %%rax\n");
+    push_depth++;
+    codegen_addr(expr->d.compound_assign.lhs);
+    fprintf(out, "\tpopq %%rcx\n");
+    push_depth--;
+    fprintf(out, "\tpushq %%rax\n");
+    push_depth++;
+    codegen_load(expr->type, "%rax");
+    codegen_normalize(operation_type);
+    if (op == AST_PTR_ADD || op == AST_PTR_SUB)
+      codegen_pointer_offset(op, operation_type);
+    else
+      codegen_integer_binary(op, operation_type);
+    fprintf(out, "\tmovq %%rax, %%rcx\n");
+    fprintf(out, "\tpopq %%rax\n");
+    push_depth--;
+    codegen_store(expr->type);
+    fprintf(out, "\tmovq %%rcx, %%rax\n");
+    codegen_normalize(expr->type);
+    break;
+  }
   case AST_CONVERT:
     codegen_expr(expr->d.unary.operand);
     if (is_integer(expr->type) &&
@@ -271,7 +310,7 @@ static void codegen_expr(AstNode *expr) {
     codegen_expr(expr->d.binary.lhs);
     fprintf(out, "\tpopq %%rcx\n");
     push_depth--;
-    codegen_integer_binary(expr);
+    codegen_integer_binary(expr->kind, expr->type);
     break;
   case AST_PTR_ADD:
   case AST_PTR_SUB: {
@@ -283,9 +322,7 @@ static void codegen_expr(AstNode *expr) {
     codegen_expr(expr->d.binary.lhs);
     fprintf(out, "\tpopq %%rcx\n");
     push_depth--;
-    fprintf(out, "\timulq $%d, %%rcx\n", expr->type->base->size);
-    fprintf(out, expr->kind == AST_PTR_ADD ? "\taddq %%rcx, %%rax\n"
-                                           : "\tsubq %%rcx, %%rax\n");
+    codegen_pointer_offset(expr->kind, expr->type);
     break;
   }
   case AST_PTR_DIFF: {

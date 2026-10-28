@@ -131,6 +131,7 @@ typedef enum {
   AST_CALL,
   AST_CASE,
   AST_COMMA,
+  AST_COMPOUND_ASSIGN,
   AST_CONDITIONAL,
   AST_CONTINUE,
   AST_CONVERT,
@@ -297,6 +298,13 @@ typedef struct AstNode {
       struct AstNode *lhs;
       struct AstNode *rhs;
     } binary;
+
+    struct {
+      struct AstNode *lhs;
+      struct AstNode *rhs; /* Converted right operand. */
+      AstKind op; /* Typed integer operation or AST_PTR_ADD/AST_PTR_SUB. */
+      Type *operation_type; /* Type before conversion back to lhs->type. */
+    } compound_assign;
   } d;
 } AstNode;
 

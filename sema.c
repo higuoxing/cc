@@ -570,16 +570,7 @@ AstNode *sema_assignment(Parser *p, Token operator, AstNode *left,
       error_at(p, loc, "pointer arithmetic on void pointer");
     if (left->type->kind == TYPE_PTR && left->type->base->size < 0)
       error_at(p, loc, "pointer arithmetic on incomplete type");
-    /*
-     * Compound assignment desugars to 'E1 = E1 <op> E2', where E1
-     * is the left operand and E2 the right one (C11 6.5.16.2p3).
-     * The standard requires the lvalue E1 to be evaluated only
-     * once, which holds here because E1 is a plain variable.
-     * lhs_copy is a fresh node: codegen walks a tree and must not
-     * see the same node twice.
-     */
     AstNode *binop;
-    AstNode *lhs_copy;
     AstKind binop_ty;
 
     switch (op) {
@@ -618,14 +609,19 @@ AstNode *sema_assignment(Parser *p, Token operator, AstNode *left,
       error_at(p, loc, "invalid assignment operator");
     }
 
-    if (left->kind != AST_VAR)
-      error_at(p, loc, "compound assignment through pointer not supported");
-
-    lhs_copy = new_expr(p, AST_VAR, left->d.variable.var->type, loc);
-    lhs_copy->d.variable.var = left->d.variable.var;
-
-    binop = sema_binary(p, binop_ty, lhs_copy, rhs, loc);
-    rhs = binop;
+    /*
+     * Reuse binary operand checks and conversions, then validate assignment
+     * back to the target type. Keep the original lvalue separately so codegen
+     * evaluates its address once (C11 6.5.16.2), without emitting binop's lhs.
+     */
+    binop = sema_binary(p, binop_ty, left, rhs, loc);
+    sema_convert_expr(p, left->type, binop, loc, "assignment");
+    node = new_expr(p, AST_COMPOUND_ASSIGN, left->type, loc);
+    node->d.compound_assign.lhs = left;
+    node->d.compound_assign.rhs = binop->d.binary.rhs;
+    node->d.compound_assign.op = binop->kind;
+    node->d.compound_assign.operation_type = binop->type;
+    return node;
   }
 
   rhs = sema_convert_expr(p, left->type, rhs, loc, "assignment");
