@@ -16,6 +16,7 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
+#include <limits.h>
 #include <stdarg.h>
 #include <stdbool.h>
 #include <stdio.h>
@@ -33,6 +34,7 @@ static void reset_function_state(Parser *p);
 static void parser_advance(Parser *p);
 static AstNode *parse_assignment(Parser *p);
 static AstNode *parse_expression(Parser *p);
+static AstNode *parse_condition(Parser *p);
 static AstNode *parse_conditional(Parser *p);
 static AstNode *parse_unary(Parser *p);
 static AstNode *parse_call_expr(Parser *p);
@@ -76,12 +78,14 @@ static LocalVar *find_local_var(Parser *p, Token name) {
 static LocalVar *declare_local_var(Parser *p, Token name, Type *type) {
   LocalVar *var;
   int size;
+  int alignment;
 
   size = type_size(type);
+  alignment = type_alignment(type);
   for (var = p->locals; var && var->scope_depth == p->scope_depth;
        var = var->next) {
     if (same_identifier(var->name, name))
-      parse_error(p, "duplicate local variable");
+      error_at(p, name, "duplicate local variable");
   }
 
   /*
@@ -91,8 +95,8 @@ static LocalVar *declare_local_var(Parser *p, Token name, Type *type) {
   if (p->scope_depth == 1)
     for (var = p->locals; var && var->scope_depth == 0; var = var->next)
       if (same_identifier(var->name, name))
-        parse_error(p, "declaration of '%.*s' shadows a parameter", name.len,
-                    name.start);
+        error_at(p, name, "declaration of '%.*s' shadows a parameter", name.len,
+                 name.start);
 
   var = (LocalVar *)calloc(1, sizeof(LocalVar));
   if (!var)
@@ -100,7 +104,10 @@ static LocalVar *declare_local_var(Parser *p, Token name, Type *type) {
   var->name = name;
   var->type = type;
   var->scope_depth = p->scope_depth;
-  p->stack_size = (p->stack_size + size - 1) / size * size + size;
+  int padding = (alignment - p->stack_size % alignment) % alignment;
+  if (size > INT_MAX - 15 - p->stack_size - padding)
+    error_at(p, name, "local variables exceed supported stack size");
+  p->stack_size += padding + size;
   var->offset = p->stack_size;
   var->next = p->locals;
   p->locals = var;
@@ -295,6 +302,7 @@ static AstNode *parse_call_expr(Parser *p) {
  * postfix-expression:
  *   primary-expression
  *   identifier '(' ')'
+ *   postfix-expression '[' expression ']'
  *   postfix-expression '++' | postfix-expression '--'
  */
 static AstNode *parse_postfix(Parser *p) {
@@ -310,8 +318,17 @@ static AstNode *parse_postfix(Parser *p) {
   }
 
   while (p->current.kind == TOKEN_PLUS_PLUS ||
-         p->current.kind == TOKEN_MINUS_MINUS) {
+         p->current.kind == TOKEN_MINUS_MINUS ||
+         p->current.kind == TOKEN_LBRACKET) {
     Token op = p->current;
+    if (op.kind == TOKEN_LBRACKET) {
+      AstNode *index;
+      parser_advance(p);
+      index = parse_expression(p);
+      parse_expect(p, TOKEN_RBRACKET, "expect ']'");
+      left = sema_subscript(p, left, index, op);
+      continue;
+    }
     AstKind kind =
         op.kind == TOKEN_PLUS_PLUS ? AST_POST_INCREMENT : AST_POST_DECREMENT;
     parser_advance(p);
@@ -442,22 +459,62 @@ static Type *parse_declspecs(Parser *p) {
 }
 
 /*
- * Consume pointer stars separately from declaration specifiers until a full
- * declarator parser handles pointers, arrays, and function declarators.
+ * declarator:
+ *   pointer_opt direct-declarator
+ * direct-declarator:
+ *   identifier
+ *   identifier '[' constant-expression ']'
+ * pointer:
+ *   '*'
+ *   '*' pointer
+ * (C11 6.7.6, supported subset; _opt means optional.)
+ *
+ * The name may be omitted for a parameter declaration; callers enforce where
+ * it is required. Only fixed-size, one-dimensional arrays are supported.
+ * Function and parenthesized declarators come later.
  */
-static Type *parse_pointer_type(Parser *p, Type *type) {
+static Type *parse_declarator(Parser *p, Type *type, Token *name) {
+  *name = (Token){0};
   while (p->current.kind == TOKEN_STAR) {
     type = pointer_to(type);
     if (!type)
       parse_error(p, "out of memory");
     parser_advance(p);
   }
+  if (p->current.kind == TOKEN_IDENTIFIER) {
+    *name = p->current;
+    parser_advance(p);
+  }
+  if (p->current.kind == TOKEN_LBRACKET) {
+    Token loc = p->current;
+    AstNode *bound;
+    int64_t length;
+    parser_advance(p);
+    if (type->kind == TYPE_VOID)
+      error_at(p, loc, "array element has void type");
+    if (p->current.kind == TOKEN_RBRACKET)
+      parse_error(p, "array bound is required");
+    bound = parse_conditional(p);
+    if (!is_integer(bound->type))
+      error_at(p, bound->loc, "array bound must have integer type");
+    length = eval_const_expr(p, bound);
+    if (length == 0 || (length < 0 && !bound->type->is_unsigned))
+      error_at(p, bound->loc, "array bound must be positive");
+    if ((uint64_t)length > (uint64_t)(INT_MAX / type_size(type)))
+      error_at(p, bound->loc, "array size exceeds supported limit");
+    parse_expect(p, TOKEN_RBRACKET, "expect ']'");
+    type = array_of(type, (int)length);
+    if (!type)
+      error_at(p, loc, "out of memory");
+    if (p->current.kind == TOKEN_LBRACKET)
+      parse_error(p, "multidimensional arrays are not supported yet");
+  }
   return type;
 }
 
 /*
  * declaration:
- *   declaration-type identifier ['=' assignment-expression] ';'
+ *   declaration-specifiers declarator ['=' assignment-expression] ';'
  * Restricted to a single declarator.
  */
 static AstNode *parse_decl(Parser *p) {
@@ -466,20 +523,21 @@ static AstNode *parse_decl(Parser *p) {
   Type *type;
 
   type = parse_declspecs(p);
-  type = parse_pointer_type(p, type);
+  type = parse_declarator(p, type, &name);
   if (type->kind == TYPE_VOID)
-    parse_error(p, "variable has void type");
+    error_at(p, name.kind == TOKEN_IDENTIFIER ? name : p->current,
+             "variable has void type");
 
-  if (p->current.kind != TOKEN_IDENTIFIER)
+  if (name.kind != TOKEN_IDENTIFIER)
     parse_error(p, "expect variable name");
 
-  name = p->current;
   decl = new_ast_node(p, AST_DECL);
+  decl->loc = name;
   decl->d.decl.var = declare_local_var(p, name, type);
-  /* Consume variable name. */
-  parser_advance(p);
 
   if (p->current.kind == TOKEN_ASSIGN) {
+    if (type->kind == TYPE_ARRAY)
+      parse_error(p, "array initializers are not supported yet");
     /* Consume '=' */
     parser_advance(p);
     decl->d.decl.init = parse_assignment(p);
@@ -842,6 +900,14 @@ static AstNode *parse_expression(Parser *p) {
 }
 
 /*
+ * Parse a controlling expression and apply scalar condition checks.
+ * The caller handles its surrounding parentheses or semicolons.
+ */
+static AstNode *parse_condition(Parser *p) {
+  return sema_check_condition(p, parse_expression(p));
+}
+
+/*
  * conditional-expression:
  *   logical-OR-expression
  *   logical-OR-expression '?' expression ':' conditional-expression
@@ -961,14 +1027,13 @@ static AstNode *parse_external_declaration(Parser *p) {
   reset_function_state(p);
   fn = new_ast_node(p, AST_FUNCTION);
   return_type = parse_declspecs(p);
-  return_type = parse_pointer_type(p, return_type);
-  if (p->current.kind != TOKEN_IDENTIFIER)
+  return_type = parse_declarator(p, return_type, &func_name);
+  if (func_name.kind != TOKEN_IDENTIFIER)
     parse_error(p, "expect function name");
 
-  fn->d.function.name = p->current;
-  func_name = p->current;
-  /* Consume <function_name> */
-  parser_advance(p);
+  fn->d.function.name = func_name;
+  if (return_type->kind == TYPE_ARRAY)
+    error_at(p, func_name, "function cannot return an array");
 
   parse_expect(p, TOKEN_LPAREN, "expect '('");
 
@@ -991,20 +1056,23 @@ static AstNode *parse_external_declaration(Parser *p) {
         param_types = types;
       }
       param_type = parse_declspecs(p);
-      param_type = parse_pointer_type(p, param_type);
+      param_type = parse_declarator(p, param_type, &param_name);
+      if (param_type->kind == TYPE_ARRAY) {
+        param_type = pointer_to(param_type->base);
+        if (!param_type)
+          parse_error(p, "out of memory");
+      }
       if (param_type->kind == TYPE_VOID)
-        parse_error(p, "parameter has void type");
+        error_at(p,
+                 param_name.kind == TOKEN_IDENTIFIER ? param_name : p->current,
+                 "parameter has void type");
       param_types[nparams] = param_type;
 
-      if (p->current.kind == TOKEN_IDENTIFIER) {
-        param_name = p->current;
+      if (param_name.kind == TOKEN_IDENTIFIER) {
         for (var = p->locals; var && var->scope_depth == 0; var = var->next) {
           if (same_identifier(var->name, param_name))
-            parse_error(p, "duplicate local variable");
+            error_at(p, param_name, "duplicate local variable");
         }
-
-        /* Consume param name */
-        parser_advance(p);
 
         param = (LocalVar *)calloc(1, sizeof(LocalVar));
         if (!param)
@@ -1071,8 +1139,7 @@ static AstNode *parse_if_stmt(Parser *p) {
   parse_expect(p, TOKEN_IF, "expect 'if'");
   parse_expect(p, TOKEN_LPAREN, "expect '('");
   if_node = new_ast_node(p, AST_IF);
-  if_node->d.if_stmt.cond = parse_expression(p);
-  sema_check_nonvoid_expr(p, if_node->d.if_stmt.cond);
+  if_node->d.if_stmt.cond = parse_condition(p);
   parse_expect(p, TOKEN_RPAREN, "expect ')'");
   if_node->d.if_stmt.then_stmt = parse_stmt(p, /*allow_decl=*/false);
   if (p->current.kind == TOKEN_ELSE) {
@@ -1094,8 +1161,7 @@ static AstNode *parse_while_stmt(Parser *p) {
   parse_expect(p, TOKEN_WHILE, "expect 'while'");
   parse_expect(p, TOKEN_LPAREN, "expect '('");
   while_node = new_ast_node(p, AST_WHILE);
-  while_node->d.while_stmt.cond = parse_expression(p);
-  sema_check_nonvoid_expr(p, while_node->d.while_stmt.cond);
+  while_node->d.while_stmt.cond = parse_condition(p);
   parse_expect(p, TOKEN_RPAREN, "expect ')'");
   ++p->loop_depth;
   while_node->d.while_stmt.body = parse_stmt(p, /*allow_decl=*/false);
@@ -1140,8 +1206,7 @@ static AstNode *parse_for_stmt(Parser *p) {
   }
 
   if (p->current.kind != TOKEN_SEMICOLON) {
-    for_node->d.for_stmt.cond = parse_expression(p);
-    sema_check_nonvoid_expr(p, for_node->d.for_stmt.cond);
+    for_node->d.for_stmt.cond = parse_condition(p);
   }
   parse_expect(p, TOKEN_SEMICOLON, "expect ';'");
 
@@ -1173,8 +1238,7 @@ static AstNode *parse_do_stmt(Parser *p) {
   --p->loop_depth;
   parse_expect(p, TOKEN_WHILE, "expect 'while'");
   parse_expect(p, TOKEN_LPAREN, "expect '('");
-  do_node->d.do_stmt.cond = parse_expression(p);
-  sema_check_nonvoid_expr(p, do_node->d.do_stmt.cond);
+  do_node->d.do_stmt.cond = parse_condition(p);
   parse_expect(p, TOKEN_RPAREN, "expect ')'");
   /* The trailing ';' is part of the do-statement itself. */
   parse_expect(p, TOKEN_SEMICOLON, "expect ';'");

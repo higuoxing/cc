@@ -56,7 +56,8 @@ Type *integer_promotion_type(Type *type) {
 /*
  * Common type after integer promotion on our LP64 target. Signed long
  * represents every unsigned int value. Long long has higher rank than long,
- * but the same width, so mixing it with unsigned long yields unsigned long long.
+ * but the same width, so mixing it with unsigned long yields unsigned long
+ * long.
  */
 Type *common_integer_type(const Type *a, const Type *b) {
   if (a->kind == TYPE_LONG_LONG || b->kind == TYPE_LONG_LONG) {
@@ -87,6 +88,8 @@ bool same_type(const Type *a, const Type *b) {
     return false;
   if (is_integer(a) && a->is_unsigned != b->is_unsigned)
     return false;
+  if (a->kind == TYPE_ARRAY)
+    return a->array_len == b->array_len && same_type(a->base, b->base);
   return a->kind != TYPE_PTR || same_type(a->base, b->base);
 }
 
@@ -101,6 +104,24 @@ bool compatible_pointers(const Type *a, const Type *b) {
  * derivable from its kind. Void must never reach this.
  */
 int type_size(const Type *type) { return type->size; }
+
+int type_alignment(const Type *type) {
+  return type->kind == TYPE_ARRAY ? type_alignment(type->base) : type->size;
+}
+
+/*
+ * The caller validates a positive length and a total size representable by int.
+ */
+Type *array_of(Type *base, int length) {
+  Type *type = calloc(1, sizeof(Type));
+  if (!type)
+    return NULL;
+  type->kind = TYPE_ARRAY;
+  type->base = base;
+  type->array_len = length;
+  type->size = base->size * length;
+  return type;
+}
 
 Type *pointer_to(Type *base) {
   Type *type;

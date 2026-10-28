@@ -36,6 +36,35 @@ Function *find_function(Parser *p, Token name) {
 
 static AstNode *new_expr(Parser *p, AstKind kind, Type *type, Token loc);
 
+/*
+ * Convert an operand used as a value without promoting its integer type.
+ * Array decay is the only explicit value conversion needed by our types so far.
+ */
+static AstNode *convert_to_value(Parser *p, AstNode *expr) {
+  AstNode *node;
+  Type *type;
+  if (expr->type->kind != TYPE_ARRAY)
+    return expr;
+  type = pointer_to(expr->type->base);
+  if (!type)
+    error_at(p, expr->loc, "out of memory");
+  node = new_expr(p, AST_CONVERT, type, expr->loc);
+  node->d.unary.operand = expr;
+  return node;
+}
+
+/*
+ * Controlling expressions must have scalar type. Array operands first
+ * convert to pointers; preserve integer widths for codegen's zero test.
+ */
+AstNode *sema_check_condition(Parser *p, AstNode *expr) {
+  expr = convert_to_value(p, expr);
+  sema_check_nonvoid_expr(p, expr);
+  if (!is_integer(expr->type) && expr->type->kind != TYPE_PTR)
+    error_at(p, expr->loc, "condition must have scalar type");
+  return expr;
+}
+
 static AstNode *integer_promotion(Parser *p, AstNode *expr) {
   AstNode *node;
   Type *type = integer_promotion_type(expr->type);
@@ -44,6 +73,13 @@ static AstNode *integer_promotion(Parser *p, AstNode *expr) {
   node = new_expr(p, AST_CONVERT, type, expr->loc);
   node->d.unary.operand = expr;
   return node;
+}
+
+/*
+ * Arithmetic operands and default arguments also undergo integer promotion.
+ */
+static AstNode *promote_operand(Parser *p, AstNode *expr) {
+  return integer_promotion(p, convert_to_value(p, expr));
 }
 
 AstNode *sema_switch_condition(Parser *p, AstNode *expr) {
@@ -164,6 +200,7 @@ static bool null_pointer_constant(Parser *p, AstNode *expr) {
 AstNode *sema_convert_expr(Parser *p, Type *target, AstNode *expr, Token loc,
                            const char *context) {
   AstNode *node;
+  expr = convert_to_value(p, expr);
   sema_check_nonvoid_expr(p, expr);
   if (same_type(target, expr->type))
     return expr;
@@ -191,7 +228,7 @@ void sema_check_call(Parser *p, Function *func, AstNode *call, int nargs) {
       *link =
           sema_convert_expr(p, func->param_types[i], arg, arg->loc, "argument");
     else
-      *link = integer_promotion(p, arg);
+      *link = promote_operand(p, arg);
     (*link)->next = next;
   }
 }
@@ -209,6 +246,10 @@ void sema_check_return(Parser *p, AstNode *stmt) {
 }
 
 static bool is_lvalue(AstKind ty) { return ty == AST_VAR || ty == AST_DEREF; }
+
+static bool is_modifiable_lvalue(const AstNode *expr) {
+  return is_lvalue(expr->kind) && expr->type->kind != TYPE_ARRAY;
+}
 
 static bool is_increment_op(AstKind ty) {
   return ty == AST_PRE_INCREMENT || ty == AST_POST_INCREMENT;
@@ -246,7 +287,8 @@ AstNode *sema_integer_literal(Parser *p, Token loc) {
     else if (value <= INT64_MAX)
       type = &builtin_type_long_long;
     else
-      error_at(p, loc, "integer literal out of range for supported signed types");
+      error_at(p, loc,
+               "integer literal out of range for supported signed types");
   } else if (is_unsigned)
     type = !is_long && value <= UINT32_MAX ? &builtin_type_unsigned
                                            : &builtin_type_unsigned_long;
@@ -270,106 +312,191 @@ AstNode *sema_unary(Parser *p, AstKind op, AstNode *operand, Token loc) {
   AstNode *node;
   Type *type;
   sema_check_nonvoid_expr(p, operand);
-  if (((op == AST_PRE_INCREMENT || op == AST_PRE_DECREMENT ||
-        op == AST_POST_INCREMENT || op == AST_POST_DECREMENT) &&
-       !is_lvalue(operand->kind)) ||
-      (op == AST_ADDR && !is_lvalue(operand->kind))) {
-    /* Report at the operator, not at the token after the operand. */
-    error_at(p, loc, "invalid %s target",
-             op == AST_ADDR        ? "address-of"
-             : is_increment_op(op) ? "increment"
-                                   : "decrement");
-  }
 
-  if ((op == AST_PRE_INCREMENT || op == AST_PRE_DECREMENT ||
-       op == AST_POST_INCREMENT || op == AST_POST_DECREMENT) &&
-      operand->type->kind == TYPE_PTR && operand->type->base->kind == TYPE_VOID)
-    error_at(p, loc, "pointer arithmetic on void pointer");
-
-  if (op == AST_DEREF && (operand->type->kind != TYPE_PTR ||
-                          operand->type->base->kind == TYPE_VOID))
-    error_at(p, loc, "invalid deref target");
-
-  if (op == AST_NEG || op == AST_BITWISE_NOT || op == AST_LOGICAL_NOT)
-    operand = integer_promotion(p, operand);
-
-  if (op == AST_ADDR) {
+  switch (op) {
+  case AST_NEG:
+  case AST_BITWISE_NOT:
+    operand = promote_operand(p, operand);
+    if (!is_integer(operand->type))
+      error_at(p, loc, "invalid operand to unary %s",
+               op == AST_NEG ? "-" : "~");
+    type = operand->type;
+    break;
+  case AST_LOGICAL_NOT:
+    operand = sema_check_condition(p, operand);
+    type = &builtin_type_int;
+    break;
+  case AST_DEREF:
+    operand = convert_to_value(p, operand);
+    if (operand->type->kind != TYPE_PTR ||
+        operand->type->base->kind == TYPE_VOID)
+      error_at(p, loc, "invalid deref target");
+    type = operand->type->base;
+    break;
+  case AST_ADDR:
+    if (!is_lvalue(operand->kind))
+      error_at(p, loc, "invalid address-of target");
     type = pointer_to(operand->type);
     if (!type)
       error_at(p, loc, "out of memory");
-  } else if (op == AST_DEREF) {
-    type = operand->type->base;
-  } else if (op == AST_LOGICAL_NOT) {
-    type = &builtin_type_int;
-  } else {
+    break;
+  case AST_PRE_INCREMENT:
+  case AST_PRE_DECREMENT:
+  case AST_POST_INCREMENT:
+  case AST_POST_DECREMENT:
+    if (!is_modifiable_lvalue(operand))
+      error_at(p, loc, "invalid %s target",
+               is_increment_op(op) ? "increment" : "decrement");
+    if (operand->type->kind == TYPE_PTR &&
+        operand->type->base->kind == TYPE_VOID)
+      error_at(p, loc, "pointer arithmetic on void pointer");
     type = operand->type;
+    break;
+  default:
+    error_at(p, loc, "invalid unary operator");
   }
+
   node = new_expr(p, op, type, loc);
   node->d.unary.operand = operand;
   return node;
 }
 
-AstNode *sema_binary(Parser *p, AstKind kind, AstNode *left, AstNode *right,
-                     Token loc) {
-  AstNode *node;
-  Type *type = &builtin_type_int;
-  if (kind != AST_COMMA) {
-    sema_check_nonvoid_expr(p, left);
-    sema_check_nonvoid_expr(p, right);
-    left = integer_promotion(p, left);
-    right = integer_promotion(p, right);
-  }
-  if (is_integer(left->type) && is_integer(right->type) && kind != AST_COMMA &&
-      kind != AST_LOGICAL_AND && kind != AST_LOGICAL_OR) {
-    if (kind == AST_LSHIFT || kind == AST_RSHIFT) {
-      type = left->type;
-    } else {
-      type = common_integer_type(left->type, right->type);
-      left = sema_convert_expr(p, type, left, loc, "operand");
-      right = sema_convert_expr(p, type, right, loc, "operand");
-      if (kind == AST_LT || kind == AST_LE || kind == AST_GT ||
-          kind == AST_GE || kind == AST_EQ || kind == AST_NE)
-        type = &builtin_type_int;
-    }
-  }
-  if (kind == AST_ADD || kind == AST_SUB) {
-    if ((left->type->kind == TYPE_PTR && left->type->base->kind == TYPE_VOID) ||
-        (right->type->kind == TYPE_PTR && right->type->base->kind == TYPE_VOID))
-      error_at(p, loc, "pointer arithmetic on void pointer");
-    /* 'int + ptr' is 'ptr + int' (C11 6.5.6); normalize the operands. */
-    if (kind == AST_ADD && left->type->kind != TYPE_PTR &&
-        right->type->kind == TYPE_PTR) {
-      AstNode *tmp = left;
-      left = right;
-      right = tmp;
-    }
-
-    /*
-     * The operand types decide the operation once and for all; codegen
-     * maps each kind to instructions without re-checking types.
-     */
-    if (left->type->kind == TYPE_PTR && right->type->kind == TYPE_PTR) {
-      if (kind != AST_SUB) {
-        error_at(p, loc, "invalid operands to binary +");
-      }
-      /*
-       * Pointer difference has type ptrdiff_t, signed long on our target.
-       */
-      node = new_expr(p, AST_PTR_DIFF, &builtin_type_long, loc);
-    } else if (left->type->kind == TYPE_PTR) {
-      node = new_expr(p, kind == AST_ADD ? AST_PTR_ADD : AST_PTR_SUB,
-                      left->type, loc);
-    } else if (right->type->kind == TYPE_PTR) {
-      error_at(p, loc, "invalid operands to binary -");
-    } else {
-      node = new_expr(p, kind, type, loc);
-    }
-  } else {
-    node = new_expr(p, kind, kind == AST_COMMA ? right->type : type, loc);
-  }
+static AstNode *new_binary_expr(Parser *p, AstKind kind, AstNode *left,
+                                AstNode *right, Type *type, Token loc) {
+  AstNode *node = new_expr(p, kind, type, loc);
   node->d.binary.lhs = left;
   node->d.binary.rhs = right;
   return node;
+}
+
+/*
+ * Promote integer operands and convert both to their common arithmetic type.
+ * Shifts use separate promotions and must not use this common-type conversion.
+ */
+static Type *convert_integer_operands(Parser *p, AstNode **left,
+                                      AstNode **right, Token loc) {
+  Type *type;
+  *left = promote_operand(p, *left);
+  *right = promote_operand(p, *right);
+  if (!is_integer((*left)->type) || !is_integer((*right)->type))
+    error_at(p, loc, "invalid operands to integer operator");
+  type = common_integer_type((*left)->type, (*right)->type);
+  *left = sema_convert_expr(p, type, *left, loc, "operand");
+  *right = sema_convert_expr(p, type, *right, loc, "operand");
+  return type;
+}
+
+/*
+ * Addition and subtraction select integer arithmetic, scaled pointer offsets,
+ * or pointer difference. Normalize integer + pointer to pointer + integer.
+ */
+static AstNode *sema_additive(Parser *p, AstKind kind, AstNode *left,
+                              AstNode *right, Token loc) {
+  Type *type;
+  if (is_integer(left->type) && is_integer(right->type)) {
+    type = convert_integer_operands(p, &left, &right, loc);
+    return new_binary_expr(p, kind, left, right, type, loc);
+  }
+
+  left = promote_operand(p, left);
+  right = promote_operand(p, right);
+  if ((left->type->kind == TYPE_PTR && left->type->base->kind == TYPE_VOID) ||
+      (right->type->kind == TYPE_PTR && right->type->base->kind == TYPE_VOID))
+    error_at(p, loc, "pointer arithmetic on void pointer");
+  if (kind == AST_ADD && left->type->kind != TYPE_PTR &&
+      right->type->kind == TYPE_PTR) {
+    AstNode *tmp = left;
+    left = right;
+    right = tmp;
+  }
+
+  if (left->type->kind == TYPE_PTR && right->type->kind == TYPE_PTR) {
+    if (kind != AST_SUB)
+      error_at(p, loc, "invalid operands to binary +");
+    if (!same_type(left->type->base, right->type->base))
+      error_at(p, loc, "pointer subtraction requires compatible types");
+    /* Pointer difference has type ptrdiff_t, signed long on our target. */
+    kind = AST_PTR_DIFF;
+    type = &builtin_type_long;
+  } else if (left->type->kind == TYPE_PTR) {
+    if (!is_integer(right->type))
+      error_at(p, loc, "pointer offset must have integer type");
+    kind = kind == AST_ADD ? AST_PTR_ADD : AST_PTR_SUB;
+    type = left->type;
+  } else {
+    error_at(p, loc, "invalid operands to binary -");
+  }
+  return new_binary_expr(p, kind, left, right, type, loc);
+}
+
+AstNode *sema_binary(Parser *p, AstKind kind, AstNode *left, AstNode *right,
+                     Token loc) {
+  Type *type;
+  if (kind != AST_COMMA) {
+    sema_check_nonvoid_expr(p, left);
+    sema_check_nonvoid_expr(p, right);
+  }
+
+  switch (kind) {
+  case AST_COMMA:
+    left = convert_to_value(p, left);
+    right = convert_to_value(p, right);
+    type = right->type;
+    break;
+  case AST_LOGICAL_AND:
+  case AST_LOGICAL_OR:
+    left = sema_check_condition(p, left);
+    right = sema_check_condition(p, right);
+    type = &builtin_type_int;
+    break;
+  case AST_MUL:
+  case AST_DIV:
+  case AST_MOD:
+  case AST_BIT_AND:
+  case AST_BIT_OR:
+  case AST_BIT_XOR:
+    type = convert_integer_operands(p, &left, &right, loc);
+    break;
+  case AST_LSHIFT:
+  case AST_RSHIFT:
+    left = promote_operand(p, left);
+    right = promote_operand(p, right);
+    if (!is_integer(left->type) || !is_integer(right->type))
+      error_at(p, loc, "invalid operands to integer operator");
+    type = left->type;
+    break;
+  case AST_ADD:
+  case AST_SUB:
+    return sema_additive(p, kind, left, right, loc);
+  case AST_LT:
+  case AST_LE:
+  case AST_GT:
+  case AST_GE:
+  case AST_EQ:
+  case AST_NE:
+    if (is_integer(left->type) && is_integer(right->type)) {
+      convert_integer_operands(p, &left, &right, loc);
+    } else {
+      left = promote_operand(p, left);
+      right = promote_operand(p, right);
+    }
+    type = &builtin_type_int;
+    break;
+  default:
+    error_at(p, loc, "invalid binary operator");
+  }
+  return new_binary_expr(p, kind, left, right, type, loc);
+}
+
+/* C11 6.5.2.1: E1[E2] is identical to *((E1) + (E2)). */
+AstNode *sema_subscript(Parser *p, AstNode *base, AstNode *index, Token loc) {
+  base = convert_to_value(p, base);
+  index = convert_to_value(p, index);
+  if (!((base->type->kind == TYPE_PTR && is_integer(index->type)) ||
+        (is_integer(base->type) && index->type->kind == TYPE_PTR)))
+    error_at(p, loc, "subscript requires a pointer and an integer");
+  return sema_unary(p, AST_DEREF, sema_binary(p, AST_ADD, base, index, loc),
+                    loc);
 }
 
 AstNode *sema_assignment(Parser *p, Token operator, AstNode *left,
@@ -377,7 +504,7 @@ AstNode *sema_assignment(Parser *p, Token operator, AstNode *left,
   TokenKind op = operator.kind;
   Token loc = operator;
   AstNode *node;
-  if (!is_lvalue(left->kind))
+  if (!is_modifiable_lvalue(left))
     error_at(p, loc, "invalid assignment target");
   sema_check_nonvoid_expr(p, rhs);
   if (op != TOKEN_ASSIGN) {
@@ -452,10 +579,13 @@ AstNode *sema_conditional(Parser *p, AstNode *cond, AstNode *then_expr,
                           AstNode *else_expr, Token loc) {
   Type *type;
   AstNode *node;
-  sema_check_nonvoid_expr(p, cond);
+  cond = sema_check_condition(p, cond);
   if (is_integer(then_expr->type) && is_integer(else_expr->type)) {
-    then_expr = integer_promotion(p, then_expr);
-    else_expr = integer_promotion(p, else_expr);
+    then_expr = promote_operand(p, then_expr);
+    else_expr = promote_operand(p, else_expr);
+  } else {
+    then_expr = convert_to_value(p, then_expr);
+    else_expr = convert_to_value(p, else_expr);
   }
   type = then_expr->type;
   if (is_integer(type) && is_integer(else_expr->type)) {
@@ -508,7 +638,7 @@ static int64_t checked_integer(Parser *p, Type *type, int64_t val) {
   return val;
 }
 
-/* Evaluate an integer constant expression (C11 6.6), used for case labels. */
+/* Evaluate an integer constant expression (C11 6.6). */
 int64_t eval_const_expr(Parser *p, AstNode *expr) {
   int64_t lhs, rhs;
   bool unsigned_comparison;
@@ -568,7 +698,7 @@ int64_t eval_const_expr(Parser *p, AstNode *expr) {
     break;
   default:
     /* AST_VAR, AST_ASSIGN, increments, and so on are not constant. */
-    parse_error(p, "case label is not an integer constant");
+    parse_error(p, "not an integer constant expression");
   }
 
   lhs = eval_const_expr(p, expr->d.binary.lhs);

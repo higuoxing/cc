@@ -27,6 +27,7 @@ typedef enum {
   TYPE_INT,
   TYPE_LONG,
   TYPE_LONG_LONG,
+  TYPE_ARRAY,
   TYPE_PTR,
   TYPE_VOID,
 } TypeKind;
@@ -35,7 +36,8 @@ typedef struct Type {
   TypeKind kind;
   int size; /* In bytes. */
   bool is_unsigned; /* Meaningful for integer types only. */
-  struct Type *base; /* Pointed-to type for TYPE_PTR */
+  struct Type *base; /* Element type for TYPE_ARRAY; pointed-to type for TYPE_PTR. */
+  int array_len; /* Element count for TYPE_ARRAY. */
 } Type;
 
 extern Type builtin_type_char;
@@ -56,6 +58,8 @@ extern Type *common_integer_type(const Type *a, const Type *b);
 extern bool same_type(const Type *a, const Type *b);
 extern bool compatible_pointers(const Type *a, const Type *b);
 extern int type_size(const Type *type);
+extern int type_alignment(const Type *type);
 extern Type *pointer_to(Type *base);
+extern Type *array_of(Type *base, int length);
 
 #endif

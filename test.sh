@@ -630,6 +630,99 @@ check_error character-literal-raw-newline $'int main(void) { return \'\n\'; }' "
 check_error character-literal-raw-crlf $'int main(void) { return \'\r\n\'; }' "1:25: error: unterminated character literal"
 check_error character-literal-escaped-newline $'int main(void) { return \'\\\n\'; }' "1:25: error: unterminated character literal"
 
+# Fixed-size array declarations and array parameter adjustment.
+for spec in 'char' 'unsigned char' 'short' 'unsigned short' 'int' 'unsigned' \
+    'long' 'unsigned long' 'long long' 'unsigned long long'; do
+    check 42 "int main(void) { $spec a[3]; return 42; }" "array-declaration-$spec"
+done
+check 42 'int main(void) { int *a[3]; void *b[2]; int **c[1]; return 42; }' array-pointer-elements
+check 42 'int main(void) { int a[1 + 2 * 3]; char b[1 ? 5 : 2]; short c[1U << 3]; return 42; }' array-constant-bounds
+check 42 'int main(void) { int a[3]; { char a[5]; } int x = 42; return x; }' array-scope-and-following-local
+check 42 'int main(void) { for (int a[3]; 0;) ; return 42; }' array-for-declaration
+check 42 'int f(int a[1]) { return *a; } int main(void) { int x = 42; return f(&x); }' array-parameter-definition
+check 42 'int f(int [3]); int f(int *p) { return *p; } int main(void) { int x = 42; return f(&x); }' array-unnamed-parameter
+check 42 'int f(int a[2]); int f(int a[7]); int f(int *a) { return *a; } int main(void) { int x = 42; return f(&x); }' array-parameter-compatible-bounds
+check 42 'int *f(int *a[1]) { return *a; } int main(void) { int x = 42; int *p = &x; return *f(&p); }' array-pointer-parameter
+check 42 'int f(char a[1]) { *a = 42; return *a; } int main(void) { char x; return f(&x); }' array-char-parameter
+
+check_error array-zero-bound 'int main(void) { int a[0]; return 0; }' '1:24: error: array bound must be positive'
+check_error array-negative-bound 'int main(void) { int a[-1]; return 0; }' '1:24: error: array bound must be positive'
+check_error array-missing-bound 'int main(void) { int a[]; return 0; }' '1:24: error: array bound is required'
+check_error array-variable-bound 'int main(void) { int n = 3; int a[n]; return 0; }' '1:36: error: not an integer constant expression'
+check_error array-call-bound 'int f(void); int main(void) { int a[f()]; return 0; }' '1:40: error: not an integer constant expression'
+check_error array-pointer-bound 'int main(void) { int n; int a[&n]; return 0; }' '1:31: error: array bound must have integer type'
+check_error array-void-element 'int main(void) { void a[3]; return 0; }' '1:24: error: array element has void type'
+check_error array-missing-rbracket 'int main(void) { int a[3; return 0; }' '1:25: error: expect '\'']'\'''
+check_error array-large-bound 'int main(void) { int a[536870912]; return 0; }' '1:24: error: array size exceeds supported limit'
+check_error array-unsigned-large-bound 'int main(void) { char a[18446744073709551615ULL]; return 0; }' '1:25: error: array size exceeds supported limit'
+check_error array-stack-overflow 'int main(void) { char a[2147483647]; return 0; }' '1:23: error: local variables exceed supported stack size'
+check_error array-total-stack-overflow 'int main(void) { char a[2147483620]; int b[10]; return 0; }' '1:42: error: local variables exceed supported stack size'
+check_error array-multidimensional 'int main(void) { int a[2][3]; return 0; }' '1:26: error: multidimensional arrays are not supported yet'
+check_error array-initializer 'int main(void) { int a[2] = {1, 2}; return 0; }' '1:27: error: array initializers are not supported yet'
+check_error array-function-return 'int f[3](void);' '1:5: error: function cannot return an array'
+check_error array-parameter-conflict 'int f(int a[3]); int f(char *a);' '1:22: error: conflicting declaration of function '\''f'\'''
+
+# Array expressions, element access, and pointer conversion.
+for spec in 'char' 'unsigned char' 'short' 'unsigned short' 'int' 'unsigned' 'long' 'unsigned long' 'long long' 'unsigned long long'; do
+    check 42 "int main(void) { $spec a[3]; a[0] = 7; a[1] = 11; a[2] = 24; return a[0] + a[1] + a[2]; }" "array-elements-$spec"
+done
+check 1 'int main(void) { char a[2]; a[0] = 255; a[1] = 42; return a[0] == -1 && a[1] == 42; }' array-signed-char
+check 1 'int main(void) { unsigned char a[2]; a[0] = 511; a[1] = 42; return a[0] == 255 && a[1] == 42; }' array-unsigned-char
+check 1 'int main(void) { short a[2]; a[0] = 65535; a[1] = 42; return a[0] == -1 && a[1] == 42; }' array-signed-short
+check 1 'int main(void) { unsigned short a[2]; a[0] = 131071; a[1] = 42; return a[0] == 65535 && a[1] == 42; }' array-unsigned-short
+check 1 'int main(void) { long long a[2]; a[0] = 1LL << 40; a[1] = -1; return a[0] >> 40 == 1 && a[1] < 0; }' array-wide-values
+check 1 'int main(void) { unsigned long long a[2]; a[0] = 18446744073709551615ULL; a[1] = 1ULL << 63; return a[0] / 2 == 9223372036854775807LL && a[1] >> 63 == 1; }' array-unsigned-wide-values
+check 42 'int main(void) { int a[3]; int *p = a; *(p + 2) = 42; return a[2]; }' array-pointer-initializer
+check 42 'int main(void) { int a[3]; int *p; p = a; p[1] = 42; return *(a + 1); }' array-pointer-assignment
+check 42 'int main(void) { int a[3]; 2[a] = 42; return a[2]; }' array-reversed-subscript
+check 42 'int main(void) { int a[3]; a[0] = 42; int *p = a + 2; long n = -2; return p[n]; }' array-negative-index
+check 42 'int main(void) { int a[3]; unsigned long n = 2; a[n] = 42; return a[2U]; }' array-unsigned-index
+check 1 'int main(void) { int a[3]; return a + 3 - a == 3 && (&a + 1) - &a == 1; }' array-pointer-scaling
+check 42 'int main(void) { int a[3]; (&a)[0][2] = 42; return (*(&a))[2]; }' array-address-preserves-type
+check 42 'int main(void) { int a[2]; int *p = &a[1]; *p = 42; return a[1]; }' array-element-address
+check 42 'int main(void) { int a[2]; int *p = (a); p[0] = 42; return (*(&(a)))[0]; }' array-parenthesized-address
+check 1 'int main(void) { int a[2]; a[0] = 40; a[1] = 42; return a[0]++ == 40 && ++a[0] == 42 && a[1]-- == 42 && --a[1] == 40; }' array-element-increment
+check 1 'int main(void) { int a[2]; int i = 0; a[i++] = 41; i = 0; return a[i++]++ == 41 && i == 1 && a[0] == 42; }' array-index-evaluated-once
+check 42 'int *base(int *p, int *n) { (*n)++; return p; } int main(void) { int a[2]; int n = 0; base(a, &n)[1] = 42; return n == 1 ? a[1] : 0; }' array-base-evaluated-once
+check 42 'int main(void) { int a[2]; a[0] = 7; a[1] = 42; int i = 0; return a[(i = 1, i)]; }' array-comma-index
+check 42 'int sum(int a[3]) { return a[0] + a[1] + a[2]; } int main(void) { int a[3]; a[0] = 7; a[1] = 11; a[2] = 24; return sum(a); }' array-call-argument
+check 42 'int f(); int main(void) { int a[1]; a[0] = 42; return f(a); } int f(int *p) { return p[0]; }' array-default-argument-conversion
+check 42 'int f(int x, int y, int z, int u, int v, int w, int *p) { return p[0]; } int main(void) { int a[1]; a[0] = 42; return f(0,0,0,0,0,0,a); }' array-stack-argument
+check 42 'int *id(int *p) { return p; } int main(void) { int a[2]; a[1] = 42; return id(a)[1]; }' array-subscript-call-result
+check 42 'void *id(void *p) { return p; } int main(void) { int a[1]; a[0] = 42; int *p = id(a); return *p; }' array-void-pointer-conversion
+check 42 'int main(void) { int a[2]; int b[2]; a[0] = 1; b[0] = 42; return (0 ? a : b)[0]; }' array-conditional-conversion
+check 42 'int main(void) { int a[2]; a[0] = 42; return (0, a)[0]; }' array-comma-conversion
+check 1 'int main(void) { int a[2]; return a == &a[0] && a != 0 && !!a && (a && a) && (0 || a); }' array-comparisons-and-logical
+check 42 'int main(void) { int a[1]; a[0] = 42; if (a) return a[0]; return 0; }' array-if-condition
+check 42 'int main(void) { char a[1]; a[0] = 42; return a ? a[0] : 0; }' array-conditional-condition
+check 42 'int main(void) { int a[1]; a[0] = 42; while (a) return a[0]; return 0; }' array-while-condition
+check 42 'int main(void) { int a[1]; a[0] = 42; for (; a;) return a[0]; return 0; }' array-for-condition
+check 1 'int main(void) { int a[1]; int n = 0; do { n++; } while (n < 2 && a); return n == 2; }' array-do-condition
+check 1 'int main(void) { int a[1]; int n = 0; do { if (++n == 2) return 1; } while (a); return 0; }' array-do-direct-condition
+check 42 'int main(void) { int a[2]; int b[2]; int *p[2]; p[0] = a; p[1] = b; p[1][1] = 42; return b[1]; }' array-pointer-elements
+check 42 'int main(void) { int a[2]; int *p[1]; p[0] = a; (*p)[1] = 42; return a[1]; }' array-pointer-element-deref
+check 42 'int main(void) { int a[2]; a[0] = 42; { int a[1]; a[0] = 7; } return a[0]; }' array-shadowing
+check 42 'int main(void) { char c = 7; int a[3]; char d = 9; long b[2]; a[2] = 12; b[1] = 14; return c + a[2] + d + b[1]; }' array-storage-separation
+check 42 'int main(void) { int a[1]; a; *(&a); a[0] = 42; return a[0]; }' array-discarded-expression
+
+check_error array-assignment 'int main(void) { int a[2]; int b[2]; a = b; return 0; }' '1:40: error: invalid assignment target'
+check_error array-indirect-assignment 'int main(void) { int a[2]; (*(&a)) = a; return 0; }' '1:36: error: invalid assignment target'
+check_error array-prefix-increment 'int main(void) { int a[2]; ++a; return 0; }' '1:28: error: invalid increment target'
+check_error array-postfix-decrement 'int main(void) { int a[2]; a--; return 0; }' '1:29: error: invalid decrement target'
+check_error array-compound-assignment 'int main(void) { int a[2]; a += 1; return 0; }' '1:30: error: invalid assignment target'
+check_error array-compound-element-assignment 'int main(void) { int a[2]; a[0] += 1; return 0; }' '1:33: error: compound assignment through pointer not supported'
+check_error array-invalid-subscript 'int main(void) { int a[2]; int b[2]; return a[b]; }' '1:46: error: subscript requires a pointer and an integer'
+check_error array-integer-subscript 'int main(void) { return 1[2]; }' '1:26: error: subscript requires a pointer and an integer'
+check_error array-void-subscript 'void f(void); int main(void) { int a[2]; return a[f()]; }' '1:50: error: subscript requires a pointer and an integer'
+check_error array-subscript-missing-rbracket 'int main(void) { int a[2]; return a[0; }' '1:38: error: expect '\'']'\'''
+check_error array-invalid-product 'int main(void) { int a[2]; return a * 2; }' '1:37: error: invalid operands to integer operator'
+check_error array-invalid-negation 'int main(void) { int a[2]; return -a; }' '1:35: error: invalid operand to unary -'
+check_error array-invalid-complement 'int main(void) { int a[2]; return ~a; }' '1:35: error: invalid operand to unary ~'
+check_error array-invalid-return 'int main(void) { int a[2]; return a; }' '1:28: error: incompatible return type'
+check_error array-pointer-to-array-mismatch 'int main(void) { int a[2]; int *p = &a; return 0; }' '1:33: error: incompatible initializer type'
+check_error array-call-type-mismatch 'int f(char *p); int main(void) { int a[2]; return f(a); }' '1:53: error: incompatible argument type'
+check_error array-incompatible-subtraction 'int main(void) { int a[2]; char b[2]; return a - b; }' '1:48: error: pointer subtraction requires compatible types'
+
 # Long long literal types and boundaries.
 check 1 'int main(void) { return 1LL << 40 == 1099511627776L; }' literal-long-long-width
 check 1 'int main(void) { return 1LL - 2 < 0 && 0ll == 0; }' literal-long-long-signed
@@ -1155,7 +1248,7 @@ check_error duplicate-default \
 	    '1:38: error: multiple default labels in one switch'
 check_error case-not-constant \
 	    'int main() { int a; switch (1) { case a: ; } }' \
-	    '1:40: error: case label is not an integer constant'
+	    '1:40: error: not an integer constant expression'
 check_error decl-as-if-body 'int main() { if (1) int a = 1; return 0; }' \
 	    '1:21: error: expect statement'
 check_error decl-as-else-body 'int main() { if (1) ; else int b = 2; }' \

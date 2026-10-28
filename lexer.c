@@ -431,6 +431,16 @@ Token lexer_next_token(Lexer *l) {
     tok.len = 1;
     lexer_advance(l);
     return tok;
+  case '[':
+    tok.kind = TOKEN_LBRACKET;
+    tok.len = 1;
+    lexer_advance(l);
+    return tok;
+  case ']':
+    tok.kind = TOKEN_RBRACKET;
+    tok.len = 1;
+    lexer_advance(l);
+    return tok;
   case '~':
     tok.kind = TOKEN_TILDE;
     tok.len = 1;

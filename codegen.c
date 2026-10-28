@@ -189,16 +189,14 @@ static void codegen_integer_binary(AstNode *expr) {
 static void codegen_expr(AstNode *expr) {
   switch (expr->kind) {
   case AST_VAR:
+  case AST_DEREF:
     codegen_addr(expr);
-    codegen_load(expr->type, "%rax");
+    if (expr->type->kind != TYPE_ARRAY)
+      codegen_load(expr->type, "%rax");
     break;
   case AST_ADDR:
     /* The address is the value. */
     codegen_addr(expr->d.unary.operand);
-    break;
-  case AST_DEREF:
-    codegen_expr(expr->d.unary.operand);
-    codegen_load(expr->type, "%rax");
     break;
   case AST_ASSIGN:
     codegen_expr(expr->d.binary.rhs);

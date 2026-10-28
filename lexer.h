@@ -53,6 +53,7 @@ typedef enum {
   TOKEN_INT, /* 'int' */
   TOKEN_INT_LITERAL,
   TOKEN_LBRACE,      /* '{' */
+  TOKEN_LBRACKET,    /* '[' */
   TOKEN_LESS,        /* '<' */
   TOKEN_LESS_EQ,     /* '<=' */
   TOKEN_LONG,        /* 'long' */
@@ -71,6 +72,7 @@ typedef enum {
   TOKEN_PLUS_PLUS,   /* '++' */
   TOKEN_QUESTION,    /* '?' */
   TOKEN_RBRACE,      /* '}' */
+  TOKEN_RBRACKET,    /* ']' */
   TOKEN_RESERVED,
   TOKEN_RETURN,
   TOKEN_RPAREN,    /* ')' */
