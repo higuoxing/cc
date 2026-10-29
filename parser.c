@@ -56,6 +56,7 @@ static AstNode *parse_switch_stmt(Parser *p);
 static AstNode *parse_case_stmt(Parser *p);
 static AstNode *parse_default_stmt(Parser *p);
 static AstNode *parse_stmt(Parser *p, bool allow_decl);
+static AstNode *parse_compound_stmt(Parser *p);
 static AstNode *parse_block(Parser *p);
 static AstNode *parse_external_declaration(Parser *p);
 static Type *parse_declspecs(Parser *p);
@@ -65,7 +66,7 @@ static Type *parse_type_name(Parser *p);
 static bool is_type_specifier(TokenKind kind) {
   return kind == TOKEN_CHAR || kind == TOKEN_SHORT || kind == TOKEN_INT ||
          kind == TOKEN_LONG || kind == TOKEN_UNSIGNED || kind == TOKEN_VOID ||
-         kind == TOKEN_STRUCT;
+         kind == TOKEN_STRUCT || kind == TOKEN_ENUM;
 }
 
 /* assignment-operator: = += -= *= /= %= <<= >>= &= ^= |=  (C11 6.5.16) */
@@ -88,6 +89,7 @@ static LocalVar *find_local_var(Parser *p, Token name) {
 
 static LocalVar *declare_local_var(Parser *p, Token name, Type *type) {
   LocalVar *var;
+  Enum *enumerator;
   int size;
   int alignment;
 
@@ -95,21 +97,19 @@ static LocalVar *declare_local_var(Parser *p, Token name, Type *type) {
   if (size < 0)
     error_at(p, name, "variable has incomplete type");
   alignment = type_alignment(type);
+  enumerator = find_enumerator(p, name);
+  if (enumerator && enumerator->scope_depth == p->scope_depth)
+    error_at(p, name, "variable conflicts with enumerator '%.*s'", name.len,
+             name.start);
   for (var = p->locals; var && var->scope_depth == p->scope_depth;
        var = var->next) {
-    if (same_identifier(var->name, name))
-      error_at(p, name, "duplicate local variable");
-  }
-
-  /*
-   * The function body's outermost block (depth 1) may not redeclare a
-   * parameter (depth 0); deeper blocks may shadow freely (C11 6.2.1).
-   */
-  if (p->scope_depth == 1)
-    for (var = p->locals; var && var->scope_depth == 0; var = var->next)
-      if (same_identifier(var->name, name))
-        error_at(p, name, "declaration of '%.*s' shadows a parameter", name.len,
+    if (same_identifier(var->name, name)) {
+      if (var->is_parameter)
+        error_at(p, name, "redefinition of parameter '%.*s'", name.len,
                  name.start);
+      error_at(p, name, "duplicate local variable");
+    }
+  }
 
   var = (LocalVar *)calloc(1, sizeof(LocalVar));
   if (!var)
@@ -164,6 +164,7 @@ static void reset_function_state(Parser *p) {
 static void parser_init(Parser *p, const char *filename, const char *source) {
   p->locals = NULL;
   p->tags = NULL;
+  p->enums = NULL;
   p->labels = NULL;
   p->goto_refs = NULL;
   p->functions = NULL;
@@ -359,7 +360,7 @@ static AstNode *parse_postfix(Parser *p) {
 
   if (p->current.kind == TOKEN_IDENTIFIER &&
       p->lookahead.kind == TOKEN_LPAREN) {
-    if (find_local_var(p, p->current))
+    if (find_local_var(p, p->current) || find_enumerator(p, p->current))
       parse_error(p, "called object is not a function");
     left = parse_call_expr(p);
   } else {
@@ -455,6 +456,12 @@ static AstNode *parse_primary(Parser *p) {
   if (p->current.kind == TOKEN_IDENTIFIER) {
     AstNode *expr;
     LocalVar *var = find_local_var(p, p->current);
+    Enum *enumerator = find_enumerator(p, p->current);
+    if (enumerator && (!var || enumerator->scope_depth > var->scope_depth)) {
+      expr = sema_enumerator_expr(p, enumerator, p->current);
+      parser_advance(p);
+      return expr;
+    }
     if (!var)
       parse_error(p, "undeclared identifier");
     expr = new_expr(p, AST_VAR, var->type);
@@ -477,6 +484,88 @@ static Tag *find_tag(Parser *p, Token name, bool current_scope) {
     }
   }
   return NULL;
+}
+
+static Tag *declare_tag(Parser *p, Token name, Type *type) {
+  Tag *tag = calloc(1, sizeof(Tag));
+  if (!tag)
+    error_at(p, name, "out of memory");
+  tag->name = name;
+  tag->type = type;
+  tag->scope_depth = p->scope_depth;
+  tag->next = p->tags;
+  p->tags = tag;
+  return tag;
+}
+
+/*
+ * enum-specifier:
+ *   'enum' identifier
+ *   'enum' identifier_opt '{' enumerator (',' enumerator)* ','_opt '}'
+ * enumerator: identifier ('=' constant-expression)_opt
+ * (C11 6.7.2.2; enum tags must be defined before use without a definition.)
+ */
+static Type *parse_enum_specifier(Parser *p) {
+  Token loc = p->current;
+  Token name = {0};
+  Tag *tag = NULL;
+  Type *type;
+  int64_t next_value = 0;
+
+  /* Consume 'enum' */
+  parser_advance(p);
+  if (p->current.kind == TOKEN_IDENTIFIER) {
+    name = p->current;
+    parser_advance(p);
+    tag = find_tag(p, name, p->current.kind == TOKEN_LBRACE);
+  } else if (p->current.kind != TOKEN_LBRACE) {
+    parse_error(p, "expect enum tag or '{'");
+  }
+  if (tag && tag->type->kind != TYPE_ENUM)
+    error_at(p, name, "tag '%.*s' declared as a different kind", name.len,
+             name.start);
+  if (p->current.kind != TOKEN_LBRACE) {
+    if (!tag || tag->type->size < 0)
+      error_at(p, name, "enum '%.*s' is not defined", name.len, name.start);
+    return tag->type;
+  }
+  if (tag) {
+    if (tag->type->size >= 0 || tag->is_defining)
+      error_at(p, name, "redefinition of enum '%.*s'", name.len, name.start);
+    type = tag->type;
+  } else {
+    type = enum_type();
+    if (!type)
+      error_at(p, loc, "out of memory");
+    if (name.kind == TOKEN_IDENTIFIER)
+      tag = declare_tag(p, name, type);
+  }
+  if (tag)
+    tag->is_defining = true;
+  parser_advance(p);
+  for (;;) {
+    Token enumerator_name = p->current;
+    AstNode *initializer = NULL;
+    Enum *enumerator;
+    parse_expect(p, TOKEN_IDENTIFIER, "expect enumerator name");
+    if (p->current.kind == TOKEN_ASSIGN) {
+      parser_advance(p);
+      initializer = parse_conditional(p);
+    }
+    enumerator =
+        declare_enumerator(p, enumerator_name, initializer, next_value);
+    next_value = (int64_t)enumerator->value + 1;
+    if (p->current.kind != TOKEN_COMMA)
+      break;
+    parser_advance(p);
+    if (p->current.kind == TOKEN_RBRACE)
+      break;
+  }
+  parse_expect(p, TOKEN_RBRACE, "expect '}'");
+  type->size = type->base->size;
+  if (tag)
+    tag->is_defining = false;
+  return type;
 }
 
 /*
@@ -545,20 +634,16 @@ static Type *parse_struct_specifier(Parser *p) {
   }
 
   if (tag) {
+    if (tag->type->kind != TYPE_STRUCT)
+      error_at(p, name, "tag '%.*s' declared as a different kind", name.len,
+               name.start);
     type = tag->type;
   } else {
     type = struct_type();
     if (!type)
       error_at(p, loc, "out of memory");
     if (name.kind == TOKEN_IDENTIFIER) {
-      tag = calloc(1, sizeof(Tag));
-      if (!tag)
-        error_at(p, name, "out of memory");
-      tag->name = name;
-      tag->type = type;
-      tag->scope_depth = p->scope_depth;
-      tag->next = p->tags;
-      p->tags = tag;
+      tag = declare_tag(p, name, type);
     }
   }
   if (p->current.kind != TOKEN_LBRACE)
@@ -610,6 +695,8 @@ static Type *parse_declspecs(Parser *p) {
   };
   unsigned specs = 0;
 
+  if (p->current.kind == TOKEN_ENUM)
+    return parse_enum_specifier(p);
   if (p->current.kind == TOKEN_STRUCT)
     return parse_struct_specifier(p);
   if (p->current.kind == TOKEN_VOID) {
@@ -761,7 +848,8 @@ static AstNode *parse_decl(Parser *p) {
   Type *type;
 
   type = parse_declspecs(p);
-  if (type->kind == TYPE_STRUCT && p->current.kind == TOKEN_SEMICOLON) {
+  if ((type->kind == TYPE_STRUCT || type->kind == TYPE_ENUM) &&
+      p->current.kind == TOKEN_SEMICOLON) {
     decl = new_ast_node(p, AST_DECL);
     parser_advance(p);
     return decl;
@@ -1232,20 +1320,20 @@ static AstNode *parse_return_stmt(Parser *p) {
 
 /*
  * compound-statement:
- *   '{' statement* '}'
+ *   '{' block-item* '}'
  * (C11 6.8.2)
+ *
+ * Parse in the current scope. A function body shares the scope already entered
+ * for its parameters; nested blocks enter a new scope through parse_block.
  */
-static AstNode *parse_block(Parser *p) {
+static AstNode *parse_compound_stmt(Parser *p) {
   AstNode *block;
   AstNode **tail;
-  LocalVar *outer_locals = p->locals;
-  Tag *outer_tags = p->tags;
 
   block = new_ast_node(p, AST_BLOCK);
   tail = &block->d.block.first_stmt;
 
   parse_expect(p, TOKEN_LBRACE, "expect '{'");
-  ++p->scope_depth;
   while (p->current.kind != TOKEN_RBRACE) {
     if (p->current.kind == TOKEN_EOF)
       parse_error(p, "expect '}'");
@@ -1255,8 +1343,20 @@ static AstNode *parse_block(Parser *p) {
   }
 
   parse_expect(p, TOKEN_RBRACE, "expect '}'");
+  return block;
+}
+
+static AstNode *parse_block(Parser *p) {
+  LocalVar *outer_locals = p->locals;
+  Tag *outer_tags = p->tags;
+  Enum *outer_enums = p->enums;
+  AstNode *block;
+
+  ++p->scope_depth;
+  block = parse_compound_stmt(p);
   p->locals = outer_locals;
   p->tags = outer_tags;
+  p->enums = outer_enums;
   --p->scope_depth;
   return block;
 }
@@ -1278,12 +1378,14 @@ static AstNode *parse_external_declaration(Parser *p) {
   int explicit_params = 0;
   Token unnamed_param = {0};
   Tag *outer_tags;
+  Enum *outer_enums;
 
   reset_function_state(p);
   vector_init(&param_types, sizeof(Type *));
   fn = new_ast_node(p, AST_FUNCTION);
   return_type = parse_declspecs(p);
-  if (return_type->kind == TYPE_STRUCT && p->current.kind == TOKEN_SEMICOLON) {
+  if ((return_type->kind == TYPE_STRUCT || return_type->kind == TYPE_ENUM) &&
+      p->current.kind == TOKEN_SEMICOLON) {
     parser_advance(p);
     return NULL;
   }
@@ -1299,6 +1401,7 @@ static AstNode *parse_external_declaration(Parser *p) {
 
   parse_expect(p, TOKEN_LPAREN, "expect '('");
   outer_tags = p->tags;
+  outer_enums = p->enums;
   p->scope_depth = 1;
 
   if (p->current.kind == TOKEN_VOID && p->lookahead.kind == TOKEN_RPAREN) {
@@ -1333,7 +1436,12 @@ static AstNode *parse_external_declaration(Parser *p) {
         parse_error(p, "out of memory");
 
       if (param_name.kind == TOKEN_IDENTIFIER) {
-        for (var = p->locals; var && var->scope_depth == 0; var = var->next) {
+        Enum *enumerator = find_enumerator(p, param_name);
+        if (enumerator && enumerator->scope_depth == p->scope_depth)
+          error_at(p, param_name, "parameter conflicts with enumerator '%.*s'",
+                   param_name.len, param_name.start);
+        for (var = p->locals; var && var->scope_depth == p->scope_depth;
+             var = var->next) {
           if (same_identifier(var->name, param_name))
             error_at(p, param_name, "duplicate local variable");
         }
@@ -1343,7 +1451,8 @@ static AstNode *parse_external_declaration(Parser *p) {
           parse_error(p, "out of memory");
         param->name = param_name;
         param->type = param_type;
-        param->scope_depth = 0;
+        param->scope_depth = p->scope_depth;
+        param->is_parameter = true;
         param->offset = 8 * (int)param_types.len;
         param->next = p->locals;
         p->locals = param;
@@ -1379,6 +1488,8 @@ static AstNode *parse_external_declaration(Parser *p) {
     /* Consume ';' */
     parser_advance(p);
     p->tags = outer_tags;
+    p->enums = outer_enums;
+    p->locals = NULL;
     p->scope_depth = 0;
     return NULL;
   }
@@ -1386,9 +1497,11 @@ static AstNode *parse_external_declaration(Parser *p) {
   p->current_function = func;
   fn->d.function.params = p->locals;
   p->stack_size = 8 * nparams;
-  p->scope_depth = 0;
-  fn->d.function.body = parse_block(p);
+  fn->d.function.body = parse_compound_stmt(p);
   p->tags = outer_tags;
+  p->enums = outer_enums;
+  p->locals = NULL;
+  p->scope_depth = 0;
   check_gotos(p);
   fn->d.function.stack_size = p->stack_size;
   return fn;
@@ -1449,6 +1562,7 @@ static AstNode *parse_for_stmt(Parser *p) {
   AstNode *for_node;
   LocalVar *outer_locals;
   Tag *outer_tags;
+  Enum *outer_enums;
 
   parse_expect(p, TOKEN_FOR, "expect 'for'");
   parse_expect(p, TOKEN_LPAREN, "expect '('");
@@ -1458,6 +1572,7 @@ static AstNode *parse_for_stmt(Parser *p) {
   /* A declaration in the init clause is scoped to the whole loop. */
   outer_locals = p->locals;
   outer_tags = p->tags;
+  outer_enums = p->enums;
   ++p->scope_depth;
 
   if (is_type_specifier(p->current.kind)) {
@@ -1487,6 +1602,7 @@ static AstNode *parse_for_stmt(Parser *p) {
   --p->loop_depth;
   p->locals = outer_locals;
   p->tags = outer_tags;
+  p->enums = outer_enums;
   --p->scope_depth;
 
   return for_node;
@@ -1769,6 +1885,7 @@ static AstNode *parse_stmt(Parser *p, bool allow_decl) {
   case TOKEN_LBRACE:
     return parse_block(p);
   case TOKEN_CHAR:
+  case TOKEN_ENUM:
   case TOKEN_INT:
   case TOKEN_LONG:
   case TOKEN_SHORT:

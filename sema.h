@@ -31,6 +31,10 @@
 
 extern bool same_identifier(Token a, Token b);
 extern Function *find_function(Parser *p, Token name);
+extern Enum *find_enumerator(Parser *p, Token name);
+extern Enum *declare_enumerator(Parser *p, Token name, AstNode *initializer,
+                                     int64_t next_value);
+extern AstNode *sema_enumerator_expr(Parser *p, Enum *enumerator, Token loc);
 extern int64_t eval_const_expr(Parser *p, AstNode *expr);
 extern void check_calls(Parser *p);
 extern void check_gotos(Parser *p);

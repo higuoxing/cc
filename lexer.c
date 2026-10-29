@@ -54,7 +54,7 @@ static const Keyword keywords[] = {
     KW("do", TOKEN_DO),
     KW("double", TOKEN_RESERVED),
     KW("else", TOKEN_ELSE),
-    KW("enum", TOKEN_RESERVED),
+    KW("enum", TOKEN_ENUM),
     KW("extern", TOKEN_RESERVED),
     KW("float", TOKEN_RESERVED),
     KW("for", TOKEN_FOR),
@@ -148,8 +148,10 @@ void skip_whitespace(Lexer *l) {
     }
 
     if (*l->cursor == '/' && l->cursor[1] == '*') {
-      Token loc = {.start = l->cursor, .len = 2,
-                   .line = l->line, .col = lexer_column(l)};
+      Token loc = {.start = l->cursor,
+                   .len = 2,
+                   .line = l->line,
+                   .col = lexer_column(l)};
       /* Block comment: skip to the closing delimiter. */
       lexer_advance(l);
       lexer_advance(l);

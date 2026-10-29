@@ -40,15 +40,17 @@ Type builtin_type_void = {.kind = TYPE_VOID, .size = 0, .base = NULL};
 bool is_integer(const Type *type) {
   return type->kind == TYPE_CHAR || type->kind == TYPE_SHORT ||
          type->kind == TYPE_INT || type->kind == TYPE_LONG ||
-         type->kind == TYPE_LONG_LONG;
+         type->kind == TYPE_LONG_LONG || type->kind == TYPE_ENUM;
 }
 
 /*
  * On our target, int represents every char and short value, including
- * unsigned char and unsigned short. Other types remain unchanged.
+ * unsigned char and unsigned short. Enums use int as their compatible type
+ * and also promote to int. Other types remain unchanged.
  */
 Type *integer_promotion_type(Type *type) {
-  if (type->kind == TYPE_CHAR || type->kind == TYPE_SHORT)
+  if (type->kind == TYPE_CHAR || type->kind == TYPE_SHORT ||
+      type->kind == TYPE_ENUM)
     return &builtin_type_int;
   return type;
 }
@@ -79,13 +81,18 @@ Type *common_integer_type(const Type *a, const Type *b) {
 }
 
 /*
- * Structs have distinct identities; other supported types compare structurally.
+ * Structs and enums have distinct identities. An enum is also compatible with
+ * its chosen integer type. Other supported types compare structurally.
  * A void pointer is convertible, not identical, to another object pointer.
  */
 bool same_type(const Type *a, const Type *b) {
+  if (a->kind == TYPE_ENUM && b->kind != TYPE_ENUM)
+    return same_type(a->base, b);
+  if (b->kind == TYPE_ENUM && a->kind != TYPE_ENUM)
+    return same_type(a, b->base);
   if (a->kind != b->kind)
     return false;
-  if (a->kind == TYPE_STRUCT)
+  if (a->kind == TYPE_STRUCT || a->kind == TYPE_ENUM)
     return a == b;
   if (is_integer(a) && a->is_unsigned != b->is_unsigned)
     return false;
@@ -119,6 +126,18 @@ Type *struct_type(void) {
   type->kind = TYPE_STRUCT;
   type->size = -1; /* Incomplete until the definition is finished. */
   type->alignment = 1;
+  return type;
+}
+
+/* Each enum has its own identity and uses int as its compatible integer type.
+ */
+Type *enum_type(void) {
+  Type *type = calloc(1, sizeof(Type));
+  if (!type)
+    return NULL;
+  type->kind = TYPE_ENUM;
+  type->size = -1;
+  type->base = &builtin_type_int;
   return type;
 }
 

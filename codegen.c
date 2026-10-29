@@ -148,7 +148,7 @@ static void codegen_normalize(Type *type) {
   else if (type->kind == TYPE_SHORT)
     fprintf(out, type->is_unsigned ? "\tmovzwq %%ax, %%rax\n"
                                    : "\tmovswq %%ax, %%rax\n");
-  else if (type->kind == TYPE_INT)
+  else if (type->kind == TYPE_INT || type->kind == TYPE_ENUM)
     fprintf(out, type->is_unsigned ? "\tmovl %%eax, %%eax\n" : "\tcltq\n");
 }
 

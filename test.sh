@@ -596,6 +596,113 @@ check_error sizeof-invalid-call 'int f(int x); int main(void) { return sizeof f(
 check_error sizeof-multiline-void $'int main(void) {\n  return sizeof(void);\n}\n' '2:10: error: sizeof cannot be applied to void'
 check_error sizeof-multiline-type-name $'int main(void) {\n  return sizeof(int name);\n}\n' '2:21: error: type name cannot contain an identifier'
 
+# Enum constants are int; enum objects use our signed int representation.
+check 6 'enum Color { RED, GREEN = 5, BLUE }; int main(void) { enum Color color = BLUE; return color; }' enum-basic
+check 1 'enum { A, B, C }; int main(void) { return A == 0 && B == 1 && C == 2; }' enum-default-values
+check 1 'enum { A = 5, B = 5, C }; int main(void) { return A == B && C == 6; }' enum-duplicate-values
+check 1 'enum E { A = -2, B, C, D }; int main(void) { return A == -2 && B == -1 && C == 0 && D == 1; }' enum-negative-values
+check 42 'int main(void) { enum { ANSWER = 42, }; return ANSWER; }' enum-local-anonymous-trailing-comma
+check 42 'enum E { A = 1, B = (A << 5) | 10 }; int main(void) { return B; }' enum-constant-expression
+check 42 'enum { A = 2, B = A * 21, C = A ? B : 0 }; int main(void) { return C; }' enum-reference-and-conditional
+check 4 'enum { SIZE = sizeof(int) }; int main(void) { return SIZE; }' enum-sizeof-initializer
+check 1 'enum { A = 2147483647, B = -2147483648, C = 0 }; int main(void) { return A == 2147483647 && B == -2147483648 && C == 0; }' enum-int-boundaries
+check 1 'enum { A = 2147483647, }; int main(void) { return A == 2147483647; }' enum-max-final-value
+check 1 'enum { A = 0 }; int main(void) { return sizeof A == 4 && A - 1 < 0; }' enum-constant-has-int-type
+check 1 'enum { ZERO }; int main(void) { int *p = ZERO; return p == 0; }' enum-zero-null-pointer-constant
+check 42 'enum { COUNT = 3 }; int main(void) { int a[COUNT]; a[COUNT - 1] = 42; return a[2]; }' enum-array-bound
+check 42 'enum E { A = 1, B = 42 }; int main(void) { enum E e = A; switch (e) { case A: return B; default: return 0; } }' enum-switch
+check 1 'enum E { A = -1, B = 0, C = 3 }; int main(void) { int sum = 0; for (enum E e = B; e <= C; e++) sum += e; return sum == 6; }' enum-for-variable
+check 42 'enum E { A = -1, B = 42 }; enum E id(enum E x) { return x; } int main(void) { return id(B); }' enum-function-signature
+check 1 'enum E { A = -1 }; enum E f(void) { return A; } int main(void) { long x = f(); return x == -1 && f() < 0; }' enum-return-sign-extension
+check 1 'enum E { A = -1 }; enum E f(int a, int b, int c, int d, int e, int f, enum E g) { return g; } int main(void) { return f(0,0,0,0,0,0,A) == -1; }' enum-stack-parameter
+check 1 'enum E { A = -1, B = 42 }; int main(void) { enum E a[2]; a[0] = A; a[1] = B; enum E *p = a; return p[0] == -1 && p[1] == 42 && sizeof a == 8; }' enum-array-storage
+check 1 'enum E { A = -1, B = 42 }; struct S { char c; enum E e; char end; }; int main(void) { struct S s; s.c = 7; s.e = B; s.end = 9; return s.e == 42 && s.c == 7 && s.end == 9 && sizeof s == 12; }' enum-struct-member
+check 1 'enum E { A = -1, B = 42 }; int main(void) { enum E e = A; return (e += 43) == B && e-- == B && e == 41 && ++e == B; }' enum-compound-and-increment
+check 1 'enum E { A = -1 }; int main(void) { enum E e = 4294967295UL; return e == -1 && (e = 4294967295UL) == -1; }' enum-integer-conversion
+check 42 'enum E { A = -1, B = 42 }; int main(void) { enum E e = B; int *p = &e; return *p; }' enum-compatible-int-pointer
+check 42 'enum E { A = -1, B = 42 }; int f(enum E); int f(int x) { return x; } int main(void) { return f(B); }' enum-compatible-int-prototype
+check 42 'enum E { A = -1, B = 42 }; int f(); int f(enum E x) { return x; } int main(void) { enum E e = B; return f(e); }' enum-default-argument-promotion
+check 1 'enum E { A = -1 }; int f(); int main(void) { enum E e = A; return f(e); } int f(int x) { return x == -1; }' enum-unprototyped-call-promotion
+check 42 'enum E { A = 42 }; enum E; int main(void) { enum E e = A; return e; }' enum-tag-redeclaration
+check 42 'enum E { E = 42 }; int main(void) { enum E e = E; return e; }' enum-tag-and-enumerator-namespace
+check 42 'enum { A = 42 }; int main(void) { int A = 7; { enum { A = 42 }; if (A != 42) return 0; } return A == 7 ? 42 : 0; }' enum-shadow-variable
+check 42 'enum { A = 7 }; int main(void) { { enum { A = A + 35 }; if (A != 42) return 0; } return A == 7 ? 42 : 0; }' enum-initializer-sees-outer-constant
+check 42 'enum { A = 7 }; int main(void) { int A = 42; return A; }' enum-variable-shadows-constant
+check 42 'enum { A = 7 }; int f(int A) { return A; } int main(void) { return f(42); }' enum-parameter-shadows-global-constant
+check 42 'enum E { A = 7 }; int main(void) { { enum E { A = 42 }; enum E e = A; if (e != 42) return 0; } enum E e = A; return e == 7 ? 42 : 0; }' enum-tag-and-constant-shadowing
+check 42 'int main(void) { { enum E { A }; } { enum E { A = 42 }; return A; } }' enum-sibling-scopes
+check 42 'int first(void) { enum { A = 1 }; return A; } int main(void) { enum { A = 42 }; return A; }' enum-function-scope-restore
+check 42 'int main(void) { for (enum { A = 1 } e = A; e < 2; e++) {} enum { A = 42 }; return A; }' enum-for-scope-restore
+check 42 'int f(enum E { A = 42 } e) { enum E x = e; return x + A - 42; } int main(void) { enum E { A = 1 } e = A; return f(42); }' enum-parameter-definition-scope
+check 42 'int f(enum E { A = 1 } e); int main(void) { enum E { A = 42 } e = A; return e; }' enum-prototype-scope-restore
+check 42 'struct S { enum E { A = 42 } e; }; int main(void) { struct S s; enum E e = A; s.e = e; return s.e; }' enum-definition-in-struct
+check 42 'int main(void) { enum E { A = 42 } e = A; { struct E { int x; }; struct E s; s.x = e; return s.x; } }' enum-ordinary-and-member-names
+check 42 'enum { A = 42 }; struct S { int A; }; int main(void) { struct S s; s.A = A; return s.A; }' enum-member-namespace
+check 42 'enum { A = 42 }; int main(void) { goto A; return 0; A: return A; }' enum-label-namespace
+check 42 'int main(void) { return sizeof(enum E { A = 42 }) == 4 ? A : 0; }' enum-definition-in-type-name
+check 1 'enum E { A = -1, B = 42 }; int main(void) { return sizeof(enum E) == 4 && sizeof(A) == sizeof(int); }' enum-sizeof
+check 1 'enum { A = 0 && (1 / 0), B = 1 ? 42 : (1 / 0) }; int main(void) { return A == 0 && B == 42; }' enum-short-circuit-constant-expression
+
+check_error enum-empty 'enum E {};' '1:9: error: expect enumerator name'
+check_error enum-anonymous-empty 'enum {};' '1:7: error: expect enumerator name'
+check_error enum-missing-tag 'enum;' '1:5: error: expect enum tag or '\''{'\'''
+check_error enum-missing-enumerator 'enum E { A, , B };' '1:13: error: expect enumerator name'
+check_error enum-keyword-enumerator 'enum E { int };' '1:10: error: expect enumerator name'
+check_error enum-missing-initializer 'enum E { A = };' '1:14: error: expect expr'
+check_error enum-missing-comma 'enum E { A B };' '1:12: error: expect '\''}'\'''
+check_error enum-missing-rbrace 'enum E { A;' '1:11: error: expect '\''}'\'''
+check_error enum-eof 'enum E { A' '1:11: error: expect '\''}'\'''
+check_error enum-duplicate-name 'enum E { A, A };' '1:13: error: duplicate enumerator '\''A'\'''
+check_error enum-duplicate-across-definitions 'enum E { A }; enum F { A };' '1:24: error: duplicate enumerator '\''A'\'''
+check_error enum-redefinition 'enum E { A }; enum E { B };' '1:20: error: redefinition of enum '\''E'\'''
+check_error enum-undefined-tag 'int main(void) { enum E e; return 0; }' '1:23: error: enum '\''E'\'' is not defined'
+check_error enum-forward-declaration 'enum E;' '1:6: error: enum '\''E'\'' is not defined'
+check_error enum-self-type-incomplete 'enum E { A = sizeof(enum E) };' '1:26: error: enum '\''E'\'' is not defined'
+check_error enum-struct-tag-conflict 'struct E { int x; }; enum E { A };' '1:27: error: tag '\''E'\'' declared as a different kind'
+check_error enum-tag-struct-conflict 'enum E { A }; struct E { int x; };' '1:22: error: tag '\''E'\'' declared as a different kind'
+check_error enum-struct-reference-conflict 'enum E { A }; int main(void) { struct E *p; return 0; }' '1:39: error: tag '\''E'\'' declared as a different kind'
+check_error enum-reference-struct-conflict 'struct E { int x; }; int main(void) { enum E e; return 0; }' '1:44: error: tag '\''E'\'' declared as a different kind'
+check_error enum-outside-block 'int main(void) { { enum { A }; } return A; }' '1:41: error: undeclared identifier'
+check_error enum-outside-function 'int f(void) { enum { A }; return A; } int main(void) { return A; }' '1:63: error: undeclared identifier'
+check_error enum-outside-for 'int main(void) { for (enum { A } e = A; e < 1; e++) {} return A; }' '1:63: error: undeclared identifier'
+check_error enum-tag-outside-block 'int main(void) { { enum E { A }; } enum E e; return 0; }' '1:41: error: enum '\''E'\'' is not defined'
+check_error enum-param-tag-outside-prototype 'int f(enum E { A } e); int main(void) { enum E e; return 0; }' '1:46: error: enum '\''E'\'' is not defined'
+check_error enum-param-constant-outside-prototype 'int f(enum E { A } e); int main(void) { return A; }' '1:48: error: undeclared identifier'
+check_error enum-variable-name-conflict 'int main(void) { int A; enum { A }; return 0; }' '1:32: error: enumerator conflicts with variable '\''A'\'''
+check_error enum-name-variable-conflict 'int main(void) { enum { A }; int A; return 0; }' '1:34: error: variable conflicts with enumerator '\''A'\'''
+check_error enum-parameter-name-conflict 'int f(int A) { enum { A }; return 0; }' '1:23: error: enumerator conflicts with variable '\''A'\'''
+check_error enum-name-parameter-conflict 'int f(enum { A } A);' '1:18: error: parameter conflicts with enumerator '\''A'\'''
+check_error enum-previous-parameter-conflict 'int f(int A, enum { A } x);' '1:21: error: enumerator conflicts with variable '\''A'\'''
+check_error enum-function-name-conflict 'int f(void); enum { f };' '1:21: error: enumerator conflicts with function '\''f'\'''
+check_error enum-name-function-conflict 'enum { f }; int f(void);' '1:17: error: function conflicts with enumerator '\''f'\'''
+check_error enum-constant-call 'enum { A }; int main(void) { return A(); }' '1:37: error: called object is not a function'
+check_error enum-shadow-function-call 'int f(void); int main(void) { enum { f }; return f(); }' '1:50: error: called object is not a function'
+check_error enum-constant-assignment 'enum { A }; int main(void) { A = 1; return 0; }' '1:32: error: invalid assignment target'
+check_error enum-constant-increment 'enum { A }; int main(void) { A++; return 0; }' '1:31: error: invalid increment target'
+check_error enum-constant-address 'enum { A }; int main(void) { int *p = &A; return 0; }' '1:39: error: invalid address-of target'
+check_error enum-too-large 'enum { A = 2147483648L };' '1:8: error: enumerator value is outside the range of int'
+check_error enum-too-small 'enum { A = -2147483649L };' '1:8: error: enumerator value is outside the range of int'
+check_error enum-unsigned-too-large 'enum { A = 4294967295U };' '1:8: error: enumerator value is outside the range of int'
+check_error enum-unsigned-high-bit 'enum { A = 18446744073709551615ULL };' '1:8: error: enumerator value is outside the range of int'
+check_error enum-implicit-overflow 'enum { A = 2147483647, B };' '1:24: error: enumerator value is outside the range of int'
+check_error enum-noninteger-initializer 'enum { A = "text" };' '1:12: error: enumerator value must have integer type'
+check_error enum-nonconstant-initializer 'int main(void) { int x = 1; enum { A = x }; return 0; }' '1:42: error: not an integer constant expression'
+check_error enum-self-reference 'enum { A = A };' '1:12: error: undeclared identifier'
+check_error enum-division-by-zero 'enum { A = 1 / 0 };' '1:18: error: division by zero in constant expression'
+check_error enum-incompatible-pointers 'enum E { A = -1 }; enum F { B = -2 }; int main(void) { enum E *e; enum F *f = e; return 0; }' '1:75: error: incompatible initializer type'
+check_error enum-incompatible-prototypes 'enum E { A = -1 }; enum F { B = -2 }; int f(enum E); int f(enum F);' '1:58: error: conflicting declaration of function '\''f'\'''
+check_error enum-syntax-location $'enum E {\n  A,\n  ,\n};\n' '3:3: error: expect enumerator name'
+check_error enum-duplicate-location $'enum E {\n  A,\n  A\n};\n' '3:3: error: duplicate enumerator '\''A'\'''
+check_error enum-range-location $'enum E {\n  A = 2147483648L\n};\n' '2:3: error: enumerator value is outside the range of int'
+
+# Parameters and outermost body declarations share depth 1; nested blocks shadow.
+check 42 'int f(int x) { { int x = 7; if (x != 7) return 0; } return x; } int main(void) { return f(42); }' parameter-nested-variable-shadow
+check 42 'int f(int x) { { enum { x = 7 }; if (x != 7) return 0; } return x; } int main(void) { return f(42); }' parameter-nested-enumerator-shadow
+check 42 'int f(int x) { for (int x = 0; x < 2; x++) {} return x; } int main(void) { return f(42); }' parameter-for-variable-shadow
+check 42 'int f(enum { A = 7 } x) { { int A = 42; return A; } } int main(void) { return f(0); }' parameter-enumerator-nested-variable-shadow
+check 42 'int f(int x); enum { x = 42 }; int main(void) { return x; }' parameter-prototype-scope-restored
+check 42 'int f(int x) { int y = 0; return x + y; } enum { x = 40, y = 2 }; int main(void) { return x + y; }' parameter-definition-scope-restored
+
 # Typed functions preserve pointer widths and check complete signatures.
 check 42 'int *identity(int *p) { return p; } int main(void) { int x = 42; return *identity(&x); }' typed-pointer-identity
 check 42 'int *identity(int *); int main(void) { int x = 42; return *identity(&x); } int *identity(int *p) { return p; }' typed-pointer-prototype
@@ -1619,7 +1726,7 @@ check_error call-undefined 'int main() { return foo(); }' \
 check_error call-on-variable 'int main() { int a = 1; return a(); }' \
 	    '1:32: error: called object is not a function'
 check_error param-shadow 'int foo(int a) { int a = 42; return a; } int main() { return foo(24); }' \
-	    "1:22: error: declaration of 'a' shadows a parameter"
+	    "1:22: error: redefinition of parameter 'a'"
 check_error too-many-args 'int foo(int a) { return a; } int main() { return foo(1, 2); }' \
 	    "1:50: error: wrong number of arguments to function 'foo'"
 check_error too-few-args 'int foo(int a) { return a; } int main() { return foo(); }' \

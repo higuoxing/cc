@@ -31,6 +31,7 @@ typedef enum {
   TYPE_INT,
   TYPE_LONG,
   TYPE_LONG_LONG,
+  TYPE_ENUM,
   TYPE_ARRAY,
   TYPE_PTR,
   TYPE_STRUCT,
@@ -39,9 +40,9 @@ typedef enum {
 
 typedef struct Type {
   TypeKind kind;
-  int size; /* In bytes; -1 for an incomplete struct. */
+  int size; /* In bytes; -1 for an incomplete struct or enum. */
   bool is_unsigned; /* Meaningful for integer types only. */
-  struct Type *base; /* Element type for TYPE_ARRAY; pointed-to type for TYPE_PTR. */
+  struct Type *base; /* Array element, pointee, or enum's compatible integer type. */
   int array_len; /* Element count for TYPE_ARRAY. */
   Member *members; /* Declaration order for TYPE_STRUCT. */
   int alignment; /* Required alignment for TYPE_STRUCT. */
@@ -76,5 +77,6 @@ extern int type_alignment(const Type *type);
 extern Type *pointer_to(Type *base);
 extern Type *array_of(Type *base, int length);
 extern Type *struct_type(void);
+extern Type *enum_type(void);
 
 #endif

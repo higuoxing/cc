@@ -36,6 +36,55 @@ Function *find_function(Parser *p, Token name) {
 
 static AstNode *new_expr(Parser *p, AstKind kind, Type *type, Token loc);
 
+Enum *find_enumerator(Parser *p, Token name) {
+  Enum *enumerator;
+  for (enumerator = p->enums; enumerator; enumerator = enumerator->next)
+    if (same_identifier(enumerator->name, name))
+      return enumerator;
+  return NULL;
+}
+
+Enum *declare_enumerator(Parser *p, Token name, AstNode *initializer,
+                         int64_t next_value) {
+  Enum *enumerator;
+  LocalVar *var;
+  int64_t value = next_value;
+  if (initializer) {
+    if (!is_integer(initializer->type))
+      error_at(p, initializer->loc, "enumerator value must have integer type");
+    value = eval_const_expr(p, initializer);
+  }
+  if (value < INT32_MIN || value > INT32_MAX ||
+      (initializer && initializer->type->is_unsigned &&
+       (uint64_t)value > INT32_MAX))
+    error_at(p, name, "enumerator value is outside the range of int");
+  enumerator = find_enumerator(p, name);
+  if (enumerator && enumerator->scope_depth == p->scope_depth)
+    error_at(p, name, "duplicate enumerator '%.*s'", name.len, name.start);
+  for (var = p->locals; var; var = var->next)
+    if (var->scope_depth == p->scope_depth && same_identifier(var->name, name))
+      error_at(p, name, "enumerator conflicts with variable '%.*s'", name.len,
+               name.start);
+  if (p->scope_depth == 0 && find_function(p, name))
+    error_at(p, name, "enumerator conflicts with function '%.*s'", name.len,
+             name.start);
+  enumerator = calloc(1, sizeof(Enum));
+  if (!enumerator)
+    error_at(p, name, "out of memory");
+  enumerator->name = name;
+  enumerator->value = (int)value;
+  enumerator->scope_depth = p->scope_depth;
+  enumerator->next = p->enums;
+  p->enums = enumerator;
+  return enumerator;
+}
+
+AstNode *sema_enumerator_expr(Parser *p, Enum *enumerator, Token loc) {
+  AstNode *node = new_expr(p, AST_INT_LITERAL, &builtin_type_int, loc);
+  node->d.int_literal.val = (uint64_t)enumerator->value;
+  return node;
+}
+
 /*
  * Convert an operand used as a value without promoting its integer type.
  * Array decay is the only explicit value conversion needed by our types so far.
@@ -95,7 +144,12 @@ Function *declare_function(Parser *p, Token name, Type *return_type,
                            Type **param_types, int nparams, bool has_prototype,
                            bool definition) {
   Function *func = find_function(p, name);
+  Enum *enumerator;
   int i;
+  for (enumerator = p->enums; enumerator; enumerator = enumerator->next)
+    if (enumerator->scope_depth == 0 && same_identifier(enumerator->name, name))
+      error_at(p, name, "function conflicts with enumerator '%.*s'", name.len,
+               name.start);
   if (func) {
     if (definition && func->is_defined)
       error_at(p, name, "redefinition of function '%.*s'", name.len,

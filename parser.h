@@ -24,7 +24,7 @@
 
 typedef struct AstNode AstNode;
 
-/* Struct tags have their own namespace and follow block scope. */
+/* Struct and enum tags share a namespace and follow block scope. */
 typedef struct Tag {
   Token name;
   Type *type;
@@ -38,8 +38,17 @@ typedef struct LocalVar {
   Type *type;
   int offset; /* Positive distance below %rbp */
   int scope_depth;
+  bool is_parameter;
   struct LocalVar *next;
 } LocalVar;
+
+/* Enumeration constants share the ordinary identifier namespace with objects. */
+typedef struct Enum {
+  Token name;
+  int value;
+  int scope_depth;
+  struct Enum *next;
+} Enum;
 
 /*
  * Labels have function scope (C11 6.2.1), so this table is not restored
@@ -103,6 +112,7 @@ typedef struct {
 
   LocalVar *locals;
   Tag *tags;
+  Enum *enums;
   Label *labels;
   GotoRef *goto_refs;
   Function *functions;

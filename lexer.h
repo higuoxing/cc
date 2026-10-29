@@ -45,6 +45,7 @@ typedef enum {
   TOKEN_DO,         /* 'do' */
   TOKEN_DOT,        /* '.' */
   TOKEN_ELSE,       /* 'else' */
+  TOKEN_ENUM,       /* 'enum' */
   TOKEN_EQ_EQ,      /* '==' */
   TOKEN_FOR,        /* 'for' */
   TOKEN_GOTO,       /* 'goto' */
