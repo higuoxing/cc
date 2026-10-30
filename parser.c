@@ -28,7 +28,7 @@
 #include "type.h"
 #include "vector.h"
 
-static LocalVar *declare_local_var(Parser *p, Token name, Type *type);
+static Variable *declare_local_var(Parser *p, Token name, Type *type);
 static AstNode *new_ast_node(Parser *p, AstKind kind);
 static AstNode *new_expr(Parser *p, AstKind kind, Type *type);
 static void reset_function_state(Parser *p);
@@ -84,8 +84,8 @@ static bool is_assignment_op(TokenKind ty) {
          ty == TOKEN_BIT_XOR_EQ || ty == TOKEN_BIT_OR_EQ;
 }
 
-static LocalVar *declare_local_var(Parser *p, Token name, Type *type) {
-  LocalVar *var;
+static Variable *declare_local_var(Parser *p, Token name, Type *type) {
+  Variable *var;
   int size;
   int alignment;
 
@@ -95,17 +95,12 @@ static LocalVar *declare_local_var(Parser *p, Token name, Type *type) {
   alignment = type_alignment(type);
   sema_check_variable_name(p, name, false);
 
-  var = (LocalVar *)calloc(1, sizeof(LocalVar));
-  if (!var)
-    parse_error(p, "out of memory");
-  var->name = name;
-  var->type = type;
+  var = new_variable(p, name, type);
   int padding = (alignment - p->stack_size % alignment) % alignment;
   if (size > INT_MAX - 15 - p->stack_size - padding)
     error_at(p, name, "local variables exceed supported stack size");
   p->stack_size += padding + size;
   var->offset = p->stack_size;
-  add_symbol(p, name, SYMBOL_VARIABLE, var, p->scope_depth);
   return var;
 }
 
@@ -1448,41 +1443,54 @@ static AstNode *parse_block(Parser *p) {
 }
 
 /*
- * external-declaration:
- *   function-definition
- *   declaration
+ * File-scope object declarations currently support uninitialized declarators.
+ * Each declarator uses the same base type; compatible redeclarations produce
+ * no additional AST node.
  */
-static AstNode *parse_external_declaration(Parser *p) {
-  AstNode *fn;
+static AstNode *parse_global_declaration(Parser *p, Type *base, Type *type,
+                                        Token name) {
+  AstNode *head = NULL;
+  AstNode **tail = &head;
+  for (;;) {
+    AstNode *decl;
+    if (name.kind != TOKEN_IDENTIFIER)
+      error_at(p, name, "expect variable name");
+    if (p->current.kind == TOKEN_LPAREN)
+      parse_error(p, "function declarations in a declaration list are not "
+                     "supported yet");
+    decl = declare_global_variable(p, name, type);
+    if (p->current.kind == TOKEN_ASSIGN)
+      parse_error(p, "global variable initializers are not supported yet");
+    if (decl) {
+      *tail = decl;
+      tail = &decl->next;
+    }
+    if (p->current.kind != TOKEN_COMMA)
+      break;
+    parser_advance(p);
+    type = parse_declarator(p, base, &name);
+  }
+  parse_semicolon(p);
+  return head;
+}
+
+/*
+ * Parse a function's parameter declarations and optional body after its return
+ * type and name have been consumed.
+ */
+static AstNode *parse_function_declaration(Parser *p, Type *return_type,
+                                          Token func_name) {
+  AstNode *fn = new_ast_node(p, AST_FUNCTION);
   Function *func;
-  LocalVar *params = NULL;
-  Token func_name;
-  Type *return_type;
-  bool is_typedef;
+  Variable *params = NULL;
   Vector param_types;
   int nparams;
   int definition = 0;
   int explicit_params = 0;
   Token unnamed_param = {0};
 
-  reset_function_state(p);
   vector_init(&param_types, sizeof(Type *));
-  fn = new_ast_node(p, AST_FUNCTION);
-  return_type = parse_declspecs(p, &is_typedef);
-  if (is_typedef) {
-    parse_typedef_declarators(p, return_type);
-    vector_free(&param_types);
-    return NULL;
-  }
-  if ((return_type->kind == TYPE_STRUCT || return_type->kind == TYPE_ENUM) &&
-      p->current.kind == TOKEN_SEMICOLON) {
-    parser_advance(p);
-    return NULL;
-  }
-  return_type = parse_declarator(p, return_type, &func_name);
-  if (func_name.kind != TOKEN_IDENTIFIER)
-    error_at(p, func_name, "expect function name");
-
+  fn->loc = func_name;
   fn->d.function.name = func_name;
   if (return_type->kind == TYPE_ARRAY)
     error_at(p, func_name, "function cannot return an array");
@@ -1498,7 +1506,7 @@ static AstNode *parse_external_declaration(Parser *p) {
   } else if (p->current.kind != TOKEN_RPAREN) {
     explicit_params = 1;
     for (;;) {
-      LocalVar *param;
+      Variable *param;
       Token param_name;
       Token param_loc = p->current;
       Type *param_type;
@@ -1530,16 +1538,11 @@ static AstNode *parse_external_declaration(Parser *p) {
       if (param_name.kind == TOKEN_IDENTIFIER) {
         sema_check_variable_name(p, param_name, true);
 
-        param = (LocalVar *)calloc(1, sizeof(LocalVar));
-        if (!param)
-          parse_error(p, "out of memory");
-        param->name = param_name;
-        param->type = param_type;
+        param = new_variable(p, param_name, param_type);
         param->is_parameter = true;
         param->offset = 8 * (int)param_types.len;
         param->next = params;
         params = param;
-        add_symbol(p, param_name, SYMBOL_VARIABLE, param, p->scope_depth);
       } else {
         if (p->current.kind != TOKEN_COMMA && p->current.kind != TOKEN_RPAREN)
           parse_error(p, "expect parameter name");
@@ -1583,6 +1586,35 @@ static AstNode *parse_external_declaration(Parser *p) {
   check_gotos(p);
   fn->d.function.stack_size = p->stack_size;
   return fn;
+}
+
+/*
+ * external-declaration: function-definition | declaration (C11 6.9).
+ * A '(' after the declarator starts a function; otherwise parse objects.
+ */
+static AstNode *parse_external_declaration(Parser *p) {
+  Type *base;
+  Type *type;
+  Token name;
+  bool is_typedef;
+
+  reset_function_state(p);
+  base = parse_declspecs(p, &is_typedef);
+  if (is_typedef) {
+    parse_typedef_declarators(p, base);
+    return NULL;
+  }
+  if ((base->kind == TYPE_STRUCT || base->kind == TYPE_ENUM) &&
+      p->current.kind == TOKEN_SEMICOLON) {
+    parser_advance(p);
+    return NULL;
+  }
+  type = parse_declarator(p, base, &name);
+  if (name.kind != TOKEN_IDENTIFIER)
+    error_at(p, name, "expect declaration name");
+  if (p->current.kind == TOKEN_LPAREN)
+    return parse_function_declaration(p, type, name);
+  return parse_global_declaration(p, base, type, name);
 }
 
 /*
@@ -1988,14 +2020,12 @@ AstNode *parse_translation_unit(const char *filename, const char *source) {
     parse_error(&p, "expect type specifier");
 
   while (p.current.kind != TOKEN_EOF) {
-    /* Declarations return no AST node. */
-    AstNode *fn = parse_external_declaration(&p);
-    if (fn) {
-      *tail = fn;
+    *tail = parse_external_declaration(&p);
+    while (*tail)
       tail = &(*tail)->next;
-    }
   }
 
+  sema_check_global_variables(&p);
   check_calls(&p);
   return head;
 }

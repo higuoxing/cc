@@ -33,13 +33,14 @@ typedef struct Tag {
   struct Tag *next;
 } Tag;
 
-typedef struct LocalVar {
+typedef struct Variable {
   Token name;
   Type *type;
-  int offset; /* Positive distance below %rbp */
+  int offset; /* Positive distance below %rbp for stack variables. */
+  bool is_global;
   bool is_parameter;
-  struct LocalVar *next;
-} LocalVar;
+  struct Variable *next; /* Parameter list, in reverse declaration order. */
+} Variable;
 
 typedef struct Enum {
   Token name;
@@ -93,7 +94,7 @@ typedef struct Symbol {
   SymbolKind kind;
   int scope_depth;
   union {
-    LocalVar *variable;
+    Variable *variable;
     Function *function;
     Type *typedef_type;
     Enum *enumerator;
@@ -206,7 +207,7 @@ typedef struct AstNode {
   AstKind kind;
   Type *type; /* Inferred expression type. */
   Token loc;
-  struct AstNode *next; /* Linked list of statements inside a block. */
+  struct AstNode *next; /* Statements or external declarations. */
   union {
     struct {
       Token name;
@@ -215,7 +216,7 @@ typedef struct AstNode {
        * Parameters in reverse declaration order. This list is retained for
        * codegen independently of their scope-bound symbol entries.
        */
-      struct LocalVar *params;
+      struct Variable *params;
       int stack_size;
     } function;
 
@@ -290,7 +291,7 @@ typedef struct AstNode {
     } ret;
 
     struct {
-      LocalVar *var;
+      Variable *var;
       struct AstNode *init;
     } decl;
 
@@ -299,7 +300,7 @@ typedef struct AstNode {
     } expr_stmt;
 
     struct {
-      LocalVar *var;
+      Variable *var;
     } variable;
 
     struct {

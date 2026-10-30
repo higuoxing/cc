@@ -55,9 +55,15 @@ static void codegen_expr(AstNode *expr);
 
 static void codegen_addr(AstNode *expr) {
   switch (expr->kind) {
-  case AST_VAR:
-    fprintf(out, "\tleaq -%d(%%rbp), %%rax\n", expr->d.variable.var->offset);
+  case AST_VAR: {
+    Variable *var = expr->d.variable.var;
+    if (var->is_global)
+      fprintf(out, "\tleaq %.*s(%%rip), %%rax\n", var->name.len,
+              var->name.start);
+    else
+      fprintf(out, "\tleaq -%d(%%rbp), %%rax\n", var->offset);
     break;
+  }
   case AST_MEMBER:
     /*
      * Both '.' and '->' use the struct object's address plus its field offset.
@@ -733,25 +739,47 @@ static void codegen_stmt(AstNode *stmt, int break_label, int continue_label,
   }
 }
 
+/*
+ * Uninitialized globals have zero-filled storage in .bss. Preserve the current
+ * section because object declarations can appear between function definitions.
+ */
+static void codegen_global_variable(Variable *var) {
+  Token name = var->name;
+  fprintf(out, "\t.pushsection .bss\n");
+  fprintf(out, "\t.globl %.*s\n", name.len, name.start);
+  fprintf(out, "\t.type %.*s, @object\n", name.len, name.start);
+  fprintf(out, "\t.size %.*s, %d\n", name.len, name.start, type_size(var->type));
+  fprintf(out, "\t.balign %d\n", type_alignment(var->type));
+  fprintf(out, "%.*s:\n", name.len, name.start);
+  fprintf(out, "\t.zero %d\n", type_size(var->type));
+  fprintf(out, "\t.popsection\n");
+}
+
 void codegen(const AstNode *ast, FILE *out_file) {
-  const AstNode *fn;
+  const AstNode *decl;
 
   out = out_file;
   fprintf(out, "\t.text\n");
 
-  /* The translation unit is a chain of function definitions. */
-  for (fn = ast; fn; fn = fn->next) {
+  /*
+   * The translation unit contains global objects and function definitions.
+   */
+  for (decl = ast; decl; decl = decl->next) {
+    if (decl->kind == AST_DECL) {
+      codegen_global_variable(decl->d.decl.var);
+      continue;
+    }
     Token name;
     int stack_size;
     int ret_label = label_seq++;
 
-    if (fn->kind != AST_FUNCTION) {
+    if (decl->kind != AST_FUNCTION) {
       fprintf(stderr, "expected function AST\n");
       exit(1);
     }
 
-    name = fn->d.function.name;
-    stack_size = (fn->d.function.stack_size + 15) / 16 * 16;
+    name = decl->d.function.name;
+    stack_size = (decl->d.function.stack_size + 15) / 16 * 16;
     fprintf(out, "\t.globl %.*s\n", name.len, name.start);
     fprintf(out, "%.*s:\n", name.len, name.start);
     fprintf(out, "\tpushq %%rbp\n");
@@ -764,13 +792,13 @@ void codegen(const AstNode *ast, FILE *out_file) {
      * arrive in registers; later ones start at 16(%rbp), above saved rbp
      * and the return address. The locals chain is in reverse parameter order.
      */
-    if (fn->d.function.params) {
-      LocalVar *param;
+    if (decl->d.function.params) {
+      Variable *param;
       int nparams = 0;
 
-      for (param = fn->d.function.params; param; param = param->next)
+      for (param = decl->d.function.params; param; param = param->next)
         nparams++;
-      for (param = fn->d.function.params; param; param = param->next) {
+      for (param = decl->d.function.params; param; param = param->next) {
         --nparams;
         if (nparams < 6) {
           if (param->type->size == 8)
@@ -804,7 +832,7 @@ void codegen(const AstNode *ast, FILE *out_file) {
       }
     }
 
-    codegen_stmt(fn->d.function.body, -1, -1, ret_label);
+    codegen_stmt(decl->d.function.body, -1, -1, ret_label);
 
     /* Reaching the end of the function returns zero. */
     fprintf(out, "\tmovl $0, %%eax\n");

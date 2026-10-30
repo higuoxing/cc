@@ -151,6 +151,80 @@ function check_error() {
     printf '[PASS] %s (rejected with expected diagnostic)\n' "$name"
 }
 
+# Global objects use zero-filled storage and RIP-relative addresses.
+check 1 'char value; int main(void) { if (value != 0) return 0; value = -1; return value == -1; }' global-char-zero-and-store
+check 1 'unsigned char value; int main(void) { if (value != 0) return 0; value = 255; return value == 255; }' global-unsigned-char-zero-and-store
+check 1 'short value; int main(void) { if (value != 0) return 0; value = -1; return value == -1; }' global-short-zero-and-store
+check 1 'unsigned short value; int main(void) { if (value != 0) return 0; value = 65535; return value == 65535; }' global-unsigned-short-zero-and-store
+check 1 'int value; int main(void) { if (value != 0) return 0; value = -1; return value == -1; }' global-int-zero-and-store
+check 1 'unsigned value; int main(void) { if (value != 0) return 0; value = 4294967295U; return value == 4294967295U; }' global-unsigned-zero-and-store
+check 1 'long value; int main(void) { if (value != 0) return 0; value = 1099511627776L; return value == 1099511627776L; }' global-long-zero-and-store
+check 1 'unsigned long value; int main(void) { if (value != 0) return 0; value = 18446744073709551615UL; return value == 18446744073709551615UL; }' global-unsigned-long-zero-and-store
+check 1 'long long value; int main(void) { if (value != 0) return 0; value = -9223372036854775807LL; return value == -9223372036854775807LL; }' global-long-long-zero-and-store
+check 1 'unsigned long long value; int main(void) { if (value != 0) return 0; value = 18446744073709551615ULL; return value == 18446744073709551615ULL; }' global-unsigned-long-long-zero-and-store
+check 42 'int x; int main(void) { x = 42; return x; }' global-assignment
+check 1 'int *p; int main(void) { return p == 0; }' global-pointer-zero
+check 42 'int x, *p; int main(void) { p = &x; *p = 42; return x; }' global-pointer-store
+check 42 'int x, *p, **pp; int main(void) { pp = &p; p = &x; **pp = 42; return x; }' global-pointer-to-pointer
+check 42 'int a[3]; int main(void) { if (a[0] || a[1] || a[2]) return 0; a[2] = 42; return a[2]; }' global-array-zero-and-store
+check 42 'char a[5]; int main(void) { a[0] = 1; a[4] = 42; if (a[1] || a[2] || a[3]) return 0; return a[4]; }' global-char-array
+check 1 'unsigned short a[3]; int main(void) { a[1] = 65535; return a[0] == 0 && a[1] == 65535 && a[2] == 0; }' global-short-array
+check 1 'long a[3]; int main(void) { a[1] = 1099511627776L; return a[0] == 0 && a[1] == 1099511627776L && a[2] == 0; }' global-long-array
+check 3 'int a[3]; int main(void) { return (a + 3) - a; }' global-pointer-difference
+check 42 'int a[3], *p; int main(void) { p = a; p++; *p = 42; return a[1]; }' global-pointer-increment
+check 42 'struct S { char c; long value; }; struct S s; int main(void) { if (s.c || s.value) return 0; s.c = 7; s.value = 42; return s.value; }' global-struct-members
+check 42 'struct S { int a[3]; }; struct S s; int main(void) { s.a[2] = 42; return s.a[2]; }' global-struct-array-member
+check 42 'struct I { short x; }; struct O { char c; struct I i; long n; }; struct O o; int main(void) { o.i.x = 42; o.n = 1099511627776L; if (o.n != 1099511627776L) return 0; return o.i.x; }' global-nested-struct
+check 42 'struct S s; struct S { int value; struct S *next; }; int main(void) { s.value = 42; s.next = &s; return s.next->value; }' global-completed-struct
+check 1 'struct S { char c; long n; }; struct S s; int main(void) { void *raw = &s; unsigned char *bytes = raw; unsigned long i; for (i = 0; i < sizeof(s); i++) if (bytes[i] != 0) return 0; return 1; }' global-struct-storage-zero
+check 42 'enum E { ANSWER = 42 }; enum E e; int main(void) { if (e != 0) return 0; e = ANSWER; return e; }' global-enum
+check 42 'typedef unsigned long Counter; Counter count; int main(void) { count = 42; return count; }' global-typedef
+check 42 'typedef int A[3]; A a; int main(void) { a[2] = 42; return a[2]; }' global-typedef-array
+check 42 'int x; int x; int main(void) { x = 42; return x; }' global-repeated-declaration
+check 42 'int a, b, a, c; int main(void) { a = 10; b = 12; c = 20; return a + b + c; }' global-multiple-and-repeated
+check 42 'int a; int a, b; int main(void) { a = 20; b = 22; return a + b; }' global-new-after-repeated
+check 42 'typedef int I; I x; int x; int main(void) { x = 42; return x; }' global-compatible-alias-redeclaration
+check 42 'int x; int f(void) { x = 42; return 0; } int main(void) { f(); return x; }' global-cross-function-store
+check 42 'int count; int f(int n) { if (n == 0) return count; count++; return f(n - 1); } int main(void) { return f(42); }' global-recursive-state
+check 42 'int x; int f(int x) { x = 7; return x; } int main(void) { x = 42; f(1); return x; }' global-parameter-shadow
+check 42 'int x; int main(void) { x = 42; { int x = 7; if (x != 7) return 0; } return x; }' global-block-shadow
+check 42 'int x; int main(void) { x = 42; for (int x = 0; x < 3; x++) {} return x; }' global-for-shadow
+check 42 'int f(void) { return 20; } int x; int main(void) { x = 22; return f() + x; }' global-object-after-function
+check 98 'int f(void) { char *p = "abc"; return p[1]; } int x; int main(void) { x = f(); return x; }' global-sections-after-string
+check 65 'char *p; int main(void) { p = "A"; return p[0]; }' global-pointer-to-string
+check 42 'int a[3]; int *f(void) { return a; } int main(void) { f()[1] = 42; return a[1]; }' global-return-array-pointer
+check 42 'struct S { int x; }; struct S s; struct S *f(void) { return &s; } int main(void) { f()->x = 42; return s.x; }' global-return-struct-pointer
+check 42 'int x; int f(int a,int b,int c,int d,int e,int f,int g,int *p) { *p = a+b+c+d+e+f+g; return 0; } int main(void) { f(1,2,3,4,5,6,21,&x); return x; }' global-eighth-pointer-argument
+check 42 'int x; int main(void) { x = 20; x += 22; return x; }' global-compound-assignment
+check 42 'int x; int main(void) { x = 40; ++x; x++; return x; }' global-increment
+check 1 'unsigned char c; int main(void) { c = 255; c++; return c == 0; }' global-narrow-increment
+check 1 'char a, b; int main(void) { b = 7; a = 1; return a == 1 && b == 7; }' global-byte-store-neighbor
+check 1 'short a, b; int main(void) { b = 7; a = 1; return a == 1 && b == 7; }' global-short-store-neighbor
+check 12 'int a[3]; int main(void) { return sizeof(a); }' global-sizeof-array
+
+# File-scope object declaration diagnostics.
+check_error global-void 'void x;' "1:6: error: variable has void type"
+check_error global-void-alias 'typedef void V; V x;' "1:19: error: variable has void type"
+check_error global-conflicting-type 'int x; long x;' "1:13: error: conflicting declaration of variable 'x'"
+check_error global-conflicting-array 'int a[2]; int a[3];' "1:15: error: conflicting declaration of variable 'a'"
+check_error global-conflicting-pointer 'int *p; char *p;' "1:15: error: conflicting declaration of variable 'p'"
+check_error global-function-conflict 'int f; int f(void);' "1:12: error: function conflicts with variable 'f'"
+check_error global-variable-conflict 'int f(void); int f;' "1:18: error: variable conflicts with function 'f'"
+check_error global-typedef-conflict 'typedef int T; int T;' "1:20: error: variable conflicts with typedef 'T'"
+check_error global-typedef-name-conflict 'int T; typedef int T;' "1:20: error: typedef conflicts with variable 'T'"
+check_error global-enumerator-conflict 'enum { X }; int X;' "1:17: error: variable conflicts with enumerator 'X'"
+check_error global-enumerator-name-conflict 'int X; enum { X };' "1:15: error: enumerator conflicts with variable 'X'"
+check_error global-incomplete 'struct S x;' "1:10: error: variable has incomplete type"
+check_error global-repeated-incomplete 'struct S x; struct S x;' "1:10: error: variable has incomplete type"
+check_error global-initializer-unsupported 'int x = 42;' "1:7: error: global variable initializers are not supported yet"
+check_error global-array-initializer-unsupported 'int a[3] = {0};' "1:10: error: global variable initializers are not supported yet"
+check_error global-missing-name 'int;' "1:4: error: expect declaration name"
+check_error global-missing-name-after-comma 'int a,;' "1:7: error: expect variable name"
+check_error global-mixed-function-unsupported 'int a, f(void);' "1:9: error: function declarations in a declaration list are not supported yet"
+check_error global-distinct-structs 'struct A { int x; }; struct B { int x; }; struct A a; struct B a;' "1:64: error: conflicting declaration of variable 'a'"
+check_error global-use-before-declaration 'int f(void) { return x; } int x;' "1:22: error: undeclared identifier"
+check_error global-nonconstant-array-bound 'int n; int a[n];' "1:15: error: not an integer constant expression"
+
 # Declaration specifiers use one bitmask for built-in and named types.
 check 42 'typedef int T; int main(void) { unsigned T = 42; return T; }' declspec-unsigned-shadows-typedef
 check 42 'typedef struct { int x; } S; int main(void) { S S; S.x = 42; return S.x; }' declspec-struct-alias-as-declarator

@@ -39,6 +39,9 @@ extern Symbol *find_symbol_in_scope(Parser *p, Token name, int scope_depth);
 extern Symbol *add_symbol(Parser *p, Token name, SymbolKind kind,
                           void *declaration, int scope_depth);
 extern void sema_check_variable_name(Parser *p, Token name, bool is_parameter);
+extern Variable *new_variable(Parser *p, Token name, Type *type);
+extern AstNode *declare_global_variable(Parser *p, Token name, Type *type);
+extern void sema_check_global_variables(Parser *p);
 extern void declare_typedef(Parser *p, Token name, Type *type);
 extern Enum *declare_enumerator(Parser *p, Token name, AstNode *initializer,
                                      int64_t next_value);

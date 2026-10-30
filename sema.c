@@ -112,6 +112,55 @@ void sema_check_variable_name(Parser *p, Token name, bool is_parameter) {
 static AstNode *new_expr(Parser *p, AstKind kind, Type *type, Token loc);
 
 /*
+ * Create a variable and register its name in the current scope. Callers check
+ * redeclarations first and assign storage information after creation.
+ */
+Variable *new_variable(Parser *p, Token name, Type *type) {
+  Variable *var = calloc(1, sizeof(Variable));
+  if (!var)
+    error_at(p, name, "out of memory");
+  var->name = name;
+  var->type = type;
+  add_symbol(p, name, SYMBOL_VARIABLE, var, p->scope_depth);
+  return var;
+}
+
+/*
+ * An uninitialized file-scope object is a tentative definition (C11 6.9.2).
+ * Compatible declarations share one variable and produce one declaration node.
+ * An incomplete struct may be completed later in the translation unit.
+ */
+AstNode *declare_global_variable(Parser *p, Token name, Type *type) {
+  Symbol *prev_sym = find_symbol_in_scope(p, name, 0);
+  Variable *var;
+  AstNode *decl;
+  if (type->kind == TYPE_VOID)
+    error_at(p, name, "variable has void type");
+  if (prev_sym) {
+    if (prev_sym->kind != SYMBOL_VARIABLE)
+      error_at(p, name, "variable conflicts with %s '%.*s'",
+               symbol_kind_name(prev_sym->kind), name.len, name.start);
+    var = prev_sym->d.variable;
+    if (!same_type(var->type, type))
+      error_at(p, name, "conflicting declaration of variable '%.*s'", name.len,
+               name.start);
+    return NULL;
+  }
+  var = new_variable(p, name, type);
+  var->is_global = true;
+  decl = new_expr(p, AST_DECL, &builtin_type_void, name);
+  decl->d.decl.var = var;
+  return decl;
+}
+
+void sema_check_global_variables(Parser *p) {
+  Symbol *sym;
+  for (sym = p->symbols; sym; sym = sym->next)
+    if (sym->kind == SYMBOL_VARIABLE && type_size(sym->d.variable->type) < 0)
+      error_at(p, sym->name, "variable has incomplete type");
+}
+
+/*
  * C11 permits a typedef to be repeated in the same scope for the same type.
  * An enum and its compatible integer type are still distinct types here.
  */
