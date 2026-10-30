@@ -110,6 +110,7 @@ void sema_check_variable_name(Parser *p, Token name, bool is_parameter) {
 }
 
 static AstNode *new_expr(Parser *p, AstKind kind, Type *type, Token loc);
+static bool constant_integer_tree(Parser *p, AstNode *expr);
 
 /*
  * Create a variable and register its name in the current scope. Callers check
@@ -126,7 +127,8 @@ Variable *new_variable(Parser *p, Token name, Type *type) {
 }
 
 /*
- * An uninitialized file-scope object is a tentative definition (C11 6.9.2).
+ * A file-scope object without an initializer is a tentative definition
+ * (C11 6.9.2). A later initializer can provide its definition.
  * Compatible declarations share one variable and produce one declaration node.
  * An incomplete struct may be completed later in the translation unit.
  */
@@ -151,6 +153,29 @@ AstNode *declare_global_variable(Parser *p, Token name, Type *type) {
   decl = new_expr(p, AST_DECL, &builtin_type_void, name);
   decl->d.decl.var = var;
   return decl;
+}
+
+/*
+ * Evaluate after conversion so narrowing and signedness match the object's
+ * type. Keep only its stored bits; codegen will select the data directive.
+ */
+void sema_initialize_global_variable(Parser *p, Token name, AstNode *expr) {
+  Variable *var = find_symbol_in_scope(p, name, 0)->d.variable;
+  uint64_t value;
+  int width;
+  if (var->has_initializer)
+    error_at(p, name, "redefinition of variable '%.*s'", name.len, name.start);
+  if (!is_integer(var->type))
+    error_at(p, name, "global initializer requires an integer or enum type");
+  width = type_size(var->type) * 8;
+  expr = sema_convert_expr(p, var->type, expr, name, "initializer");
+  if (!constant_integer_tree(p, expr))
+    error_at(p, expr->loc, "global initializer is not a constant expression");
+  value = (uint64_t)eval_const_expr(p, expr);
+  if (width < 64)
+    value &= (UINT64_C(1) << width) - 1;
+  var->init_value = value;
+  var->has_initializer = true;
 }
 
 void sema_check_global_variables(Parser *p) {
@@ -345,25 +370,38 @@ void sema_check_nonvoid_expr(Parser *p, AstNode *expr) {
 }
 
 /*
- * Only evaluate constant integer trees when testing for a null pointer
- * constant. An ordinary integer variable whose value is zero is insufficient.
+ * Check integer constant expressions before evaluating them. Calls, variable
+ * reads and side effects are allowed only in unevaluated branches.
  */
-static bool constant_integer_tree(AstNode *expr) {
+static bool constant_integer_tree(Parser *p, AstNode *expr) {
   if (!is_integer(expr->type))
     return false;
   switch (expr->kind) {
   case AST_INT_LITERAL:
     return true;
   case AST_CONVERT:
-    return constant_integer_tree(expr->d.unary.operand);
+    return constant_integer_tree(p, expr->d.unary.operand);
   case AST_CONDITIONAL:
-    return constant_integer_tree(expr->d.conditional.cond) &&
-           constant_integer_tree(expr->d.conditional.then_expr) &&
-           constant_integer_tree(expr->d.conditional.else_expr);
+    if (!constant_integer_tree(p, expr->d.conditional.cond))
+      return false;
+    return constant_integer_tree(p, eval_const_expr(p, expr->d.conditional.cond)
+                                        ? expr->d.conditional.then_expr
+                                        : expr->d.conditional.else_expr);
+  case AST_LOGICAL_AND:
+  case AST_LOGICAL_OR: {
+    bool lhs;
+    if (!constant_integer_tree(p, expr->d.binary.lhs))
+      return false;
+    lhs = eval_const_expr(p, expr->d.binary.lhs) != 0;
+    if ((expr->kind == AST_LOGICAL_AND && !lhs) ||
+        (expr->kind == AST_LOGICAL_OR && lhs))
+      return true;
+    return constant_integer_tree(p, expr->d.binary.rhs);
+  }
   case AST_NEG:
   case AST_BITWISE_NOT:
   case AST_LOGICAL_NOT:
-    return constant_integer_tree(expr->d.unary.operand);
+    return constant_integer_tree(p, expr->d.unary.operand);
   case AST_ADD:
   case AST_SUB:
   case AST_MUL:
@@ -380,17 +418,15 @@ static bool constant_integer_tree(AstNode *expr) {
   case AST_BIT_AND:
   case AST_BIT_XOR:
   case AST_BIT_OR:
-  case AST_LOGICAL_AND:
-  case AST_LOGICAL_OR:
-    return constant_integer_tree(expr->d.binary.lhs) &&
-           constant_integer_tree(expr->d.binary.rhs);
+    return constant_integer_tree(p, expr->d.binary.lhs) &&
+           constant_integer_tree(p, expr->d.binary.rhs);
   default:
     return false;
   }
 }
 
 static bool null_pointer_constant(Parser *p, AstNode *expr) {
-  return constant_integer_tree(expr) && eval_const_expr(p, expr) == 0;
+  return constant_integer_tree(p, expr) && eval_const_expr(p, expr) == 0;
 }
 
 AstNode *sema_convert_expr(Parser *p, Type *target, AstNode *expr, Token loc,

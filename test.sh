@@ -151,6 +151,69 @@ function check_error() {
     printf '[PASS] %s (rejected with expected diagnostic)\n' "$name"
 }
 
+# Scalar global initializers use the converted value at the object's width.
+check 42 'int x = 42; int main(void) { return x; }' global-int-initializer
+check 1 'char x = -1; int main(void) { return x == -1; }' global-char-negative-initializer
+check 1 'unsigned char x = 255; int main(void) { return x == 255; }' global-unsigned-char-initializer
+check 1 'char x = 511; int main(void) { return x == -1; }' global-char-narrow-initializer
+check 1 'unsigned char x = -1; int main(void) { return x == 255; }' global-unsigned-char-narrow-initializer
+check 1 'short x = -32768; int main(void) { return x == -32768; }' global-short-negative-initializer
+check 1 'unsigned short x = 65535; int main(void) { return x == 65535; }' global-unsigned-short-initializer
+check 1 'short x = 65535; int main(void) { return x == -1; }' global-short-narrow-initializer
+check 1 'unsigned short x = -1; int main(void) { return x == 65535; }' global-unsigned-short-narrow-initializer
+check 1 'int x = -2147483647 - 1; int main(void) { return x == -2147483647 - 1; }' global-int-min-initializer
+check 1 'unsigned x = 4294967295U; int main(void) { return x == 4294967295U; }' global-unsigned-initializer
+check 1 'int x = 4294967295U; int main(void) { return x == -1; }' global-int-narrow-initializer
+check 1 'unsigned x = -1; int main(void) { return x == 4294967295U; }' global-unsigned-negative-initializer
+check 1 'long x = 1099511627776L; int main(void) { return x == 1099511627776L; }' global-long-initializer
+check 1 'long x = -1099511627776L; int main(void) { return x == -1099511627776L; }' global-long-negative-initializer
+check 1 'unsigned long x = 18446744073709551615UL; int main(void) { return x == 18446744073709551615UL; }' global-unsigned-long-initializer
+check 1 'long long x = -9223372036854775807LL - 1; int main(void) { return x == -9223372036854775807LL - 1; }' global-long-long-min-initializer
+check 1 'unsigned long long x = 18446744073709551615ULL; int main(void) { return x == 18446744073709551615ULL; }' global-unsigned-long-long-initializer
+check 42 'enum E { ANSWER = 42 }; enum E x = ANSWER; int main(void) { return x; }' global-enum-initializer
+check 1 'enum E { NEG = -1 }; enum E x = NEG; int main(void) { return x == -1; }' global-enum-negative-initializer
+check 42 'typedef unsigned long U; U x = 42; int main(void) { return x; }' global-typedef-initializer
+check 42 'int x = 6 * 7; int main(void) { return x; }' global-constant-expression-initializer
+check 8 'unsigned long x = sizeof(long); int main(void) { return x; }' global-sizeof-initializer
+check 65 'int x = '\''A'\''; int main(void) { return x; }' global-character-initializer
+check 42 'int x = 1 ? 42 : 1 / 0; int main(void) { return x; }' global-conditional-initializer
+check 42 'int f(void); int x = 1 ? 42 : f(); int main(void) { return x; }' global-unevaluated-call-initializer
+check 42 'int x; int x = 42; int x; int main(void) { return x; }' global-nonzero-tentative-definition
+check 42 'int x = 42; int x; int main(void) { return x; }' global-nonzero-followed-by-tentative
+check 42 'int x; int f(void) { return x; } int x = 42; int main(void) { return f(); }' global-initializer-after-reference
+check 42 'int x = 20, y = 22; int main(void) { return x + y; }' global-multiple-initializers
+check 42 'int x = 20; int main(void) { x += 22; return x; }' global-initialized-object-writable
+check 42 'int x = 21; int main(void) { int *p = &x; *p *= 2; return x; }' global-initialized-object-address
+check 1 'char a = 1, b = 2; short c = 3, d = 4; int main(void) { a = 7; c = 8; return a == 7 && b == 2 && c == 8 && d == 4; }' global-initialized-neighbor-storage
+check 42 'int a = 10, z, b = 12; int f(void) { char *p = "A"; return p[0] - 45; } int c = 0; int main(void) { return a + z + b + f() + c; }' global-data-bss-text-rodata-sections
+check 0 'int x = 0; int main(void) { return x; }' global-zero-initializer
+check 0 'int x; int x = 0; int x; int main(void) { return x; }' global-zero-tentative-definition
+check 0 'int x = 0, y = 0; int main(void) { return x + y; }' global-zero-multiple-definitions
+check 0 'int f(void); int x = 0 && f(); int main(void) { return x; }' global-zero-unevaluated-call
+check 0 'unsigned char x = 256; int main(void) { return x; }' global-zero-after-narrowing
+check_error global-initializer-redefinition 'int x = 1; int x = 2;' "1:16: error: redefinition of variable 'x'"
+check_error global-initializer-zero-redefinition 'int x = 0; int x = 0;' "1:16: error: redefinition of variable 'x'"
+check_error global-initializer-tentative-redefinition 'int x; int x = 0; int x = 1;' "1:23: error: redefinition of variable 'x'"
+check_error global-initializer-comma-redefinition 'int x = 1, x = 2;' "1:12: error: redefinition of variable 'x'"
+check_error global-initializer-conflicting-definition 'int x = 1; long x = 2;' "1:17: error: conflicting declaration of variable 'x'"
+check_error global-initializer-variable-read 'int y; int x = y;' "1:16: error: global initializer is not a constant expression"
+check_error global-initializer-initialized-variable-read 'int y = 1; int x = y;' "1:20: error: global initializer is not a constant expression"
+check_error global-initializer-self-read 'int x = x;' "1:9: error: global initializer is not a constant expression"
+check_error global-initializer-function-call 'int f(void); int x = f();' "1:22: error: global initializer is not a constant expression"
+check_error global-initializer-assignment 'int y; int x = (y = 1);' "1:19: error: global initializer is not a constant expression"
+check_error global-initializer-comma-expression 'int x = (1, 42);' "1:11: error: global initializer is not a constant expression"
+check_error global-initializer-increment 'int y; int x = y++;' "1:17: error: global initializer is not a constant expression"
+check_error global-initializer-evaluated-call 'int f(void); int x = 1 && f();' "1:24: error: global initializer is not a constant expression"
+check_error global-initializer-incompatible-string 'int x = "A";' "1:5: error: incompatible initializer type"
+check_error global-initializer-void-call 'void f(void); int x = f();' "1:23: error: void expression used as a value"
+check_error global-initializer-pointer-unsupported 'int *p = 0;' "1:8: error: global pointer initializers are not supported yet"
+check_error global-initializer-array-unsupported 'int a[2] = {1,2};' "1:10: error: array initializers are not supported yet"
+check_error global-initializer-struct-unsupported 'struct S { int x; }; struct S s = {1};' "1:33: error: struct initializers are not supported yet"
+check_error global-initializer-division-by-zero 'int x = 1 / 0;' "1:14: error: division by zero in constant expression"
+check_error global-initializer-signed-overflow 'int x = 2147483647 + 1;' "1:23: error: integer overflow in constant expression"
+check_error global-initializer-invalid-shift 'int x = 1 << 32;' "1:16: error: invalid shift count in constant expression"
+check_error global-initializer-missing-expression 'int x = ;' "1:9: error: expect expr"
+
 # Global objects use zero-filled storage and RIP-relative addresses.
 check 1 'char value; int main(void) { if (value != 0) return 0; value = -1; return value == -1; }' global-char-zero-and-store
 check 1 'unsigned char value; int main(void) { if (value != 0) return 0; value = 255; return value == 255; }' global-unsigned-char-zero-and-store
@@ -216,8 +279,7 @@ check_error global-enumerator-conflict 'enum { X }; int X;' "1:17: error: variab
 check_error global-enumerator-name-conflict 'int X; enum { X };' "1:15: error: enumerator conflicts with variable 'X'"
 check_error global-incomplete 'struct S x;' "1:10: error: variable has incomplete type"
 check_error global-repeated-incomplete 'struct S x; struct S x;' "1:10: error: variable has incomplete type"
-check_error global-initializer-unsupported 'int x = 42;' "1:7: error: global variable initializers are not supported yet"
-check_error global-array-initializer-unsupported 'int a[3] = {0};' "1:10: error: global variable initializers are not supported yet"
+check_error global-array-initializer-unsupported 'int a[3] = {0};' "1:10: error: array initializers are not supported yet"
 check_error global-missing-name 'int;' "1:4: error: expect declaration name"
 check_error global-missing-name-after-comma 'int a,;' "1:7: error: expect variable name"
 check_error global-mixed-function-unsupported 'int a, f(void);' "1:9: error: function declarations in a declaration list are not supported yet"

@@ -1443,12 +1443,12 @@ static AstNode *parse_block(Parser *p) {
 }
 
 /*
- * File-scope object declarations currently support uninitialized declarators.
+ * File-scope object declarations support integer constant initializers.
  * Each declarator uses the same base type; compatible redeclarations produce
  * no additional AST node.
  */
 static AstNode *parse_global_declaration(Parser *p, Type *base, Type *type,
-                                        Token name) {
+                                         Token name) {
   AstNode *head = NULL;
   AstNode **tail = &head;
   for (;;) {
@@ -1459,8 +1459,16 @@ static AstNode *parse_global_declaration(Parser *p, Type *base, Type *type,
       parse_error(p, "function declarations in a declaration list are not "
                      "supported yet");
     decl = declare_global_variable(p, name, type);
-    if (p->current.kind == TOKEN_ASSIGN)
-      parse_error(p, "global variable initializers are not supported yet");
+    if (p->current.kind == TOKEN_ASSIGN) {
+      if (type->kind == TYPE_ARRAY)
+        parse_error(p, "array initializers are not supported yet");
+      if (type->kind == TYPE_STRUCT)
+        parse_error(p, "struct initializers are not supported yet");
+      if (type->kind == TYPE_PTR)
+        parse_error(p, "global pointer initializers are not supported yet");
+      parser_advance(p);
+      sema_initialize_global_variable(p, name, parse_assignment(p));
+    }
     if (decl) {
       *tail = decl;
       tail = &decl->next;
@@ -1479,7 +1487,7 @@ static AstNode *parse_global_declaration(Parser *p, Type *base, Type *type,
  * type and name have been consumed.
  */
 static AstNode *parse_function_declaration(Parser *p, Type *return_type,
-                                          Token func_name) {
+                                           Token func_name) {
   AstNode *fn = new_ast_node(p, AST_FUNCTION);
   Function *func;
   Variable *params = NULL;

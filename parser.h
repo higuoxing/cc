@@ -39,6 +39,8 @@ typedef struct Variable {
   int offset; /* Positive distance below %rbp for stack variables. */
   bool is_global;
   bool is_parameter;
+  bool has_initializer;
+  uint64_t init_value; /* Global integer initializer bits, at the object's width. */
   struct Variable *next; /* Parameter list, in reverse declaration order. */
 } Variable;
 

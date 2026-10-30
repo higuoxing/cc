@@ -740,18 +740,42 @@ static void codegen_stmt(AstNode *stmt, int break_label, int continue_label,
 }
 
 /*
- * Uninitialized globals have zero-filled storage in .bss. Preserve the current
- * section because object declarations can appear between function definitions.
+ * Zero-initialized globals use .bss; nonzero integer initializers use .data.
+ * Preserve the current section because objects can appear between functions.
  */
 static void codegen_global_variable(Variable *var) {
   Token name = var->name;
-  fprintf(out, "\t.pushsection .bss\n");
+  int size = type_size(var->type);
+  bool nonzero = var->has_initializer && var->init_value != 0;
+  fprintf(out, "\t.pushsection %s\n", nonzero ? ".data" : ".bss");
   fprintf(out, "\t.globl %.*s\n", name.len, name.start);
   fprintf(out, "\t.type %.*s, @object\n", name.len, name.start);
-  fprintf(out, "\t.size %.*s, %d\n", name.len, name.start, type_size(var->type));
+  fprintf(out, "\t.size %.*s, %d\n", name.len, name.start, size);
   fprintf(out, "\t.balign %d\n", type_alignment(var->type));
   fprintf(out, "%.*s:\n", name.len, name.start);
-  fprintf(out, "\t.zero %d\n", type_size(var->type));
+  if (nonzero) {
+    const char *directive;
+    switch (size) {
+    case 1:
+      directive = ".byte";
+      break;
+    case 2:
+      directive = ".short";
+      break;
+    case 4:
+      directive = ".long";
+      break;
+    case 8:
+      directive = ".quad";
+      break;
+    default:
+      fprintf(stderr, "unsupported global initializer size\n");
+      exit(1);
+    }
+    fprintf(out, "\t%s %" PRIu64 "\n", directive, var->init_value);
+  } else {
+    fprintf(out, "\t.zero %d\n", size);
+  }
   fprintf(out, "\t.popsection\n");
 }
 
