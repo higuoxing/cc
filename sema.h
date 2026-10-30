@@ -30,8 +30,16 @@
  */
 
 extern bool same_identifier(Token a, Token b);
-extern Function *find_function(Parser *p, Token name);
-extern Enum *find_enumerator(Parser *p, Token name);
+/*
+ * Expression and type-name lookup finds the nearest visible binding.
+ * Redeclaration checks look only in the scope receiving the declaration.
+ */
+extern Symbol *find_symbol(Parser *p, Token name);
+extern Symbol *find_symbol_in_scope(Parser *p, Token name, int scope_depth);
+extern Symbol *add_symbol(Parser *p, Token name, SymbolKind kind,
+                          void *declaration, int scope_depth);
+extern void sema_check_variable_name(Parser *p, Token name, bool is_parameter);
+extern void declare_typedef(Parser *p, Token name, Type *type);
 extern Enum *declare_enumerator(Parser *p, Token name, AstNode *initializer,
                                      int64_t next_value);
 extern AstNode *sema_enumerator_expr(Parser *p, Enum *enumerator, Token loc);

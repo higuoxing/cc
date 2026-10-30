@@ -151,6 +151,110 @@ function check_error() {
     printf '[PASS] %s (rejected with expected diagnostic)\n' "$name"
 }
 
+# Declaration specifiers use one bitmask for built-in and named types.
+check 42 'typedef int T; int main(void) { unsigned T = 42; return T; }' declspec-unsigned-shadows-typedef
+check 42 'typedef struct { int x; } S; int main(void) { S S; S.x = 42; return S.x; }' declspec-struct-alias-as-declarator
+check 42 'typedef enum { A = 42 } E; int main(void) { E E = A; return E; }' declspec-enum-alias-as-declarator
+check_error declspec-unsigned-struct 'int main(void) { unsigned struct S x; }' "1:27: error: invalid combination of type specifiers"
+check_error declspec-struct-unsigned 'int main(void) { struct S unsigned x; }' "1:27: error: invalid combination of type specifiers"
+check_error declspec-unsigned-enum 'int main(void) { unsigned enum E x; }' "1:27: error: invalid combination of type specifiers"
+check_error declspec-enum-unsigned 'enum E { A }; int main(void) { enum E unsigned x; }' "1:39: error: invalid combination of type specifiers"
+check_error declspec-void-int 'int main(void) { void int x; }' "1:23: error: invalid combination of type specifiers"
+check_error declspec-int-void 'int main(void) { int void x; }' "1:22: error: invalid combination of type specifiers"
+check_error declspec-alias-unsigned 'typedef int T; int main(void) { T unsigned x; }' "1:35: error: invalid combination of type specifiers"
+check_error declspec-duplicate-void 'typedef void void V;' "1:14: error: duplicate void type specifier"
+check_error declspec-struct-enum 'struct S { int x; }; struct S enum E x;' "1:31: error: invalid combination of type specifiers"
+
+# Ordinary identifier bindings preserve shadowing and file-scope functions.
+check 42 'int f(int f); int main(void) { return f(42); } int f(int f) { return f; }' symbol-function-binding-below-parameter
+check 42 'int X(void) { return 42; } int main(void) { { enum { X = 7 }; { typedef char X; { int X = 9; if (X != 9) return 0; } if (sizeof(X) != 1) return 0; } if (X != 7) return 0; } return X(); }' symbol-nested-kind-shadowing
+check 42 'typedef int T; int f(enum { T = 42 } x) { return T + x; } int main(void) { T x = 0; return f(x); }' symbol-parameter-enum-restores-typedef
+check 42 'int f(int n) { if (n == 0) return 42; { typedef char T; T x = 1; if (x != 1) return 0; } return f(n - 1); } int main(void) { return f(3); }' symbol-recursive-binding-after-block
+check_error symbol-parameter-hides-function-call 'int f(int f) { return f(); }' "1:23: error: called object is not a function"
+check_error symbol-file-conflict-hidden-by-parameter-enum 'typedef int f; int f(enum { f = 1 } x);' "1:20: error: function conflicts with typedef 'f'"
+check_error symbol-file-enum-conflict-hidden-by-parameter 'enum { f }; int f(int f);' "1:17: error: function conflicts with enumerator 'f'"
+
+# Typedef declarations and ordinary identifier scope.
+check 42 'typedef struct S; typedef struct S S; struct S { int x; }; int main(void) { S s; s.x = 42; return s.x; }' typedef-tag-only
+check 42 'typedef enum { A = 42 }; int main(void) { return A; }' typedef-enum-only
+check 42 'typedef int I; int main(void) { I x = 42; return x; }' typedef-integer
+check 42 'int main(void) { typedef int I; I x = 42; return x; }' typedef-local
+check 1 'typedef unsigned U; int main(void) { U x = 4294967295U; return x > 0; }' typedef-unsigned
+check 255 'typedef char C; int main(void) { C x = 255; return x; }' typedef-char
+check 1 'typedef unsigned char C; int main(void) { C x = 255; return x == 255; }' typedef-unsigned-char
+check 255 'typedef short S; int main(void) { S x = 65535; return x; }' typedef-short
+check 1 'typedef unsigned short S; int main(void) { S x = 65535; return x == 65535; }' typedef-unsigned-short
+check 8 'typedef long L; int main(void) { return sizeof(L); }' typedef-long
+check 1 'typedef unsigned long long U; int main(void) { U x = 18446744073709551615ULL; return x > 0; }' typedef-unsigned-long-long
+check 42 'typedef int I; typedef I J; int main(void) { J x = 42; return x; }' typedef-chain
+check 42 'typedef int *P; int main(void) { int x = 42; P p = &x; return *p; }' typedef-pointer
+check 42 'typedef int I; int main(void) { I x = 42; I *p = &x; return *p; }' typedef-pointer-declarator
+check 42 'typedef int A[3]; int main(void) { A a; a[2] = 42; return a[2]; }' typedef-array
+check 12 'typedef int A[3]; int main(void) { return sizeof(A); }' typedef-array-sizeof
+check 42 'typedef int A[3]; int f(A a) { return a[2]; } int main(void) { A a; a[2] = 42; return f(a); }' typedef-array-parameter
+check 42 'typedef struct { int x; } S; int main(void) { S s; s.x = 42; return s.x; }' typedef-anonymous-struct
+check 42 'typedef struct Node Node; struct Node { int value; Node *next; }; int main(void) { Node n; n.value = 42; n.next = &n; return n.next->value; }' typedef-forward-struct
+check 42 'typedef enum { ANSWER = 42 } E; int main(void) { E e = ANSWER; return e; }' typedef-enum
+check 42 'typedef int I; struct S { I x; }; int main(void) { struct S s; s.x = 42; return s.x; }' typedef-struct-member
+check 42 'typedef int I; I f(I x); I f(I x) { return x; } int main(void) { return f(42); }' typedef-function-signature
+check 42 'typedef void V; V f(V) { return; } int main(V) { f(); return 42; }' typedef-void
+check 42 'typedef int I; typedef I I; int main(void) { I x = 42; return x; }' typedef-repeat
+check 8 'typedef int *P; typedef int *P; int main(void) { return sizeof(P); }' typedef-repeat-pointer
+check 12 'typedef int A[3]; typedef int A[3]; int main(void) { return sizeof(A); }' typedef-repeat-array
+check 4 'typedef enum E { A } E; typedef enum E E; int main(void) { return sizeof(E); }' typedef-repeat-enum
+check 42 'int main(void) { int T = 42; { typedef char T; T x = 1; if (sizeof(x) != 1) return 0; } return T; }' typedef-hides-variable
+check 42 'enum { T = 42 }; int main(void) { { typedef char T; T x; if (sizeof(x) != 1) return 0; } return T; }' typedef-hides-enumerator
+check 42 'int T(void) { return 42; } int main(void) { { typedef char T; T x; if (sizeof(x) != 1) return 0; } return T(); }' typedef-hides-function
+check 42 'typedef int T; int main(void) { { int T = 42; return T; } }' typedef-variable-hides-alias
+check 42 'typedef int T; int main(void) { enum { T = 42 }; return T; }' typedef-enumerator-hides-alias
+check 42 'typedef int T; int f(int T) { return T; } int main(void) { return f(42); }' typedef-parameter-hides-alias
+check 42 'typedef int T; int f(int T); int main(void) { T x = 42; return x; }' typedef-prototype-restores-alias
+check 42 'typedef int T; int f(int T) { return T; } int main(void) { T x = 42; return f(x); }' typedef-definition-restores-alias
+check 4 'typedef int T; int main(void) { { typedef char T; if (sizeof(T) != 1) return 0; } return sizeof(T); }' typedef-block-restores-alias
+check 42 'typedef int T; int main(void) { int sum = 0; for (T i = 0; i < 7; i++) sum += 6; return sum; }' typedef-for-type
+check 4 'typedef int T; int main(void) { for (int T = 0; T < 1; T++) {} return sizeof(T); }' typedef-for-restores-alias
+check 4 'typedef int T; int main(void) { for (int i = 0; i < 1; i++) { typedef char T; if (sizeof(T) != 1) return 0; } return sizeof(T); }' typedef-for-body-restores-alias
+check 42 'typedef int T; int main(void) { goto T; T: return 42; }' typedef-label-namespace
+check 42 'typedef int T; struct T { int T; }; int main(void) { struct T t; t.T = 42; return t.T; }' typedef-tag-member-namespace
+check 42 'typedef int I, *P, A[2]; int main(void) { A a; P p = a; I x = 42; p[1] = x; return a[1]; }' typedef-multiple-declarators
+check 42 'typedef int I, A[sizeof(I)]; int main(void) { A a; a[3] = 42; return a[3]; }' typedef-earlier-declarator-visible
+check 42 'int typedef I; int main(void) { I x = 42; return x; }' typedef-storage-after-type
+check 42 'unsigned typedef long U; int main(void) { U x = 42; return x; }' typedef-storage-between-types
+check 42 'typedef int I; I typedef J; int main(void) { J x = 42; return x; }' typedef-storage-after-alias
+check 42 'struct S { int x; } typedef S; int main(void) { S s; s.x = 42; return s.x; }' typedef-storage-after-struct
+check 42 'typedef int T; int main(void) { int T = 42; return sizeof(T) + T - 4; }' typedef-sizeof-hidden-alias
+check 42 'typedef int T; int main(void) { T T = 42; return T; }' typedef-alias-as-variable-name
+check 42 'typedef int T; int f(T T) { return T; } int main(void) { return f(42); }' typedef-alias-as-parameter-name
+check 42 'typedef int T; int main(void) { T: ; T x = 42; return x; }' typedef-label-preserves-alias
+
+check_error typedef-conflicting-type 'typedef int T; typedef long T;' "1:29: error: conflicting typedef for 'T'"
+check_error typedef-conflicting-array 'typedef int A[2]; typedef int A[3];' "1:31: error: conflicting typedef for 'A'"
+check_error typedef-enum-integer-distinct 'typedef enum E { A } T; typedef int T;' "1:37: error: conflicting typedef for 'T'"
+check_error typedef-enum-pointer-distinct 'typedef enum E { A } *P; typedef int *P;' "1:39: error: conflicting typedef for 'P'"
+check_error typedef-variable-conflict 'int main(void) { typedef int T; int T; }' "1:37: error: variable conflicts with typedef 'T'"
+check_error typedef-local-conflict 'int main(void) { int T; typedef int T; }' "1:37: error: typedef conflicts with variable 'T'"
+check_error typedef-enumerator-conflict 'enum { T }; typedef int T;' "1:25: error: typedef conflicts with enumerator 'T'"
+check_error typedef-enum-name-conflict 'typedef int T; enum { T };' "1:23: error: enumerator conflicts with typedef 'T'"
+check_error typedef-function-conflict 'int f(void); typedef int f;' "1:26: error: typedef conflicts with function 'f'"
+check_error typedef-function-name-conflict 'typedef int f; int f(void);' "1:20: error: function conflicts with typedef 'f'"
+check_error typedef-function-conflict-hidden-by-parameter 'typedef int f; int f(int f) { return f; }' "1:20: error: function conflicts with typedef 'f'"
+check_error typedef-parameter-conflict 'int f(int x) { typedef int x; return x; }' "1:28: error: typedef conflicts with variable 'x'"
+check_error typedef-initializer 'typedef int T = 1;' "1:15: error: typedef cannot have an initializer"
+check_error typedef-missing-name 'typedef int;' "1:12: error: expect typedef name"
+check_error typedef-missing-pointer-alias 'typedef int *;' "1:14: error: expect typedef name"
+check_error typedef-duplicate-storage 'typedef typedef int T;' "1:9: error: duplicate typedef specifier"
+check_error typedef-storage-in-sizeof 'int main(void) { return sizeof(typedef int); }' "1:32: error: typedef is not allowed here"
+check_error typedef-storage-in-member 'struct S { typedef int T; };' "1:12: error: typedef is not allowed here"
+check_error typedef-storage-in-parameter 'int f(typedef int T);' "1:7: error: typedef is not allowed here"
+check_error typedef-name-as-expression 'typedef int T; int main(void) { return T; }' "1:40: error: typedef name is not an expression"
+check_error typedef-name-as-call 'typedef int T; int main(void) { return T(); }' "1:40: error: typedef name is not an expression"
+check_error typedef-storage-in-for 'int main(void) { for (typedef int T; ; ) {} }' "1:23: error: typedef is not allowed in a for initializer"
+check_error typedef-declaration-as-body 'typedef int T; int main(void) { if (1) T x; }' "1:40: error: expect statement"
+check_error typedef-typedef-as-body 'int main(void) { if (1) typedef int T; }' "1:25: error: expect statement"
+check_error typedef-function-scope-restored 'int f(void) { typedef int T; return 0; } int main(void) { T x; return 0; }' "1:59: error: undeclared identifier"
+check_error typedef-hidden-parameter-type 'typedef int T; int f(int T, T x);' "1:29: error: expect type specifier"
+check_error typedef-function-type-unsupported 'typedef int F(int);' "1:14: error: function typedefs are not supported yet"
+
 check 0 'int main() {}'
 check 42 'int main() { return 42; }'
 check 3  'int main() { return 1+2; }'
@@ -1502,7 +1606,7 @@ check_error duplicate-int-specifier 'int main(void) { int int x; return 0; }' '1
 check_error duplicate-unsigned-specifier 'int main(void) { unsigned unsigned x; return 0; }' '1:27: error: duplicate unsigned type specifier'
 check_error duplicate-int-after-unsigned 'int main(void) { int unsigned int x; return 0; }' '1:31: error: duplicate int type specifier'
 check_error duplicate-unsigned-after-int 'int main(void) { unsigned int unsigned x; return 0; }' '1:31: error: duplicate unsigned type specifier'
-check_error invalid-unsigned-void 'int main(void) { unsigned void x; return 0; }' '1:27: error: expect variable name'
+check_error invalid-unsigned-void 'int main(void) { unsigned void x; return 0; }' '1:27: error: invalid combination of type specifiers'
 
 # Diagnostic locations audited against GCC and Clang. Expected diagnostics
 # check our filename, line, and byte column.
@@ -1574,8 +1678,8 @@ check_error adjacent-literals 'int main() { return 1 2; }' "1:22: error: expect 
 check_error trailing-identifier 'int main() { return 42; garbage }' "1:25: error: undeclared identifier"
 check_error trailing-token 'int main() { return 42; @ }' "1:25: error: expect expr"
 check_error trailing-after-bare-return 'int main() { return; garbage }' '1:14: error: expect return expr'
-check_error empty-input '' "1:1: error: expect 'int'"
-check_error whitespace-only $' \t\n' "2:1: error: expect 'int'"
+check_error empty-input '' "1:1: error: expect type specifier"
+check_error whitespace-only $' \t\n' "2:1: error: expect type specifier"
 check_error undeclared-read 'int main() { return a; }' '1:21: error: undeclared identifier'
 check_error undeclared-assign 'int main() { a = 3; return 0; }' '1:14: error: undeclared identifier'
 check_error use-before-declared 'int main() { a=3; int a; return a; }' '1:14: error: undeclared identifier'
@@ -1604,13 +1708,20 @@ check_error invalid-int-char-specifiers 'int main() { int char; return 0; }' '1:
 for kw in \
     _Alignas _Alignof _Atomic _Bool _Complex _Generic _Imaginary \
 	     _Noreturn _Static_assert _Thread_local \
-	     auto break case const continue default do double else enum extern \
+	     auto break case const continue default do double else extern \
 	     float for goto if inline register restrict signed sizeof \
-	     static struct switch typedef union void volatile while; do
+	     static switch union volatile while; do
     check_error "reserved-kw-$kw" \
 		"int main() { int $kw; return 0; }" \
 		'1:18: error: expect variable name'
 done
+for kw in enum struct void; do
+    check_error "reserved-kw-$kw" \
+                "int main() { int $kw; return 0; }" \
+                '1:18: error: invalid combination of type specifiers'
+done
+check_error reserved-kw-typedef 'int main() { int typedef; return 0; }' \
+            '1:25: error: expect typedef name'
 check_error invalid-increment 'int main() { return ++1; }' \
 	    '1:21: error: invalid increment target'
 check_error invalid-increment 'int main() { return 1++; }' \

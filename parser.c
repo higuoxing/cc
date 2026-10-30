@@ -38,11 +38,11 @@ static AstNode *parse_expression(Parser *p);
 static AstNode *parse_condition(Parser *p);
 static AstNode *parse_conditional(Parser *p);
 static AstNode *parse_unary(Parser *p);
-static AstNode *parse_call_expr(Parser *p);
+static AstNode *parse_call_expr(Parser *p, Function *func);
 static AstNode *parse_postfix(Parser *p);
 static AstNode *parse_primary(Parser *p);
 static AstNode *parse_string_literal(Parser *p);
-static AstNode *parse_decl(Parser *p);
+static AstNode *parse_decl(Parser *p, bool allow_typedef);
 static AstNode *parse_return_stmt(Parser *p);
 static AstNode *parse_if_stmt(Parser *p);
 static AstNode *parse_while_stmt(Parser *p);
@@ -59,11 +59,17 @@ static AstNode *parse_stmt(Parser *p, bool allow_decl);
 static AstNode *parse_compound_stmt(Parser *p);
 static AstNode *parse_block(Parser *p);
 static AstNode *parse_external_declaration(Parser *p);
-static Type *parse_declspecs(Parser *p);
+static Type *parse_declspecs(Parser *p, bool *is_typedef);
+static AstNode *parse_typedef_declarators(Parser *p, Type *base);
 static Type *parse_declarator(Parser *p, Type *type, Token *name);
 static Type *parse_type_name(Parser *p);
 
-static bool is_type_specifier(TokenKind kind) {
+static bool is_type_specifier(Parser *p, Token token) {
+  TokenKind kind = token.kind;
+  if (kind == TOKEN_IDENTIFIER) {
+    Symbol *sym = find_symbol(p, token);
+    return sym && sym->kind == SYMBOL_TYPEDEF;
+  }
   return kind == TOKEN_CHAR || kind == TOKEN_SHORT || kind == TOKEN_INT ||
          kind == TOKEN_LONG || kind == TOKEN_UNSIGNED || kind == TOKEN_VOID ||
          kind == TOKEN_STRUCT || kind == TOKEN_ENUM;
@@ -78,18 +84,8 @@ static bool is_assignment_op(TokenKind ty) {
          ty == TOKEN_BIT_XOR_EQ || ty == TOKEN_BIT_OR_EQ;
 }
 
-static LocalVar *find_local_var(Parser *p, Token name) {
-  LocalVar *var;
-  for (var = p->locals; var; var = var->next) {
-    if (same_identifier(var->name, name))
-      return var;
-  }
-  return NULL;
-}
-
 static LocalVar *declare_local_var(Parser *p, Token name, Type *type) {
   LocalVar *var;
-  Enum *enumerator;
   int size;
   int alignment;
 
@@ -97,33 +93,19 @@ static LocalVar *declare_local_var(Parser *p, Token name, Type *type) {
   if (size < 0)
     error_at(p, name, "variable has incomplete type");
   alignment = type_alignment(type);
-  enumerator = find_enumerator(p, name);
-  if (enumerator && enumerator->scope_depth == p->scope_depth)
-    error_at(p, name, "variable conflicts with enumerator '%.*s'", name.len,
-             name.start);
-  for (var = p->locals; var && var->scope_depth == p->scope_depth;
-       var = var->next) {
-    if (same_identifier(var->name, name)) {
-      if (var->is_parameter)
-        error_at(p, name, "redefinition of parameter '%.*s'", name.len,
-                 name.start);
-      error_at(p, name, "duplicate local variable");
-    }
-  }
+  sema_check_variable_name(p, name, false);
 
   var = (LocalVar *)calloc(1, sizeof(LocalVar));
   if (!var)
     parse_error(p, "out of memory");
   var->name = name;
   var->type = type;
-  var->scope_depth = p->scope_depth;
   int padding = (alignment - p->stack_size % alignment) % alignment;
   if (size > INT_MAX - 15 - p->stack_size - padding)
     error_at(p, name, "local variables exceed supported stack size");
   p->stack_size += padding + size;
   var->offset = p->stack_size;
-  var->next = p->locals;
-  p->locals = var;
+  add_symbol(p, name, SYMBOL_VARIABLE, var, p->scope_depth);
   return var;
 }
 
@@ -150,8 +132,21 @@ static void parser_advance(Parser *p) {
   p->lookahead = lexer_next_token(&p->lexer);
 }
 
+static void enter_scope(Parser *p) { ++p->scope_depth; }
+
+/*
+ * Scope exit restores the outer bindings. File-scope function symbols remain
+ * visible even when they were added while parsing parameters at depth 1.
+ */
+static void leave_scope(Parser *p) {
+  while (p->symbols && p->symbols->scope_depth == p->scope_depth)
+    p->symbols = p->symbols->next;
+  while (p->tags && p->tags->scope_depth == p->scope_depth)
+    p->tags = p->tags->next;
+  --p->scope_depth;
+}
+
 static void reset_function_state(Parser *p) {
-  p->locals = NULL;
   p->labels = NULL;
   p->goto_refs = NULL;
   p->current_switch = NULL;
@@ -162,12 +157,10 @@ static void reset_function_state(Parser *p) {
 }
 
 static void parser_init(Parser *p, const char *filename, const char *source) {
-  p->locals = NULL;
   p->tags = NULL;
-  p->enums = NULL;
+  p->symbols = NULL;
   p->labels = NULL;
   p->goto_refs = NULL;
-  p->functions = NULL;
   p->call_refs = NULL;
   p->current_switch = NULL;
   p->current_function = NULL;
@@ -240,7 +233,8 @@ static AstNode *parse_unary(Parser *p) {
     Type *type;
     parser_advance(p);
     if (p->current.kind == TOKEN_LPAREN &&
-        is_type_specifier(p->lookahead.kind)) {
+        (p->lookahead.kind == TOKEN_TYPEDEF ||
+         is_type_specifier(p, p->lookahead))) {
       parser_advance(p);
       type = parse_type_name(p);
       parse_expect(p, TOKEN_RPAREN, "expect ')'");
@@ -299,10 +293,9 @@ static AstNode *parse_unary(Parser *p) {
  * postfix-expression:
  *   identifier '(' argument-expression-list_opt ')'
  */
-static AstNode *parse_call_expr(Parser *p) {
+static AstNode *parse_call_expr(Parser *p, Function *func) {
   AstNode *call;
   CallRef *ref;
-  Function *func;
   int nargs = 0;
 
   ref = (CallRef *)calloc(1, sizeof(CallRef));
@@ -312,11 +305,6 @@ static AstNode *parse_call_expr(Parser *p) {
   ref->loc = p->current;
   ref->next = p->call_refs;
   p->call_refs = ref;
-
-  func = find_function(p, ref->name);
-  if (func == NULL)
-    parse_error(p, "function '%.*s' not declared", ref->name.len,
-                ref->name.start);
 
   call = new_expr(p, AST_CALL, func->return_type);
   call->d.call.function = func;
@@ -360,9 +348,15 @@ static AstNode *parse_postfix(Parser *p) {
 
   if (p->current.kind == TOKEN_IDENTIFIER &&
       p->lookahead.kind == TOKEN_LPAREN) {
-    if (find_local_var(p, p->current) || find_enumerator(p, p->current))
+    Symbol *sym = find_symbol(p, p->current);
+    if (!sym)
+      parse_error(p, "function '%.*s' not declared", p->current.len,
+                  p->current.start);
+    if (sym->kind == SYMBOL_TYPEDEF)
+      parse_error(p, "typedef name is not an expression");
+    if (sym->kind != SYMBOL_FUNCTION)
       parse_error(p, "called object is not a function");
-    left = parse_call_expr(p);
+    left = parse_call_expr(p, sym->d.function);
   } else {
     left = parse_primary(p);
   }
@@ -455,17 +449,20 @@ static AstNode *parse_primary(Parser *p) {
 
   if (p->current.kind == TOKEN_IDENTIFIER) {
     AstNode *expr;
-    LocalVar *var = find_local_var(p, p->current);
-    Enum *enumerator = find_enumerator(p, p->current);
-    if (enumerator && (!var || enumerator->scope_depth > var->scope_depth)) {
-      expr = sema_enumerator_expr(p, enumerator, p->current);
+    Symbol *sym = find_symbol(p, p->current);
+    if (!sym)
+      parse_error(p, "undeclared identifier");
+    if (sym->kind == SYMBOL_TYPEDEF)
+      parse_error(p, "typedef name is not an expression");
+    if (sym->kind == SYMBOL_ENUMERATOR) {
+      expr = sema_enumerator_expr(p, sym->d.enumerator, p->current);
       parser_advance(p);
       return expr;
     }
-    if (!var)
+    if (sym->kind != SYMBOL_VARIABLE)
       parse_error(p, "undeclared identifier");
-    expr = new_expr(p, AST_VAR, var->type);
-    expr->d.variable.var = var;
+    expr = new_expr(p, AST_VAR, sym->d.variable->type);
+    expr->d.variable.var = sym->d.variable;
     /* Consume identifier. */
     parser_advance(p);
     return expr;
@@ -658,7 +655,7 @@ static Type *parse_struct_specifier(Parser *p) {
     Type *base;
     if (p->current.kind == TOKEN_EOF)
       parse_error(p, "expect '}'");
-    base = parse_declspecs(p);
+    base = parse_declspecs(p, NULL);
     for (;;) {
       *tail = parse_struct_member(p, type, base, &size);
       tail = &(*tail)->next;
@@ -681,42 +678,82 @@ static Type *parse_struct_specifier(Parser *p) {
 }
 
 /*
- * Consume declaration specifiers and return the base type only.
- * Unsigned, short and long may precede or follow the base type specifier.
+ * declaration-specifiers: (storage-class-specifier | type-specifier)+
+ * (C11 6.7, supported subset).
+ *
+ * Consume typedef and type specifiers in one loop. Passing NULL forbids typedef
+ * in type names, members and parameters. Once a base type is consumed, a
+ * typedef name can instead be the declarator's name.
  */
-static Type *parse_declspecs(Parser *p) {
+static Type *parse_declspecs(Parser *p, bool *is_typedef) {
   enum {
+    DECLSPEC_NONE = 0,
     DECLSPEC_INT = 1 << 0,
     DECLSPEC_CHAR = 1 << 1,
     DECLSPEC_UNSIGNED = 1 << 2,
     DECLSPEC_LONG = 1 << 3,
     DECLSPEC_SHORT = 1 << 4,
     DECLSPEC_LONG_LONG = 1 << 5,
+    DECLSPEC_VOID = 1 << 6,
+    DECLSPEC_STRUCT = 1 << 7,
+    DECLSPEC_ENUM = 1 << 8,
+    DECLSPEC_TYPEDEF_NAME = 1 << 9,
+    DECLSPEC_EXCLUSIVE = DECLSPEC_VOID | DECLSPEC_STRUCT | DECLSPEC_ENUM |
+        DECLSPEC_TYPEDEF_NAME,
   };
-  unsigned specs = 0;
+  unsigned specs = DECLSPEC_NONE;
+  Type *specified_type = NULL;
 
-  if (p->current.kind == TOKEN_ENUM)
-    return parse_enum_specifier(p);
-  if (p->current.kind == TOKEN_STRUCT)
-    return parse_struct_specifier(p);
-  if (p->current.kind == TOKEN_VOID) {
-    parser_advance(p);
-    return &builtin_type_void;
-  }
-  while (p->current.kind == TOKEN_INT || p->current.kind == TOKEN_CHAR ||
-         p->current.kind == TOKEN_UNSIGNED || p->current.kind == TOKEN_LONG ||
-         p->current.kind == TOKEN_SHORT) {
+  if (is_typedef)
+    *is_typedef = false;
+  while (p->current.kind == TOKEN_TYPEDEF || is_type_specifier(p, p->current)) {
+    TokenKind kind = p->current.kind;
     unsigned flag;
-    if (p->current.kind == TOKEN_INT)
+    if (kind == TOKEN_TYPEDEF) {
+      if (!is_typedef)
+        parse_error(p, "typedef is not allowed here");
+      if (*is_typedef)
+        parse_error(p, "duplicate typedef specifier");
+      *is_typedef = true;
+      parser_advance(p);
+      continue;
+    }
+    /*
+     * In T T, the second typedef name is the declarator's identifier.
+     */
+    if (kind == TOKEN_IDENTIFIER && specs)
+      break;
+    switch (kind) {
+    case TOKEN_INT:
       flag = DECLSPEC_INT;
-    else if (p->current.kind == TOKEN_CHAR)
+      break;
+    case TOKEN_CHAR:
       flag = DECLSPEC_CHAR;
-    else if (p->current.kind == TOKEN_UNSIGNED)
+      break;
+    case TOKEN_UNSIGNED:
       flag = DECLSPEC_UNSIGNED;
-    else if (p->current.kind == TOKEN_LONG)
+      break;
+    case TOKEN_LONG:
       flag = DECLSPEC_LONG;
-    else
+      break;
+    case TOKEN_SHORT:
       flag = DECLSPEC_SHORT;
+      break;
+    case TOKEN_VOID:
+      flag = DECLSPEC_VOID;
+      break;
+    case TOKEN_STRUCT:
+      flag = DECLSPEC_STRUCT;
+      break;
+    case TOKEN_ENUM:
+      flag = DECLSPEC_ENUM;
+      break;
+    case TOKEN_IDENTIFIER:
+      flag = DECLSPEC_TYPEDEF_NAME;
+      break;
+    default:
+      parse_error(p, "expect type specifier");
+    }
 
     if (flag == DECLSPEC_LONG && (specs & DECLSPEC_LONG))
       flag = DECLSPEC_LONG_LONG;
@@ -724,15 +761,31 @@ static Type *parse_declspecs(Parser *p) {
       parse_error(p, "duplicate %.*s type specifier", p->current.len,
                   p->current.start);
     }
+    if ((specs & DECLSPEC_EXCLUSIVE) || ((flag & DECLSPEC_EXCLUSIVE) && specs))
+      parse_error(p, "invalid combination of type specifiers");
     specs |= flag;
     if (((specs & DECLSPEC_CHAR) &&
          (specs & (DECLSPEC_INT | DECLSPEC_LONG | DECLSPEC_SHORT))) ||
         ((specs & DECLSPEC_SHORT) && (specs & DECLSPEC_LONG)))
       parse_error(p, "invalid combination of type specifiers");
-    parser_advance(p);
+    if (kind == TOKEN_STRUCT)
+      specified_type = parse_struct_specifier(p);
+    else if (kind == TOKEN_ENUM)
+      specified_type = parse_enum_specifier(p);
+    else {
+      if (kind == TOKEN_IDENTIFIER)
+        specified_type = find_symbol(p, p->current)->d.typedef_type;
+      parser_advance(p);
+    }
   }
 
   switch (specs) {
+  case DECLSPEC_VOID:
+    return &builtin_type_void;
+  case DECLSPEC_STRUCT:
+  case DECLSPEC_ENUM:
+  case DECLSPEC_TYPEDEF_NAME:
+    return specified_type;
   case DECLSPEC_INT:
     return &builtin_type_int;
   case DECLSPEC_CHAR:
@@ -760,8 +813,10 @@ static Type *parse_declspecs(Parser *p) {
   case DECLSPEC_UNSIGNED | DECLSPEC_LONG | DECLSPEC_LONG_LONG:
   case DECLSPEC_UNSIGNED | DECLSPEC_LONG | DECLSPEC_LONG_LONG | DECLSPEC_INT:
     return &builtin_type_unsigned_long_long;
+  case DECLSPEC_NONE:
+    parse_error(p, "expect type specifier");
   default:
-    parse_error(p, "expect 'int'");
+    parse_error(p, "invalid combination of type specifiers");
   }
 }
 
@@ -830,7 +885,7 @@ static Type *parse_declarator(Parser *p, Type *type, Token *name) {
  */
 static Type *parse_type_name(Parser *p) {
   Token name;
-  Type *type = parse_declspecs(p);
+  Type *type = parse_declspecs(p, NULL);
   type = parse_declarator(p, type, &name);
   if (name.kind == TOKEN_IDENTIFIER)
     error_at(p, name, "type name cannot contain an identifier");
@@ -838,16 +893,53 @@ static Type *parse_type_name(Parser *p) {
 }
 
 /*
+ * declaration: declaration-specifiers declarator (',' declarator)* ';'
+ * The declaration-specifiers contain typedef (C11 6.7, 6.7.8).
+ * Aliases allocate no storage and use an empty declaration node in blocks.
+ */
+static AstNode *parse_typedef_declarators(Parser *p, Type *base) {
+  AstNode *decl = new_ast_node(p, AST_DECL);
+  if ((base->kind == TYPE_STRUCT || base->kind == TYPE_ENUM) &&
+      p->current.kind == TOKEN_SEMICOLON) {
+    parser_advance(p);
+    return decl;
+  }
+  for (;;) {
+    Token name;
+    Type *type = parse_declarator(p, base, &name);
+    if (name.kind != TOKEN_IDENTIFIER)
+      error_at(p, name, "expect typedef name");
+    if (p->current.kind == TOKEN_ASSIGN)
+      parse_error(p, "typedef cannot have an initializer");
+    if (p->current.kind == TOKEN_LPAREN)
+      parse_error(p, "function typedefs are not supported yet");
+    declare_typedef(p, name, type);
+    if (p->current.kind != TOKEN_COMMA)
+      break;
+    parser_advance(p);
+  }
+  parse_semicolon(p);
+  return decl;
+}
+
+/*
  * declaration:
  *   declaration-specifiers declarator ['=' assignment-expression] ';'
  * Restricted to a single declarator.
  */
-static AstNode *parse_decl(Parser *p) {
+static AstNode *parse_decl(Parser *p, bool allow_typedef) {
   AstNode *decl;
+  Token loc = p->current;
   Token name;
   Type *type;
+  bool is_typedef;
 
-  type = parse_declspecs(p);
+  type = parse_declspecs(p, &is_typedef);
+  if (is_typedef) {
+    if (!allow_typedef)
+      error_at(p, loc, "typedef is not allowed in a for initializer");
+    return parse_typedef_declarators(p, type);
+  }
   if ((type->kind == TYPE_STRUCT || type->kind == TYPE_ENUM) &&
       p->current.kind == TOKEN_SEMICOLON) {
     decl = new_ast_node(p, AST_DECL);
@@ -1347,17 +1439,11 @@ static AstNode *parse_compound_stmt(Parser *p) {
 }
 
 static AstNode *parse_block(Parser *p) {
-  LocalVar *outer_locals = p->locals;
-  Tag *outer_tags = p->tags;
-  Enum *outer_enums = p->enums;
   AstNode *block;
 
-  ++p->scope_depth;
+  enter_scope(p);
   block = parse_compound_stmt(p);
-  p->locals = outer_locals;
-  p->tags = outer_tags;
-  p->enums = outer_enums;
-  --p->scope_depth;
+  leave_scope(p);
   return block;
 }
 
@@ -1369,21 +1455,25 @@ static AstNode *parse_block(Parser *p) {
 static AstNode *parse_external_declaration(Parser *p) {
   AstNode *fn;
   Function *func;
-  LocalVar *var;
+  LocalVar *params = NULL;
   Token func_name;
   Type *return_type;
+  bool is_typedef;
   Vector param_types;
   int nparams;
   int definition = 0;
   int explicit_params = 0;
   Token unnamed_param = {0};
-  Tag *outer_tags;
-  Enum *outer_enums;
 
   reset_function_state(p);
   vector_init(&param_types, sizeof(Type *));
   fn = new_ast_node(p, AST_FUNCTION);
-  return_type = parse_declspecs(p);
+  return_type = parse_declspecs(p, &is_typedef);
+  if (is_typedef) {
+    parse_typedef_declarators(p, return_type);
+    vector_free(&param_types);
+    return NULL;
+  }
   if ((return_type->kind == TYPE_STRUCT || return_type->kind == TYPE_ENUM) &&
       p->current.kind == TOKEN_SEMICOLON) {
     parser_advance(p);
@@ -1400,9 +1490,7 @@ static AstNode *parse_external_declaration(Parser *p) {
     error_at(p, func_name, "returning structs by value is not supported yet");
 
   parse_expect(p, TOKEN_LPAREN, "expect '('");
-  outer_tags = p->tags;
-  outer_enums = p->enums;
-  p->scope_depth = 1;
+  enter_scope(p);
 
   if (p->current.kind == TOKEN_VOID && p->lookahead.kind == TOKEN_RPAREN) {
     explicit_params = 1;
@@ -1415,13 +1503,17 @@ static AstNode *parse_external_declaration(Parser *p) {
       Token param_loc = p->current;
       Type *param_type;
 
-      param_type = parse_declspecs(p);
+      param_type = parse_declspecs(p, NULL);
       param_type = parse_declarator(p, param_type, &param_name);
       if (param_type->kind == TYPE_ARRAY) {
         param_type = pointer_to(param_type->base);
         if (!param_type)
           parse_error(p, "out of memory");
       }
+      if (param_type->kind == TYPE_VOID && param_types.len == 0 &&
+          param_name.kind != TOKEN_IDENTIFIER &&
+          p->current.kind == TOKEN_RPAREN)
+        break;
       if (param_type->kind == TYPE_VOID)
         error_at(p,
                  param_name.kind == TOKEN_IDENTIFIER ? param_name : p->current,
@@ -1436,26 +1528,18 @@ static AstNode *parse_external_declaration(Parser *p) {
         parse_error(p, "out of memory");
 
       if (param_name.kind == TOKEN_IDENTIFIER) {
-        Enum *enumerator = find_enumerator(p, param_name);
-        if (enumerator && enumerator->scope_depth == p->scope_depth)
-          error_at(p, param_name, "parameter conflicts with enumerator '%.*s'",
-                   param_name.len, param_name.start);
-        for (var = p->locals; var && var->scope_depth == p->scope_depth;
-             var = var->next) {
-          if (same_identifier(var->name, param_name))
-            error_at(p, param_name, "duplicate local variable");
-        }
+        sema_check_variable_name(p, param_name, true);
 
         param = (LocalVar *)calloc(1, sizeof(LocalVar));
         if (!param)
           parse_error(p, "out of memory");
         param->name = param_name;
         param->type = param_type;
-        param->scope_depth = p->scope_depth;
         param->is_parameter = true;
         param->offset = 8 * (int)param_types.len;
-        param->next = p->locals;
-        p->locals = param;
+        param->next = params;
+        params = param;
+        add_symbol(p, param_name, SYMBOL_VARIABLE, param, p->scope_depth);
       } else {
         if (p->current.kind != TOKEN_COMMA && p->current.kind != TOKEN_RPAREN)
           parse_error(p, "expect parameter name");
@@ -1487,21 +1571,15 @@ static AstNode *parse_external_declaration(Parser *p) {
   if (!definition) {
     /* Consume ';' */
     parser_advance(p);
-    p->tags = outer_tags;
-    p->enums = outer_enums;
-    p->locals = NULL;
-    p->scope_depth = 0;
+    leave_scope(p);
     return NULL;
   }
 
   p->current_function = func;
-  fn->d.function.params = p->locals;
+  fn->d.function.params = params;
   p->stack_size = 8 * nparams;
   fn->d.function.body = parse_compound_stmt(p);
-  p->tags = outer_tags;
-  p->enums = outer_enums;
-  p->locals = NULL;
-  p->scope_depth = 0;
+  leave_scope(p);
   check_gotos(p);
   fn->d.function.stack_size = p->stack_size;
   return fn;
@@ -1560,9 +1638,6 @@ static AstNode *parse_while_stmt(Parser *p) {
  */
 static AstNode *parse_for_stmt(Parser *p) {
   AstNode *for_node;
-  LocalVar *outer_locals;
-  Tag *outer_tags;
-  Enum *outer_enums;
 
   parse_expect(p, TOKEN_FOR, "expect 'for'");
   parse_expect(p, TOKEN_LPAREN, "expect '('");
@@ -1570,14 +1645,11 @@ static AstNode *parse_for_stmt(Parser *p) {
   for_node = new_ast_node(p, AST_FOR);
 
   /* A declaration in the init clause is scoped to the whole loop. */
-  outer_locals = p->locals;
-  outer_tags = p->tags;
-  outer_enums = p->enums;
-  ++p->scope_depth;
+  enter_scope(p);
 
-  if (is_type_specifier(p->current.kind)) {
+  if (p->current.kind == TOKEN_TYPEDEF || is_type_specifier(p, p->current)) {
     /* parse_decl consumes the declaration's own ';'. */
-    for_node->d.for_stmt.init = parse_decl(p);
+    for_node->d.for_stmt.init = parse_decl(p, false);
   } else if (p->current.kind == TOKEN_SEMICOLON) {
     /* Omitted init clause; consume the ';'. */
     parser_advance(p);
@@ -1600,10 +1672,7 @@ static AstNode *parse_for_stmt(Parser *p) {
   ++p->loop_depth;
   for_node->d.for_stmt.body = parse_stmt(p, /*allow_decl=*/false);
   --p->loop_depth;
-  p->locals = outer_locals;
-  p->tags = outer_tags;
-  p->enums = outer_enums;
-  --p->scope_depth;
+  leave_scope(p);
 
   return for_node;
 }
@@ -1694,7 +1763,7 @@ static AstNode *parse_goto_stmt(Parser *p) {
  * labeled-statement:
  *   identifier ':' statement
  * (C11 6.8.1; labels have function scope, so the label table survives
- *  block exit, unlike the locals list)
+ *  block exit, unlike ordinary identifier bindings)
  */
 static AstNode *parse_label_stmt(Parser *p) {
   AstNode *label_node;
@@ -1859,6 +1928,12 @@ static AstNode *parse_stmt(Parser *p, bool allow_decl) {
   if (p->current.kind == TOKEN_IDENTIFIER && p->lookahead.kind == TOKEN_COLON)
     return parse_label_stmt(p);
 
+  if (p->current.kind == TOKEN_TYPEDEF || is_type_specifier(p, p->current)) {
+    if (allow_decl)
+      return parse_decl(p, true);
+    parse_error(p, "expect statement");
+  }
+
   switch (p->current.kind) {
   case TOKEN_RETURN:
     return parse_return_stmt(p);
@@ -1884,21 +1959,6 @@ static AstNode *parse_stmt(Parser *p, bool allow_decl) {
     return parse_default_stmt(p);
   case TOKEN_LBRACE:
     return parse_block(p);
-  case TOKEN_CHAR:
-  case TOKEN_ENUM:
-  case TOKEN_INT:
-  case TOKEN_LONG:
-  case TOKEN_SHORT:
-  case TOKEN_STRUCT:
-  case TOKEN_UNSIGNED:
-  case TOKEN_VOID:
-    if (allow_decl)
-      return parse_decl(p);
-    /*
-     * C11 6.8: a declaration is not a statement, so it cannot be the
-     * body of if/while/for/do or a label.
-     */
-    parse_error(p, "expect statement");
   case TOKEN_SEMICOLON:
     stmt = new_ast_node(p, AST_EXPR_STMT);
     parser_advance(p);
@@ -1925,7 +1985,7 @@ AstNode *parse_translation_unit(const char *filename, const char *source) {
 
   /* Keep the empty-input diagnostics: the loop would just not run. */
   if (p.current.kind == TOKEN_EOF)
-    parse_error(&p, "expect 'int'");
+    parse_error(&p, "expect type specifier");
 
   while (p.current.kind != TOKEN_EOF) {
     /* Declarations return no AST node. */

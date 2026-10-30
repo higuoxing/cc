@@ -92,6 +92,7 @@ typedef enum {
   TOKEN_STRUCT,   /* 'struct' */
   TOKEN_SWITCH,   /* 'switch' */
   TOKEN_TILDE,    /* '~' */
+  TOKEN_TYPEDEF,  /* 'typedef' */
   TOKEN_UNSIGNED, /* 'unsigned' */
   TOKEN_VOID, /* 'void' */
   TOKEN_WHILE, /* 'while' */

@@ -37,22 +37,18 @@ typedef struct LocalVar {
   Token name;
   Type *type;
   int offset; /* Positive distance below %rbp */
-  int scope_depth;
   bool is_parameter;
   struct LocalVar *next;
 } LocalVar;
 
-/* Enumeration constants share the ordinary identifier namespace with objects. */
 typedef struct Enum {
   Token name;
   int value;
-  int scope_depth;
-  struct Enum *next;
 } Enum;
 
 /*
  * Labels have function scope (C11 6.2.1), so this table is not restored
- * when a block ends, unlike the locals list.
+ * when a block ends, unlike ordinary identifier bindings.
  */
 typedef struct Label {
   Token name;
@@ -70,8 +66,8 @@ typedef struct GotoRef {
 } GotoRef;
 
 /*
- * Function declarations and definitions seen so far; persists across the
- * translation unit. In C11, f() doesn't supply a prototype (6.7.6.3).
+ * Function declarations refer to a shared descriptor across redeclarations.
+ * In C11, f() doesn't supply a prototype (6.7.6.3).
  */
 typedef struct Function {
   Token name;
@@ -80,8 +76,30 @@ typedef struct Function {
   Type **param_types;
   int has_prototype; /* 0 for a declaration with an empty argument list. */
   int is_defined; /* 1 once a definition has been seen. */
-  struct Function *next;
 } Function;
+
+typedef enum {
+  SYMBOL_VARIABLE,
+  SYMBOL_FUNCTION,
+  SYMBOL_TYPEDEF,
+  SYMBOL_ENUMERATOR,
+} SymbolKind;
+
+/*
+ * A symbol can represent a variable, function, typedef name, or enumerator.
+ */
+typedef struct Symbol {
+  Token name;
+  SymbolKind kind;
+  int scope_depth;
+  union {
+    LocalVar *variable;
+    Function *function;
+    Type *typedef_type;
+    Enum *enumerator;
+  } d;
+  struct Symbol *next;
+} Symbol;
 
 /*
  * A function call whose argument count is checked against a visible
@@ -110,12 +128,10 @@ typedef struct {
   Token current;
   Token lookahead;
 
-  LocalVar *locals;
+  Symbol *symbols;
   Tag *tags;
-  Enum *enums;
   Label *labels;
   GotoRef *goto_refs;
-  Function *functions;
   Function *current_function;
   CallRef *call_refs;
   /*
@@ -196,9 +212,8 @@ typedef struct AstNode {
       Token name;
       struct AstNode *body;
       /*
-       * The parameters, in declaration order. Their LocalVar entries also
-       * sit in the function's locals chain for lookup, so the chain here
-       * is the snapshot taken before locals are declared.
+       * Parameters in reverse declaration order. This list is retained for
+       * codegen independently of their scope-bound symbol entries.
        */
       struct LocalVar *params;
       int stack_size;

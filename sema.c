@@ -25,30 +25,126 @@ bool same_identifier(Token a, Token b) {
   return a.len == b.len && strncmp(a.start, b.start, a.len) == 0;
 }
 
-Function *find_function(Parser *p, Token name) {
-  Function *fn;
-  for (fn = p->functions; fn != NULL; fn = fn->next) {
-    if (same_identifier(fn->name, name))
-      return fn;
+Symbol *find_symbol(Parser *p, Token name) {
+  Symbol *sym;
+  for (sym = p->symbols; sym; sym = sym->next)
+    if (same_identifier(sym->name, name))
+      return sym;
+  return NULL;
+}
+
+Symbol *find_symbol_in_scope(Parser *p, Token name, int scope_depth) {
+  Symbol *sym;
+  for (sym = p->symbols; sym; sym = sym->next) {
+    if (sym->scope_depth < scope_depth)
+      break;
+    if (sym->scope_depth == scope_depth && same_identifier(sym->name, name))
+      return sym;
   }
   return NULL;
 }
 
+/*
+ * Callers check redeclarations before binding a new name. A function is bound
+ * at file scope even while its parameters occupy an inner scope. Inserting by
+ * depth keeps lookup and scope exit valid in that case.
+ * The declaration pointer refers to the object selected by kind.
+ */
+Symbol *add_symbol(Parser *p, Token name, SymbolKind kind, void *declaration,
+                   int scope_depth) {
+  Symbol **link = &p->symbols;
+  Symbol *sym = calloc(1, sizeof(Symbol));
+  if (!sym)
+    error_at(p, name, "out of memory");
+  sym->name = name;
+  sym->kind = kind;
+  sym->scope_depth = scope_depth;
+  switch (kind) {
+  case SYMBOL_VARIABLE:
+    sym->d.variable = declaration;
+    break;
+  case SYMBOL_FUNCTION:
+    sym->d.function = declaration;
+    break;
+  case SYMBOL_TYPEDEF:
+    sym->d.typedef_type = declaration;
+    break;
+  case SYMBOL_ENUMERATOR:
+    sym->d.enumerator = declaration;
+    break;
+  }
+  while (*link && (*link)->scope_depth > scope_depth)
+    link = &(*link)->next;
+  sym->next = *link;
+  *link = sym;
+  return sym;
+}
+
+static const char *symbol_kind_name(SymbolKind kind) {
+  switch (kind) {
+  case SYMBOL_VARIABLE:
+    return "variable";
+  case SYMBOL_FUNCTION:
+    return "function";
+  case SYMBOL_TYPEDEF:
+    return "typedef";
+  case SYMBOL_ENUMERATOR:
+    return "enumerator";
+  }
+  return "identifier";
+}
+
+void sema_check_variable_name(Parser *p, Token name, bool is_parameter) {
+  Symbol *prev_sym = find_symbol_in_scope(p, name, p->scope_depth);
+  if (!prev_sym)
+    return;
+  if (prev_sym->kind == SYMBOL_VARIABLE) {
+    if (!is_parameter && prev_sym->d.variable->is_parameter)
+      error_at(p, name, "redefinition of parameter '%.*s'", name.len,
+               name.start);
+    error_at(p, name, "duplicate local variable");
+  }
+  error_at(p, name, "%s conflicts with %s '%.*s'",
+           is_parameter ? "parameter" : "variable",
+           symbol_kind_name(prev_sym->kind), name.len, name.start);
+}
+
 static AstNode *new_expr(Parser *p, AstKind kind, Type *type, Token loc);
 
-Enum *find_enumerator(Parser *p, Token name) {
-  Enum *enumerator;
-  for (enumerator = p->enums; enumerator; enumerator = enumerator->next)
-    if (same_identifier(enumerator->name, name))
-      return enumerator;
-  return NULL;
+/*
+ * C11 permits a typedef to be repeated in the same scope for the same type.
+ * An enum and its compatible integer type are still distinct types here.
+ */
+static bool same_typedef_type(Type *a, Type *b) {
+  if (a->kind != b->kind)
+    return false;
+  if (a->kind == TYPE_PTR || a->kind == TYPE_ARRAY)
+    return (a->kind != TYPE_ARRAY || a->array_len == b->array_len) &&
+           same_typedef_type(a->base, b->base);
+  return same_type(a, b);
+}
+
+void declare_typedef(Parser *p, Token name, Type *type) {
+  Symbol *prev_sym = find_symbol_in_scope(p, name, p->scope_depth);
+  if (prev_sym) {
+    if (prev_sym->kind != SYMBOL_TYPEDEF)
+      error_at(p, name, "typedef conflicts with %s '%.*s'",
+               symbol_kind_name(prev_sym->kind), name.len, name.start);
+    if (!same_typedef_type(prev_sym->d.typedef_type, type))
+      error_at(p, name, "conflicting typedef for '%.*s'", name.len, name.start);
+    return;
+  }
+  add_symbol(p, name, SYMBOL_TYPEDEF, type, p->scope_depth);
 }
 
 Enum *declare_enumerator(Parser *p, Token name, AstNode *initializer,
                          int64_t next_value) {
   Enum *enumerator;
-  LocalVar *var;
+  Symbol *prev_sym = find_symbol_in_scope(p, name, p->scope_depth);
   int64_t value = next_value;
+  if (prev_sym && prev_sym->kind == SYMBOL_TYPEDEF)
+    error_at(p, name, "enumerator conflicts with typedef '%.*s'", name.len,
+             name.start);
   if (initializer) {
     if (!is_integer(initializer->type))
       error_at(p, initializer->loc, "enumerator value must have integer type");
@@ -58,24 +154,18 @@ Enum *declare_enumerator(Parser *p, Token name, AstNode *initializer,
       (initializer && initializer->type->is_unsigned &&
        (uint64_t)value > INT32_MAX))
     error_at(p, name, "enumerator value is outside the range of int");
-  enumerator = find_enumerator(p, name);
-  if (enumerator && enumerator->scope_depth == p->scope_depth)
-    error_at(p, name, "duplicate enumerator '%.*s'", name.len, name.start);
-  for (var = p->locals; var; var = var->next)
-    if (var->scope_depth == p->scope_depth && same_identifier(var->name, name))
-      error_at(p, name, "enumerator conflicts with variable '%.*s'", name.len,
-               name.start);
-  if (p->scope_depth == 0 && find_function(p, name))
-    error_at(p, name, "enumerator conflicts with function '%.*s'", name.len,
-             name.start);
+  if (prev_sym) {
+    if (prev_sym->kind == SYMBOL_ENUMERATOR)
+      error_at(p, name, "duplicate enumerator '%.*s'", name.len, name.start);
+    error_at(p, name, "enumerator conflicts with %s '%.*s'",
+             symbol_kind_name(prev_sym->kind), name.len, name.start);
+  }
   enumerator = calloc(1, sizeof(Enum));
   if (!enumerator)
     error_at(p, name, "out of memory");
   enumerator->name = name;
   enumerator->value = (int)value;
-  enumerator->scope_depth = p->scope_depth;
-  enumerator->next = p->enums;
-  p->enums = enumerator;
+  add_symbol(p, name, SYMBOL_ENUMERATOR, enumerator, p->scope_depth);
   return enumerator;
 }
 
@@ -143,13 +233,15 @@ AstNode *sema_switch_condition(Parser *p, AstNode *expr) {
 Function *declare_function(Parser *p, Token name, Type *return_type,
                            Type **param_types, int nparams, bool has_prototype,
                            bool definition) {
-  Function *func = find_function(p, name);
-  Enum *enumerator;
+  Symbol *prev_sym = find_symbol_in_scope(p, name, 0);
+  Function *func = NULL;
   int i;
-  for (enumerator = p->enums; enumerator; enumerator = enumerator->next)
-    if (enumerator->scope_depth == 0 && same_identifier(enumerator->name, name))
-      error_at(p, name, "function conflicts with enumerator '%.*s'", name.len,
-               name.start);
+  if (prev_sym) {
+    if (prev_sym->kind != SYMBOL_FUNCTION)
+      error_at(p, name, "function conflicts with %s '%.*s'",
+               symbol_kind_name(prev_sym->kind), name.len, name.start);
+    func = prev_sym->d.function;
+  }
   if (func) {
     if (definition && func->is_defined)
       error_at(p, name, "redefinition of function '%.*s'", name.len,
@@ -180,8 +272,7 @@ Function *declare_function(Parser *p, Token name, Type *return_type,
       error_at(p, name, "out of memory");
     func->name = name;
     func->return_type = return_type;
-    func->next = p->functions;
-    p->functions = func;
+    add_symbol(p, name, SYMBOL_FUNCTION, func, 0);
   }
   if (has_prototype && !func->has_prototype) {
     if (nparams) {
