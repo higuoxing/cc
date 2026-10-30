@@ -23,6 +23,9 @@
 
 #include "parser.h"
 
+/*
+ * Emit assembly after assign_stack_offsets() has laid out the functions.
+ */
 extern void codegen(const AstNode *ast, FILE *out);
 
 #endif

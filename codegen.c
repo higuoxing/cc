@@ -53,27 +53,49 @@ static const char *argregs8[] = {"%dil", "%sil", "%dl", "%cl", "%r8b", "%r9b"};
 
 static void codegen_expr(AstNode *expr);
 
+static void codegen_bytes(const unsigned char *bytes, int length) {
+  int i;
+  for (i = 0; i < length; ++i) {
+    if (i % 16 == 0)
+      fprintf(out, "\t.byte ");
+    else
+      fprintf(out, ", ");
+    fprintf(out, "%u", (unsigned)bytes[i]);
+    if (i % 16 == 15 || i == length - 1)
+      fprintf(out, "\n");
+  }
+}
+
 /*
  * Emit the decoded bytes, including embedded zeros and the final terminator.
  * Preserve the caller's section and return the string's label number.
  */
 static int codegen_string_literal(AstNode *expr) {
   int seq = label_seq++;
-  int i;
-
   fprintf(out, "\t.pushsection .rodata\n");
   fprintf(out, ".L.string.%d:\n", seq);
-  for (i = 0; i < expr->type->array_len; ++i) {
-    if (i % 16 == 0)
-      fprintf(out, "\t.byte ");
-    else
-      fprintf(out, ", ");
-    fprintf(out, "%u", (unsigned)expr->d.string_literal.val[i]);
-    if (i % 16 == 15 || i == expr->type->array_len - 1)
-      fprintf(out, "\n");
-  }
+  codegen_bytes(expr->d.string_literal.val, expr->type->array_len);
   fprintf(out, "\t.popsection\n");
   return seq;
+}
+
+/*
+ * Copy the string into the local array, then zero any remaining elements.
+ * Repeated byte instructions keep large padding from bloating the code.
+ */
+static void codegen_local_string_array(Variable *var, AstNode *expr) {
+  int size = type_size(var->type);
+  int length = expr->type->array_len < size ? expr->type->array_len : size;
+  int seq = codegen_string_literal(expr);
+  fprintf(out, "\tleaq .L.string.%d(%%rip), %%rsi\n", seq);
+  fprintf(out, "\tleaq -%d(%%rbp), %%rdi\n", var->offset);
+  fprintf(out, "\tmovl $%d, %%ecx\n", length);
+  fprintf(out, "\trep movsb\n");
+  if (size > length) {
+    fprintf(out, "\txorl %%eax, %%eax\n");
+    fprintf(out, "\tmovl $%d, %%ecx\n", size - length);
+    fprintf(out, "\trep stosb\n");
+  }
 }
 
 static void codegen_addr(AstNode *expr) {
@@ -717,6 +739,10 @@ static void codegen_stmt(AstNode *stmt, int break_label, int continue_label,
     break;
   case AST_DECL:
     if (stmt->d.decl.init) {
+      if (stmt->d.decl.var->type->kind == TYPE_ARRAY) {
+        codegen_local_string_array(stmt->d.decl.var, stmt->d.decl.init);
+        break;
+      }
       codegen_expr(stmt->d.decl.init);
       if (stmt->d.decl.var->type->size == 8)
         fprintf(out, "\tmovq %%rax, -%d(%%rbp)\n", stmt->d.decl.var->offset);
@@ -769,17 +795,33 @@ static void codegen_global_variable(Variable *var) {
   Token name = var->name;
   int size = type_size(var->type);
   bool nonzero = false;
-  if (var->has_initializer)
-    nonzero = var->type->kind == TYPE_PTR
-                  ? var->initializer.address.base != NULL
-                  : var->initializer.value != 0;
+  AstNode *string = NULL;
+  int length = 0;
+  if (var->has_initializer) {
+    if (var->type->kind == TYPE_ARRAY) {
+      int i;
+      string = var->initializer.string;
+      length = string->type->array_len < size ? string->type->array_len : size;
+      for (i = 0; i < length; ++i)
+        if (string->d.string_literal.val[i])
+          nonzero = true;
+    } else if (var->type->kind == TYPE_PTR) {
+      nonzero = var->initializer.address.base != NULL;
+    } else {
+      nonzero = var->initializer.value != 0;
+    }
+  }
   fprintf(out, "\t.pushsection %s\n", nonzero ? ".data" : ".bss");
   fprintf(out, "\t.globl %.*s\n", name.len, name.start);
   fprintf(out, "\t.type %.*s, @object\n", name.len, name.start);
   fprintf(out, "\t.size %.*s, %d\n", name.len, name.start, size);
   fprintf(out, "\t.balign %d\n", type_alignment(var->type));
   fprintf(out, "%.*s:\n", name.len, name.start);
-  if (nonzero && var->type->kind == TYPE_PTR) {
+  if (nonzero && string) {
+    codegen_bytes(string->d.string_literal.val, length);
+    if (size > length)
+      fprintf(out, "\t.zero %d\n", size - length);
+  } else if (nonzero && var->type->kind == TYPE_PTR) {
     codegen_address_constant(&var->initializer.address);
   } else if (nonzero) {
     const char *directive;

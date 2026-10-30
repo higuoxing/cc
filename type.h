@@ -40,10 +40,10 @@ typedef enum {
 
 typedef struct Type {
   TypeKind kind;
-  int size; /* In bytes; -1 for an incomplete struct or enum. */
+  int size; /* In bytes; -1 for an incomplete type. */
   bool is_unsigned; /* Meaningful for integer types only. */
   struct Type *base; /* Array element, pointee, or enum's compatible integer type. */
-  int array_len; /* Element count for TYPE_ARRAY. */
+  int array_len; /* Element count for TYPE_ARRAY; -1 for an unknown bound. */
   Member *members; /* Declaration order for TYPE_STRUCT. */
   int alignment; /* Required alignment for TYPE_STRUCT. */
 } Type;

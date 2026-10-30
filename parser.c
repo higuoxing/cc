@@ -28,7 +28,6 @@
 #include "type.h"
 #include "vector.h"
 
-static Variable *declare_local_var(Parser *p, Token name, Type *type);
 static AstNode *new_ast_node(Parser *p, AstKind kind);
 static AstNode *new_expr(Parser *p, AstKind kind, Type *type);
 static void reset_function_state(Parser *p);
@@ -84,26 +83,6 @@ static bool is_assignment_op(TokenKind ty) {
          ty == TOKEN_BIT_XOR_EQ || ty == TOKEN_BIT_OR_EQ;
 }
 
-static Variable *declare_local_var(Parser *p, Token name, Type *type) {
-  Variable *var;
-  int size;
-  int alignment;
-
-  size = type_size(type);
-  if (size < 0)
-    error_at(p, name, "variable has incomplete type");
-  alignment = type_alignment(type);
-  sema_check_variable_name(p, name, false);
-
-  var = new_variable(p, name, type);
-  int padding = (alignment - p->stack_size % alignment) % alignment;
-  if (size > INT_MAX - 15 - p->stack_size - padding)
-    error_at(p, name, "local variables exceed supported stack size");
-  p->stack_size += padding + size;
-  var->offset = p->stack_size;
-  return var;
-}
-
 static AstNode *new_ast_node(Parser *p, AstKind kind) {
   AstNode *node;
   node = calloc(1, sizeof(AstNode));
@@ -148,7 +127,6 @@ static void reset_function_state(Parser *p) {
   p->current_function = NULL;
   p->scope_depth = 0;
   p->loop_depth = 0;
-  p->stack_size = 0;
 }
 
 static void parser_init(Parser *p, const char *filename, const char *source) {
@@ -161,7 +139,6 @@ static void parser_init(Parser *p, const char *filename, const char *source) {
   p->current_function = NULL;
   p->scope_depth = 0;
   p->loop_depth = 0;
-  p->stack_size = 0;
   lexer_init(&p->lexer, filename, source);
   p->previous = (Token){0};
   p->current = lexer_next_token(&p->lexer);
@@ -820,7 +797,7 @@ static Type *parse_declspecs(Parser *p, bool *is_typedef) {
  *   pointer_opt direct-declarator
  * direct-declarator:
  *   identifier
- *   identifier '[' constant-expression ']'
+ *   identifier '[' constant-expression_opt ']'
  * pointer:
  *   '*'
  *   '*' pointer
@@ -829,7 +806,7 @@ static Type *parse_declspecs(Parser *p, bool *is_typedef) {
  * The name may be omitted for a parameter declaration; callers enforce where
  * it is required. An omitted name retains the token at its expected position
  * for diagnostics, even if an array suffix is subsequently consumed.
- * Only fixed-size, one-dimensional arrays are supported.
+ * Only one-dimensional arrays with constant or unknown bounds are supported.
  * Function and parenthesized declarators come later.
  */
 static Type *parse_declarator(Parser *p, Type *type, Token *name) {
@@ -846,22 +823,22 @@ static Type *parse_declarator(Parser *p, Type *type, Token *name) {
   if (p->current.kind == TOKEN_LBRACKET) {
     Token loc = p->current;
     AstNode *bound;
-    int64_t length;
+    int64_t length = -1;
     parser_advance(p);
     if (type->kind == TYPE_VOID)
       error_at(p, loc, "array element has void type");
     if (type->size < 0)
       error_at(p, loc, "array element has incomplete type");
-    if (p->current.kind == TOKEN_RBRACKET)
-      parse_error(p, "array bound is required");
-    bound = parse_conditional(p);
-    if (!is_integer(bound->type))
-      error_at(p, bound->loc, "array bound must have integer type");
-    length = eval_const_expr(p, bound);
-    if (length == 0 || (length < 0 && !bound->type->is_unsigned))
-      error_at(p, bound->loc, "array bound must be positive");
-    if ((uint64_t)length > (uint64_t)(INT_MAX / type_size(type)))
-      error_at(p, bound->loc, "array size exceeds supported limit");
+    if (p->current.kind != TOKEN_RBRACKET) {
+      bound = parse_conditional(p);
+      if (!is_integer(bound->type))
+        error_at(p, bound->loc, "array bound must have integer type");
+      length = eval_const_expr(p, bound);
+      if (length == 0 || (length < 0 && !bound->type->is_unsigned))
+        error_at(p, bound->loc, "array bound must be positive");
+      if ((uint64_t)length > (uint64_t)(INT_MAX / type_size(type)))
+        error_at(p, bound->loc, "array size exceeds supported limit");
+    }
     parse_expect(p, TOKEN_RBRACKET, "expect ']'");
     type = array_of(type, (int)length);
     if (!type)
@@ -918,8 +895,32 @@ static AstNode *parse_typedef_declarators(Parser *p, Type *base) {
 }
 
 /*
+ * initializer: assignment-expression | '{' string-literal ','_opt '}'
+ * Brace lists other than a single string remain unsupported.
+ * The caller is positioned at '='.
+ */
+static AstNode *parse_initializer(Parser *p, Type *type) {
+  Token loc = p->current;
+  AstNode *expr;
+  if (type->kind == TYPE_STRUCT)
+    parse_error(p, "struct initializers are not supported yet");
+  parser_advance(p);
+  if (type->kind == TYPE_ARRAY && p->current.kind == TOKEN_LBRACE) {
+    if (p->lookahead.kind != TOKEN_STRING_LITERAL)
+      error_at(p, loc, "array initializers are not supported yet");
+    parser_advance(p);
+    expr = parse_assignment(p);
+    if (p->current.kind == TOKEN_COMMA)
+      parser_advance(p);
+    parse_expect(p, TOKEN_RBRACE, "expect '}'");
+    return expr;
+  }
+  return parse_assignment(p);
+}
+
+/*
  * declaration:
- *   declaration-specifiers declarator ['=' assignment-expression] ';'
+ *   declaration-specifiers declarator ['=' initializer] ';'
  * Restricted to a single declarator.
  */
 static AstNode *parse_decl(Parser *p, bool allow_typedef) {
@@ -951,19 +952,19 @@ static AstNode *parse_decl(Parser *p, bool allow_typedef) {
 
   decl = new_ast_node(p, AST_DECL);
   decl->loc = name;
-  decl->d.decl.var = declare_local_var(p, name, type);
+  sema_check_variable_name(p, name, false);
+  decl->d.decl.var = new_variable(p, name, type);
 
   if (p->current.kind == TOKEN_ASSIGN) {
-    if (type->kind == TYPE_STRUCT)
-      parse_error(p, "struct initializers are not supported yet");
+    decl->d.decl.init = parse_initializer(p, type);
     if (type->kind == TYPE_ARRAY)
-      parse_error(p, "array initializers are not supported yet");
-    /* Consume '=' */
-    parser_advance(p);
-    decl->d.decl.init = parse_assignment(p);
-    decl->d.decl.init =
-        sema_convert_expr(p, type, decl->d.decl.init, name, "initializer");
+      sema_initialize_string_array(p, decl->d.decl.var, decl->d.decl.init);
+    else
+      decl->d.decl.init =
+          sema_convert_expr(p, type, decl->d.decl.init, name, "initializer");
   }
+  if (type_size(decl->d.decl.var->type) < 0)
+    error_at(p, name, "variable has incomplete type");
 
   parse_semicolon(p);
 
@@ -1443,7 +1444,7 @@ static AstNode *parse_block(Parser *p) {
 }
 
 /*
- * File-scope objects support integer and pointer constant initializers.
+ * File-scope objects support scalar constants and character array strings.
  * Each declarator uses the same base type; compatible redeclarations produce
  * no additional AST node.
  */
@@ -1460,12 +1461,7 @@ static AstNode *parse_global_declaration(Parser *p, Type *base, Type *type,
                      "supported yet");
     decl = declare_global_variable(p, name, type);
     if (p->current.kind == TOKEN_ASSIGN) {
-      if (type->kind == TYPE_ARRAY)
-        parse_error(p, "array initializers are not supported yet");
-      if (type->kind == TYPE_STRUCT)
-        parse_error(p, "struct initializers are not supported yet");
-      parser_advance(p);
-      sema_initialize_global_variable(p, name, parse_assignment(p));
+      sema_initialize_global_variable(p, name, parse_initializer(p, type));
     }
     if (decl) {
       *tail = decl;
@@ -1536,7 +1532,7 @@ static AstNode *parse_function_declaration(Parser *p, Type *return_type,
         error_at(p,
                  param_name.kind == TOKEN_IDENTIFIER ? param_name : p->current,
                  "passing structs by value is not supported yet");
-      if (param_types.len >= (size_t)((INT_MAX - 15) / 8))
+      if (param_types.len >= INT_MAX)
         parse_error(p, "too many function parameters");
       if (!vector_push(&param_types, &param_type))
         parse_error(p, "out of memory");
@@ -1546,7 +1542,6 @@ static AstNode *parse_function_declaration(Parser *p, Type *return_type,
 
         param = new_variable(p, param_name, param_type);
         param->is_parameter = true;
-        param->offset = 8 * (int)param_types.len;
         param->next = params;
         params = param;
       } else {
@@ -1586,11 +1581,9 @@ static AstNode *parse_function_declaration(Parser *p, Type *return_type,
 
   p->current_function = func;
   fn->d.function.params = params;
-  p->stack_size = 8 * nparams;
   fn->d.function.body = parse_compound_stmt(p);
   leave_scope(p);
   check_gotos(p);
-  fn->d.function.stack_size = p->stack_size;
   return fn;
 }
 

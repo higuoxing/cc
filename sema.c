@@ -145,9 +145,15 @@ AstNode *declare_global_variable(Parser *p, Token name, Type *type) {
       error_at(p, name, "variable conflicts with %s '%.*s'",
                symbol_kind_name(prev_sym->kind), name.len, name.start);
     var = prev_sym->d.variable;
-    if (!same_type(var->type, type))
+    if (var->type->kind == TYPE_ARRAY && type->kind == TYPE_ARRAY &&
+        same_type(var->type->base, type->base) &&
+        (var->type->array_len < 0 || type->array_len < 0)) {
+      if (var->type->array_len < 0 && type->array_len >= 0)
+        var->type = type;
+    } else if (!same_type(var->type, type)) {
       error_at(p, name, "conflicting declaration of variable '%.*s'", name.len,
                name.start);
+    }
     return NULL;
   }
   var = new_variable(p, name, type);
@@ -158,9 +164,34 @@ AstNode *declare_global_variable(Parser *p, Token name, Type *type) {
 }
 
 /*
+ * A string initializes character array elements, including its terminator
+ * when space permits. Complete the object's type without changing a typedef.
+ */
+void sema_initialize_string_array(Parser *p, Variable *var, AstNode *expr) {
+  Type *type = var->type;
+  int length;
+  if (type->base->kind != TYPE_CHAR)
+    error_at(p, expr->loc, "string initializer requires a character array");
+  if (expr->kind != AST_STRING_LITERAL)
+    error_at(p, expr->loc,
+             "character array initializer must be a string literal");
+  length = expr->type->array_len;
+  if (type->array_len < 0) {
+    type = array_of(type->base, length);
+    if (!type)
+      error_at(p, expr->loc, "out of memory");
+    var->type = type;
+  } else if (type->array_len < length - 1) {
+    error_at(p, expr->loc, "string literal is too long for character array");
+  }
+  var->initializer.string = expr;
+  var->has_initializer = true;
+}
+
+/*
  * Evaluate after conversion so narrowing and signedness match the object's
- * type. Integers keep their stored bits; pointers keep a base and byte offset
- * so codegen can emit an address relocation without reading the object.
+ * type. Integers keep their stored bits, pointers keep a base and byte offset,
+ * and character arrays keep the string whose bytes initialize their storage.
  */
 void sema_initialize_global_variable(Parser *p, Token name, AstNode *expr) {
   Variable *var = find_symbol_in_scope(p, name, 0)->d.variable;
@@ -168,6 +199,10 @@ void sema_initialize_global_variable(Parser *p, Token name, AstNode *expr) {
   int width;
   if (var->has_initializer)
     error_at(p, name, "redefinition of variable '%.*s'", name.len, name.start);
+  if (var->type->kind == TYPE_ARRAY) {
+    sema_initialize_string_array(p, var, expr);
+    return;
+  }
   if (!is_integer(var->type) && var->type->kind != TYPE_PTR)
     error_at(p, name, "global initializer requires a scalar type");
   expr = sema_convert_expr(p, var->type, expr, name, "initializer");
@@ -189,9 +224,23 @@ void sema_initialize_global_variable(Parser *p, Token name, AstNode *expr) {
 
 void sema_check_global_variables(Parser *p) {
   Symbol *sym;
-  for (sym = p->symbols; sym; sym = sym->next)
-    if (sym->kind == SYMBOL_VARIABLE && type_size(sym->d.variable->type) < 0)
+  for (sym = p->symbols; sym; sym = sym->next) {
+    Variable *var;
+    if (sym->kind != SYMBOL_VARIABLE)
+      continue;
+    var = sym->d.variable;
+    /*
+     * A tentative definition with an unknown bound becomes one element
+     * when no declaration completes it before the end of the translation unit.
+     */
+    if (var->type->kind == TYPE_ARRAY && var->type->array_len < 0) {
+      var->type = array_of(var->type->base, 1);
+      if (!var->type)
+        error_at(p, sym->name, "out of memory");
+    }
+    if (type_size(var->type) < 0)
       error_at(p, sym->name, "variable has incomplete type");
+  }
 }
 
 /*

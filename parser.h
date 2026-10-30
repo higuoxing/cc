@@ -50,12 +50,13 @@ typedef struct Variable {
   bool is_parameter;
   bool has_initializer;
   /*
-   * The variable's type selects integer bits or an address. Integer values
-   * contain only the bits stored at the object's width.
+   * The variable's type selects integer bits, an address, or a string for a
+   * character array. Integer values contain only the object's stored bits.
    */
   union {
     uint64_t value;
     AddressConstant address;
+    AstNode *string;
   } initializer;
   struct Variable *next; /* Parameter list, in reverse declaration order. */
 } Variable;
@@ -160,7 +161,6 @@ typedef struct {
   AstNode *current_switch;
   int scope_depth;
   int loop_depth;
-  int stack_size;
 } Parser;
 
 typedef enum {
@@ -235,7 +235,7 @@ typedef struct AstNode {
        * codegen independently of their scope-bound symbol entries.
        */
       struct Variable *params;
-      int stack_size;
+      int stack_size; /* Assigned by stack layout after parsing. */
     } function;
 
     struct {

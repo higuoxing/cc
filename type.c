@@ -142,7 +142,8 @@ Type *enum_type(void) {
 }
 
 /*
- * The caller validates a positive length and a total size representable by int.
+ * A length of -1 denotes an unknown bound. Otherwise the caller validates a
+ * positive length and a total size representable by int.
  */
 Type *array_of(Type *base, int length) {
   Type *type = calloc(1, sizeof(Type));
@@ -151,7 +152,7 @@ Type *array_of(Type *base, int length) {
   type->kind = TYPE_ARRAY;
   type->base = base;
   type->array_len = length;
-  type->size = base->size * length;
+  type->size = length < 0 ? -1 : base->size * length;
   return type;
 }
 

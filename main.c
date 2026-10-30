@@ -22,6 +22,7 @@
 #include <sys/stat.h>
 
 #include "codegen.h"
+#include "layout.h"
 #include "parser.h"
 
 char *read_source(const char *path) {
@@ -111,7 +112,7 @@ int main(int argc, char **argv) {
   char *derived = NULL;
   FILE *out_file;
   char *source;
-  const AstNode *ast;
+  AstNode *ast;
   int i;
 
   for (i = 1; i < argc; ++i) {
@@ -133,6 +134,7 @@ int main(int argc, char **argv) {
 
   source = read_source(filename);
   ast = parse_translation_unit(filename, source);
+  assign_stack_offsets(filename, ast);
 
   if (output && strcmp(output, "-") == 0) {
     /* '-o -' writes assembly to stdout, like gcc and clang. */

@@ -151,6 +151,124 @@ function check_error() {
     printf '[PASS] %s (rejected with expected diagnostic)\n' "$name"
 }
 
+# Stack layout visits declarations after parsing each complete function.
+check 42 'int main(void) { { char s[] = "abc"; long n = 42; return s[3] + n; } }' stack-layout-nested-block
+check 42 'int main(void) { int n = 0; if (n) { char a[] = "a"; n = a[0]; } else { char b[] = "b"; long x = 42; n = x + b[1]; } return n; }' stack-layout-if-and-else
+check 42 'int main(void) { int n = 0; while (n < 42) { char a[16] = "abc"; long x = 1; n += x + a[15]; } return n; }' stack-layout-while-body
+check 42 'int main(void) { int n = 0; for (char a[] = "abc"; n < 42; n++) { short b = 42; if (a[3] || b != 42) return 0; } return n; }' stack-layout-for-init-and-body
+check 42 'int main(void) { int n = 0; do { char a[] = "abc"; long x = 42; n = x + a[3]; } while (0); return n; }' stack-layout-do-body
+check 42 'int main(void) { switch (2) { case 1: { char a[] = "a"; return a[0]; } case 2: { char b[8] = "abc"; long x = 42; return x + b[7]; } default: { short n = 0; return n; } } return 0; }' stack-layout-switch-cases
+check 42 'int main(void) { switch (2) { case 1: case 2: { char a[] = "abc"; long x = 42; return x + a[3]; } } return 0; }' stack-layout-stacked-cases
+check 42 'int main(void) { goto label; label: { char a[16] = "abc"; long x = 42; return x + a[15]; } }' stack-layout-label-body
+check 42 'int main(void) { typedef char A[]; struct S { long x; }; enum E { N = 42 }; A a = "abc"; struct S s; s.x = N; return s.x + a[3]; }' stack-layout-declaration-only-nodes
+check 42 'long f(char a,short b,int c,long d,char e,short f,int g,long h) { char s[] = "abc"; long x = a+b+c+d+e+f+g+h; return x+s[3]; } int main(void) { return f(1,2,3,4,5,6,7,14); }' stack-layout-parameter-homes-and-locals
+check 42 'int f(int n) { char a[16] = "abc"; if (n) return f(n-1) + a[15]; return 42; } int g(void) { short n = 7; return n; } int main(void) { return f(g()); }' stack-layout-separate-function-frames
+check 42 'int huge(void) { char a[2147483632]; return 0; } int main(void) { return 42; }' stack-layout-maximum-aligned-frame
+check 42 'int huge(int a,int b,int c,int d,int e,int f,int g,int h) { char buffer[2147483568]; return 0; } int main(void) { return 42; }' stack-layout-maximum-frame-with-parameters
+check_error stack-layout-second-function-overflow 'int first(void) { return 42; } int second(void) { char a[2147483647]; return 0; }' "1:56: error: local variables exceed supported stack size"
+check_error stack-layout-parameter-and-local-overflow 'int f(int a,int b,int c,int d,int e,int f,int g,int h) { char buffer[2147483569]; return 0; }' "1:63: error: local variables exceed supported stack size"
+check_error stack-layout-alignment-overflow 'int f(void) { char a[2147483625]; long b; return 0; }' "1:40: error: local variables exceed supported stack size"
+check_error stack-layout-for-init-overflow 'int f(void) { for (char a[2147483647]; 0;) {} return 0; }' "1:25: error: local variables exceed supported stack size"
+check_error stack-layout-unreachable-branch-overflow 'int f(void) { if (0) { char a[2147483647]; } return 0; }' "1:29: error: local variables exceed supported stack size"
+check_error stack-layout-switch-no-double-allocation 'int f(void) { switch (0) { case 0: { char a[1073741816]; } case 1: { char b[1073741817]; } } return 0; }' "1:75: error: local variables exceed supported stack size"
+
+# Character arrays initialized by strings, with inferred or explicit bounds.
+check 1 'int main(void) { char a[] = "abc"; return sizeof(a) == 4 && a[0] == 97 && a[2] == 99 && a[3] == 0; }' string-array-local-char-inferred
+check 1 'int main(void) { char a[3] = "abc"; return sizeof(a) == 3 && a[0] == 97 && a[2] == 99; }' string-array-local-char-exact
+check 1 'int main(void) { char a[4] = "abc"; return a[2] == 99 && a[3] == 0; }' string-array-local-char-terminated
+check 1 'int main(void) { char a[16] = "abc"; for (int i = 3; i < 16; i++) if (a[i]) return 0; return a[0] == 97; }' string-array-local-char-padding
+check 1 'int main(void) { unsigned char a[] = "abc"; return sizeof(a) == 4 && a[0] == 97 && a[2] == 99 && a[3] == 0; }' string-array-local-unsigned-char-inferred
+check 1 'int main(void) { unsigned char a[3] = "abc"; return sizeof(a) == 3 && a[0] == 97 && a[2] == 99; }' string-array-local-unsigned-char-exact
+check 1 'int main(void) { unsigned char a[4] = "abc"; return a[2] == 99 && a[3] == 0; }' string-array-local-unsigned-char-terminated
+check 1 'int main(void) { unsigned char a[16] = "abc"; for (int i = 3; i < 16; i++) if (a[i]) return 0; return a[0] == 97; }' string-array-local-unsigned-char-padding
+check 1 'int main(void) { char a[] = ""; return sizeof(a) == 1 && a[0] == 0; }' string-array-local-empty-inferred
+check 1 'int main(void) { char a[8] = ""; for (int i = 0; i < 8; i++) if (a[i]) return 0; return 1; }' string-array-local-empty-padded
+check 1 'int main(void) { char a[] = "ab" "cd"; return sizeof(a) == 5 && a[3] == 100 && a[4] == 0; }' string-array-local-concatenated
+check 1 'int main(void) { char a[] = "A\0B"; return sizeof(a) == 4 && a[0] == 65 && a[1] == 0 && a[2] == 66 && a[3] == 0; }' string-array-local-embedded-zero
+check 1 'int main(void) { char a[3] = "A\0B"; return sizeof(a) == 3 && a[1] == 0 && a[2] == 66; }' string-array-local-embedded-zero-exact
+check 1 'int main(void) { char a[8] = "\0\0"; for (int i = 0; i < 8; i++) if (a[i]) return 0; return 1; }' string-array-local-all-zero-string
+check 1 'int main(void) { char a[] = "\377\200"; return a[0] == -1 && a[1] == -128 && a[2] == 0; }' string-array-local-signed-bytes
+check 1 'int main(void) { unsigned char a[] = "\377\200"; return a[0] == 255 && a[1] == 128 && a[2] == 0; }' string-array-local-unsigned-bytes
+check 1 'int main(void) { char a[] = {"abc"}; return sizeof(a) == 4 && a[2] == 99 && a[3] == 0; }' string-array-local-braced
+check 1 'int main(void) { char a[8] = {"ab" "cd",}; return a[3] == 100 && a[4] == 0 && a[7] == 0; }' string-array-local-braced-trailing-comma
+check 1 'int main(void) { char a[] = "123456789abcdefg123456789abcdefgZ"; return sizeof(a) == 34 && a[32] == 90 && a[33] == 0; }' string-array-local-long-string
+check 1 'int main(void) { char a[] = "abc"; a[0] = 42; return a[0] == 42 && a[1] == 98; }' string-array-local-writable
+check 1 'int main(void) { char a[] = "abc"; char *p = a; p[1] = 42; return a[1] == 42; }' string-array-local-decay-and-store
+check 1 'char a[] = "abc"; int main(void) { return sizeof(a) == 4 && a[0] == 97 && a[2] == 99 && a[3] == 0; }' string-array-global-char-inferred
+check 1 'char a[3] = "abc"; int main(void) { return sizeof(a) == 3 && a[0] == 97 && a[2] == 99; }' string-array-global-char-exact
+check 1 'char a[4] = "abc"; int main(void) { return a[2] == 99 && a[3] == 0; }' string-array-global-char-terminated
+check 1 'char a[16] = "abc"; int main(void) { for (int i = 3; i < 16; i++) if (a[i]) return 0; return a[0] == 97; }' string-array-global-char-padding
+check 1 'unsigned char a[] = "abc"; int main(void) { return sizeof(a) == 4 && a[0] == 97 && a[2] == 99 && a[3] == 0; }' string-array-global-unsigned-char-inferred
+check 1 'unsigned char a[3] = "abc"; int main(void) { return sizeof(a) == 3 && a[0] == 97 && a[2] == 99; }' string-array-global-unsigned-char-exact
+check 1 'unsigned char a[4] = "abc"; int main(void) { return a[2] == 99 && a[3] == 0; }' string-array-global-unsigned-char-terminated
+check 1 'unsigned char a[16] = "abc"; int main(void) { for (int i = 3; i < 16; i++) if (a[i]) return 0; return a[0] == 97; }' string-array-global-unsigned-char-padding
+check 1 'char a[] = ""; int main(void) { return sizeof(a) == 1 && a[0] == 0; }' string-array-global-empty-inferred
+check 1 'char a[8] = ""; int main(void) { for (int i = 0; i < 8; i++) if (a[i]) return 0; return 1; }' string-array-global-empty-padded
+check 1 'char a[] = "ab" "cd"; int main(void) { return sizeof(a) == 5 && a[3] == 100 && a[4] == 0; }' string-array-global-concatenated
+check 1 'char a[] = "A\0B"; int main(void) { return sizeof(a) == 4 && a[0] == 65 && a[1] == 0 && a[2] == 66 && a[3] == 0; }' string-array-global-embedded-zero
+check 1 'char a[3] = "A\0B"; int main(void) { return sizeof(a) == 3 && a[1] == 0 && a[2] == 66; }' string-array-global-embedded-zero-exact
+check 1 'char a[8] = "\0\0"; int main(void) { for (int i = 0; i < 8; i++) if (a[i]) return 0; return 1; }' string-array-global-all-zero-string
+check 1 'char a[] = "\377\200"; int main(void) { return a[0] == -1 && a[1] == -128 && a[2] == 0; }' string-array-global-signed-bytes
+check 1 'unsigned char a[] = "\377\200"; int main(void) { return a[0] == 255 && a[1] == 128 && a[2] == 0; }' string-array-global-unsigned-bytes
+check 1 'char a[] = {"abc"}; int main(void) { return sizeof(a) == 4 && a[2] == 99 && a[3] == 0; }' string-array-global-braced
+check 1 'char a[8] = {"ab" "cd",}; int main(void) { return a[3] == 100 && a[4] == 0 && a[7] == 0; }' string-array-global-braced-trailing-comma
+check 1 'char a[] = "123456789abcdefg123456789abcdefgZ"; int main(void) { return sizeof(a) == 34 && a[32] == 90 && a[33] == 0; }' string-array-global-long-string
+check 1 'char a[] = "abc"; int main(void) { a[0] = 42; return a[0] == 42 && a[1] == 98; }' string-array-global-writable
+check 1 'char a[] = "abc"; int main(void) { char *p = a; p[1] = 42; return a[1] == 42; }' string-array-global-decay-and-store
+check 1 'typedef char A[]; A a = "abc"; A b = "x"; int main(void) { A c = "hello"; return sizeof(a) == 4 && sizeof(b) == 2 && sizeof(c) == 6; }' string-array-typedef-inferred-independent-bounds
+check 1 'typedef unsigned char A[8]; A a = "abc"; int main(void) { A b = "x"; return sizeof(a) == 8 && sizeof(b) == 8 && a[7] == 0 && b[7] == 0; }' string-array-typedef-fixed-bounds
+check 42 'char a[]; char *p = a; char a[] = "abc"; int main(void) { p[1] = 42; return a[1]; }' string-array-global-initializer-after-pointer
+check 1 'char a[]; char a[8]; char a[] = "abc"; int main(void) { return sizeof(a) == 8 && a[2] == 99 && a[7] == 0; }' string-array-global-composite-bound-before-initializer
+check 1 'char a[8]; char a[] = "abc"; char a[]; int main(void) { return sizeof(a) == 8 && a[7] == 0; }' string-array-global-repeated-unknown-bound
+check 1 'char a[] = "abc"; char a[4]; int main(void) { return sizeof(a) == 4 && a[3] == 0; }' string-array-global-compatible-known-bound
+check 1 'char a[] = "abc", b[8] = "x", c[] = "yz"; int main(void) { return sizeof(a) == 4 && sizeof(b) == 8 && sizeof(c) == 3 && b[7] == 0; }' string-array-global-multiple-arrays
+check 1 'char a[] = "abc", *p = a + 1; int main(void) { return p[0] == 98 && p[2] == 0; }' string-array-global-array-and-pointer
+check 1 'char a[] = "abc"; char *p = "abc"; int main(void) { a[0] = 42; return p[0] == 97 && a[0] == 42; }' string-array-array-and-literal-independent
+check 1 'int main(void) { char a[] = "abc"; char b[] = "abc"; a[0] = 42; return b[0] == 97 && a[0] == 42; }' string-array-local-independent-copies
+check 42 'int f(char a[]) { a[0] = 42; return a[0]; } int main(void) { char a[] = "abc"; return f(a); }' string-array-unknown-bound-parameter
+check 1 'int main(void) { long x = 1099511627776L; char a[3] = "abc"; long y = 1099511627777L; return a[2] == 99 && x == 1099511627776L && y == 1099511627777L; }' string-array-local-neighbor-layout
+check 1 'int main(void) { for (char a[] = "abc"; a[0] != 42; a[0] = 42) { if (a[3]) return 0; } return 1; }' string-array-for-initializer
+check 1 'int main(void) { for (int i = 0; i < 3; i++) { char a[64] = "abc"; if (a[0] != 97 || a[63]) return 0; a[0] = 1; a[63] = 1; } return 1; }' string-array-local-reinitialization
+check 1 'int f(int n) { char a[16] = "abc"; a[0] = n; if (n) f(n - 1); return a[0] == n && a[15] == 0; } int main(void) { return f(3); }' string-array-recursive-local-storage
+check 1 'int f(int a,int b,int c,int d,int e,int f,int g,int h) { char s[32] = "abc"; return a+b+c+d+e+f+g+h == 36 && s[0] == 97 && s[31] == 0; } int main(void) { return f(1,2,3,4,5,6,7,8); }' string-array-local-with-eight-parameters
+check 1 'int main(void) { char a[4096] = "abc"; for (int i = 3; i < 4096; i++) if (a[i]) return 0; return a[2] == 99; }' string-array-large-local-padding
+check 1 'char a[4096] = "abc"; int main(void) { for (int i = 3; i < 4096; i++) if (a[i]) return 0; return a[2] == 99; }' string-array-large-global-padding
+check 42 'char a[] = "A"; int f(void) { char b[] = "B"; return b[0] - a[0]; } char z[8] = ""; char *p = "C"; int x = 40; int main(void) { return x + f() + z[7] + p[0] - 66; }' string-array-interleaved-sections
+check 1 'char a[]; int main(void) { return a[0] == 0; }' string-array-tentative-unknown-bound
+check 1 'typedef char A[]; A a; A b = "abc"; int main(void) { return a[0] == 0 && sizeof(b) == 4; }' string-array-tentative-typedef-independent-bound
+check_error string-array-local-too-long 'int main(void) { char a[2] = "abc"; return 0; }' "1:30: error: string literal is too long for character array"
+check_error string-array-local-concat-too-long 'int main(void) { char a[2] = "ab" "cd"; return 0; }' "1:30: error: string literal is too long for character array"
+check_error string-array-local-embedded-zero-too-long 'int main(void) { char a[2] = "A\0B"; return 0; }' "1:30: error: string literal is too long for character array"
+check_error string-array-local-unsigned-too-long 'int main(void) { unsigned char a[1] = "ab"; return 0; }' "1:39: error: string literal is too long for character array"
+check_error string-array-local-integer-elements 'int main(void) { int a[] = "abc"; return 0; }' "1:28: error: string initializer requires a character array"
+check_error string-array-local-pointer-elements 'int main(void) { char *a[] = "abc"; return 0; }' "1:30: error: string initializer requires a character array"
+check_error string-array-local-pointer-source 'int main(void) { char *p; char a[] = p; return 0; }' "1:38: error: character array initializer must be a string literal"
+check_error string-array-local-pointer-expression 'int main(void) { char a[] = "abc" + 1; return 0; }' "1:35: error: character array initializer must be a string literal"
+check_error string-array-local-integer-source 'int main(void) { char a[] = 0; return 0; }' "1:29: error: character array initializer must be a string literal"
+check_error string-array-local-conditional-source 'int main(void) { char a[] = 1 ? "a" : "b"; return 0; }' "1:31: error: character array initializer must be a string literal"
+check_error string-array-local-extra-string 'int main(void) { char a[] = {"a", "b"}; return 0; }' "1:35: error: expect '}'"
+check_error string-array-local-missing-rbrace 'int main(void) { char a[] = {"a"; return 0; }' "1:33: error: expect '}'"
+check_error string-array-global-too-long 'char a[2] = "abc";' "1:13: error: string literal is too long for character array"
+check_error string-array-global-concat-too-long 'char a[2] = "ab" "cd";' "1:13: error: string literal is too long for character array"
+check_error string-array-global-embedded-zero-too-long 'char a[2] = "A\0B";' "1:13: error: string literal is too long for character array"
+check_error string-array-global-unsigned-too-long 'unsigned char a[1] = "ab";' "1:22: error: string literal is too long for character array"
+check_error string-array-global-integer-elements 'int a[] = "abc";' "1:11: error: string initializer requires a character array"
+check_error string-array-global-pointer-elements 'char *a[] = "abc";' "1:13: error: string initializer requires a character array"
+check_error string-array-global-pointer-source 'char *p; char a[] = p;' "1:21: error: character array initializer must be a string literal"
+check_error string-array-global-pointer-expression 'char a[] = "abc" + 1;' "1:18: error: character array initializer must be a string literal"
+check_error string-array-global-integer-source 'char a[] = 0;' "1:12: error: character array initializer must be a string literal"
+check_error string-array-global-conditional-source 'char a[] = 1 ? "a" : "b";' "1:14: error: character array initializer must be a string literal"
+check_error string-array-global-extra-string 'char a[] = {"a", "b"};' "1:18: error: expect '}'"
+check_error string-array-global-missing-rbrace 'char a[] = {"a";' "1:16: error: expect '}'"
+check_error string-array-global-redefinition 'char a[] = "abc"; char a[] = "x";' "1:24: error: redefinition of variable 'a'"
+check_error string-array-global-zero-redefinition 'char a[8] = ""; char a[8] = "";' "1:22: error: redefinition of variable 'a'"
+check_error string-array-global-conflicting-bound 'char a[] = "abc"; char a[5];' "1:24: error: conflicting declaration of variable 'a'"
+check_error string-array-global-known-bound-too-small 'char a[2]; char a[] = "abc";' "1:23: error: string literal is too long for character array"
+check_error string-array-incomplete-sizeof-type 'int main(void) { return sizeof(char[]); }' "1:25: error: sizeof cannot be applied to an incomplete type"
+check_error string-array-typedef-bound-stays-incomplete 'typedef char A[]; A a = "abc"; int main(void) { return sizeof(A); }' "1:56: error: sizeof cannot be applied to an incomplete type"
+check_error string-array-local-self-sizeof 'int main(void) { char a[] = sizeof(a); }' "1:29: error: sizeof cannot be applied to an incomplete type"
+check_error string-array-flexible-member-unsupported 'struct S { char a[]; };' "1:17: error: member has incomplete type"
+
 # Global pointer addresses are emitted as relocations with byte offsets.
 check 42 'int x = 42; int *p = &x; int main(void) { return *p; }' global-pointer-integer-address
 check 1 'char x = -1; char *p = &x; int main(void) { return *p == -1; }' global-pointer-char-address
@@ -916,7 +1034,7 @@ check_error sizeof-missing-operand 'int main(void) { return sizeof; }' '1:31: er
 check_error sizeof-type-without-parens 'int main(void) { return sizeof int; }' '1:32: error: expect expr'
 check_error sizeof-missing-rparen 'int main(void) { return sizeof(int; }' '1:35: error: expect '\'')'\'''
 check_error sizeof-missing-array-rbracket 'int main(void) { return sizeof(int[2); }' '1:37: error: expect '\'']'\'''
-check_error sizeof-incomplete-array 'int main(void) { return sizeof(int[]); }' '1:36: error: array bound is required'
+check_error sizeof-incomplete-array 'int main(void) { return sizeof(int[]); }' '1:25: error: sizeof cannot be applied to an incomplete type'
 check_error sizeof-void-array 'int main(void) { return sizeof(void[2]); }' '1:36: error: array element has void type'
 check_error sizeof-incomplete-struct-array 'int main(void) { return sizeof(struct S[2]); }' '1:40: error: array element has incomplete type'
 check_error sizeof-zero-array-bound 'int main(void) { return sizeof(int[0]); }' '1:36: error: array bound must be positive'
@@ -1252,7 +1370,7 @@ check 42 'int f(char a[1]) { *a = 42; return *a; } int main(void) { char x; retu
 
 check_error array-zero-bound 'int main(void) { int a[0]; return 0; }' '1:24: error: array bound must be positive'
 check_error array-negative-bound 'int main(void) { int a[-1]; return 0; }' '1:24: error: array bound must be positive'
-check_error array-missing-bound 'int main(void) { int a[]; return 0; }' '1:24: error: array bound is required'
+check_error array-missing-bound 'int main(void) { int a[]; return 0; }' '1:22: error: variable has incomplete type'
 check_error array-variable-bound 'int main(void) { int n = 3; int a[n]; return 0; }' '1:36: error: not an integer constant expression'
 check_error array-call-bound 'int f(void); int main(void) { int a[f()]; return 0; }' '1:40: error: not an integer constant expression'
 check_error array-pointer-bound 'int main(void) { int n; int a[&n]; return 0; }' '1:31: error: array bound must have integer type'
@@ -1299,7 +1417,7 @@ check_error struct-missing-member-semicolon 'struct S { int x };' '1:17: error: 
 check_error struct-missing-brace 'struct S { int x;' '1:18: error: expect '\''}'\'''
 check_error struct-missing-tag-or-body 'struct;' '1:7: error: expect struct tag or '\''{'\'''
 check_error struct-bit-field 'struct S { int x:3; };' '1:17: error: expect '\'';'\'''
-check_error struct-flexible-array 'struct S { int x; char data[]; };' '1:29: error: array bound is required'
+check_error struct-flexible-array 'struct S { int x; char data[]; };' '1:24: error: member has incomplete type'
 check_error struct-member-initializer 'struct S { int x = 1; };' '1:17: error: expect '\'';'\'''
 check_error struct-incomplete-local 'int main(void) { struct S s; return 0; }' '1:27: error: variable has incomplete type'
 check_error struct-incomplete-array 'int main(void) { struct S a[2]; return 0; }' '1:28: error: array element has incomplete type'

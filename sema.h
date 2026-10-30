@@ -42,6 +42,7 @@ extern void sema_check_variable_name(Parser *p, Token name, bool is_parameter);
 extern Variable *new_variable(Parser *p, Token name, Type *type);
 extern AstNode *declare_global_variable(Parser *p, Token name, Type *type);
 extern void sema_initialize_global_variable(Parser *p, Token name, AstNode *expr);
+extern void sema_initialize_string_array(Parser *p, Variable *var, AstNode *expr);
 extern void sema_check_global_variables(Parser *p);
 extern void declare_typedef(Parser *p, Token name, Type *type);
 extern Enum *declare_enumerator(Parser *p, Token name, AstNode *initializer,
