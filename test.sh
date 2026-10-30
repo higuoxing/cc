@@ -151,6 +151,99 @@ function check_error() {
     printf '[PASS] %s (rejected with expected diagnostic)\n' "$name"
 }
 
+# Global pointer addresses are emitted as relocations with byte offsets.
+check 42 'int x = 42; int *p = &x; int main(void) { return *p; }' global-pointer-integer-address
+check 1 'char x = -1; char *p = &x; int main(void) { return *p == -1; }' global-pointer-char-address
+check 1 'unsigned char x = 255; unsigned char *p = &x; int main(void) { return *p == 255; }' global-pointer-unsigned-char-address
+check 1 'short x = -32768; short *p = &x; int main(void) { return *p == -32768; }' global-pointer-short-address
+check 1 'unsigned short x = 65535; unsigned short *p = &x; int main(void) { return *p == 65535; }' global-pointer-unsigned-short-address
+check 1 'unsigned x = 4294967295U; unsigned *p = &x; int main(void) { return *p == 4294967295U; }' global-pointer-unsigned-address
+check 1 'long x = 1099511627776L; long *p = &x; int main(void) { return *p == 1099511627776L; }' global-pointer-long-address
+check 1 'unsigned long long x = 18446744073709551615ULL; unsigned long long *p = &x; int main(void) { return *p == 18446744073709551615ULL; }' global-pointer-unsigned-long-long-address
+check 42 'enum E { ANSWER = 42 }; enum E x = ANSWER; enum E *p = &x; int main(void) { return *p; }' global-pointer-enum-address
+check 42 'int x = 42; void *p = &x; int main(void) { int *q = p; return *q; }' global-pointer-void-address
+check 42 'int x = 42, *p = &x, **q = &p; int main(void) { return **q; }' global-pointer-pointer-object-address
+check 1 'void *p = &p; int main(void) { return p == &p; }' global-pointer-self-address
+check 42 'typedef int I; I x = 42; I *p = &x; int main(void) { return *p; }' global-pointer-typedef-address
+check 42 'int a[4]; int *p = a; int main(void) { a[0] = 42; return *p; }' global-pointer-array-decay-initializer
+check 42 'int a[4]; int *p = &a[2]; int main(void) { *p = 42; return a[2]; }' global-pointer-array-element-address
+check 42 'int a[4]; int *p = 2 + a; int main(void) { a[2] = 42; return *p; }' global-pointer-reversed-add-initializer
+check 4 'int a[4]; int *p = a + 4; int main(void) { return p - a; }' global-pointer-one-past-initializer
+check 42 'int a[4]; int *p = a + 3 - 2; int main(void) { a[1] = 42; return *p; }' global-pointer-folded-offset-initializer
+check 42 'int a[4]; int *p = &2[a]; int main(void) { a[2] = 42; return *p; }' global-pointer-reversed-subscript-initializer
+check 42 'int a[4]; int *p = &*(a + 2); int main(void) { a[2] = 42; return *p; }' global-pointer-address-deref-initializer
+check 42 'char a[4]; char *p = a + 2; int main(void) { a[2] = 42; return *p; }' global-pointer-byte-offset-initializer
+check 42 'short a[4]; short *p = a + 2; int main(void) { a[2] = 42; return *p; }' global-pointer-short-offset-initializer
+check 1 'long a[4]; long *p = a + 2; int main(void) { a[2] = 1099511627776L; return *p == 1099511627776L; }' global-pointer-long-offset-initializer
+check 42 'struct S { char c; long n; }; struct S s; long *p = &s.n; int main(void) { s.n = 42; return *p; }' global-pointer-member-address
+check 42 'struct S { char c; long n; }; struct S s; long *p = &(&s)->n; int main(void) { s.n = 42; return *p; }' global-pointer-arrow-member-address
+check 42 'struct I { char c; short n; }; struct O { char c; struct I i; }; struct O s; short *p = &s.i.n; int main(void) { s.i.n = 42; return *p; }' global-pointer-nested-member-address
+check 42 'struct S { char c; int a[3]; }; struct S s; int *p = s.a + 2; int main(void) { s.a[2] = 42; return *p; }' global-pointer-array-member-decay
+check 42 'struct S { char c; long n; }; struct S a[3]; long *p = &a[2].n; int main(void) { a[2].n = 42; return *p; }' global-pointer-struct-array-member-address
+check 42 'struct S; struct S s; struct S *p = &s; struct S { int n; }; int main(void) { p->n = 42; return s.n; }' global-pointer-completed-struct-address
+check 101 'char *p = "hello"; int main(void) { return p[1]; }' global-pointer-string-initializer
+check 0 'char *p = ""; int main(void) { return p[0]; }' global-pointer-empty-string-initializer
+check 1 'char *p = "he" "llo"; int main(void) { return p[4] == 111 && p[5] == 0; }' global-pointer-concatenated-string-initializer
+check 1 'char *p = "A\0B"; int main(void) { return p[0] == 65 && p[1] == 0 && p[2] == 66 && p[3] == 0; }' global-pointer-embedded-zero-string-initializer
+check 1 'char *p = "\377B"; int main(void) { return p[0] == -1 && p[1] == 66 && p[2] == 0; }' global-pointer-escaped-byte-string-initializer
+check 1 'char *p = "123456789abcdef"; int main(void) { return p[14] == 102 && p[15] == 0; }' global-pointer-string-full-byte-line
+check 1 'char *p = "123456789abcdefg"; int main(void) { return p[15] == 103 && p[16] == 0; }' global-pointer-string-next-byte-line
+check 1 'char *p = "123456789abcdefg123456789abcdefgZ"; int main(void) { return p[32] == 90 && p[33] == 0; }' global-pointer-string-multiple-byte-lines
+check 108 'char *p = "hello" + 2; int main(void) { return *p; }' global-pointer-string-offset-initializer
+check 111 'char *p = &"hello"[4]; int main(void) { return *p; }' global-pointer-string-subscript-initializer
+check 65 'void *p = "A"; int main(void) { char *q = p; return *q; }' global-pointer-void-string-initializer
+check 133 'char *p = "AB", *q = "CD"; int main(void) { return p[0] + q[1]; }' global-pointer-multiple-string-initializers
+check 42 'int x = 42; int *p = 1 ? &x : 0; int main(void) { return *p; }' global-pointer-conditional-address-initializer
+check 42 'int *f(void); int x = 42; int *p = 1 ? &x : f(); int main(void) { return *p; }' global-pointer-unevaluated-call-address-initializer
+check 42 'int x = 42; int *p; int *p = &x; int *p; int main(void) { return *p; }' global-pointer-address-tentative-definition
+check 42 'int x = 42; int *p; int *f(void) { return p; } int *p = &x; int main(void) { return *f(); }' global-pointer-initializer-after-function-reference
+check 42 'int x; int *p = &x; int x = 42; int main(void) { return *p; }' global-pointer-later-object-definition
+check 42 'int x = 10, y = 42; int *p = &x; int main(void) { p = &y; return *p; }' global-pointer-initialized-pointer-writable
+check 42 'int x = 0; int *p = &x; int main(void) { *p = 42; return x; }' global-pointer-initialized-target-writable
+check 42 'char *p = "A"; int z; int f(void) { char *q = "B"; return q[0] - p[0]; } char *r = "C"; int x = 40; int main(void) { return x + z + f() + r[0] - 66; }' global-pointer-data-bss-rodata-text-sections
+
+# Null pointer initializers and constant-expression diagnostics.
+check 1 'int *p = 0; int main(void) { return p == 0; }' global-pointer-null-initializer
+check 1 'void *p = 0; int main(void) { return p == 0; }' global-void-pointer-null-initializer
+check 1 'int **p = 0; int main(void) { return p == 0; }' global-pointer-to-pointer-null-initializer
+check 1 'struct S; struct S *p = 0; int main(void) { return p == 0; }' global-incomplete-pointer-null-initializer
+check 1 'int *p = 1 - 1; int main(void) { return p == 0; }' global-pointer-constant-null-initializer
+check 1 'int *p = 0ULL; int main(void) { return p == 0; }' global-pointer-unsigned-null-initializer
+check 1 'enum { ZERO }; int *p = ZERO; int main(void) { return p == 0; }' global-pointer-enum-null-initializer
+check 1 'typedef int *P; P p = 0; int main(void) { return p == 0; }' global-pointer-typedef-null-initializer
+check 1 'int *p; int *p = 0; int *p; int main(void) { return p == 0; }' global-pointer-null-tentative-definition
+check 1 'int x; int *p = 0 ? &x : 0; int main(void) { return p == 0; }' global-pointer-null-conditional-initializer
+check 1 'int *f(void); int *p = 0 ? f() : 0; int main(void) { return p == 0; }' global-pointer-null-unevaluated-call
+check 1 'int x; int *p = &*(0 ? &x : 0); int main(void) { return p == 0; }' global-pointer-null-address-deref
+check 42 'int x = 42; int *p = 0; int main(void) { p = &x; return *p; }' global-pointer-null-then-store
+check_error global-initializer-nonzero-integer 'int *p = 1;' "1:6: error: incompatible initializer type"
+check_error global-initializer-incompatible-pointer 'long x; int *p = &x;' "1:14: error: incompatible initializer type"
+check_error global-initializer-incompatible-string 'unsigned char *p = "A";' "1:16: error: incompatible initializer type"
+check_error global-initializer-pointer-read 'int *q; int *p = q;' "1:18: error: global initializer is not a constant expression"
+check_error global-initializer-initialized-pointer-read 'int x; int *q = &x; int *p = q;' "1:30: error: global initializer is not a constant expression"
+check_error global-initializer-null-pointer-read 'int *q = 0; int *p = q;' "1:22: error: global initializer is not a constant expression"
+check_error global-initializer-pointer-self-read 'int *p = p;' "1:10: error: global initializer is not a constant expression"
+check_error global-initializer-pointer-call 'int *f(void); int *p = f();' "1:24: error: global initializer is not a constant expression"
+check_error global-initializer-pointer-dereference 'int **q; int *p = *q;' "1:19: error: global initializer is not a constant expression"
+check_error global-initializer-pointer-member-read 'struct S { int *p; }; struct S s; int *p = s.p;' "1:45: error: global initializer is not a constant expression"
+check_error global-initializer-pointer-arrow-read 'struct S { int n; }; struct S *q; int *p = &q->n;' "1:44: error: global initializer is not a constant expression"
+check_error global-initializer-dynamic-offset 'int a[4], n; int *p = a + n;' "1:25: error: global initializer is not a constant expression"
+check_error global-initializer-dynamic-subscript 'int a[4], n; int *p = &a[n];' "1:23: error: global initializer is not a constant expression"
+check_error global-initializer-offset-call 'int f(void); int a[4]; int *p = a + f();' "1:35: error: global initializer is not a constant expression"
+check_error global-initializer-pointer-assignment 'int x, *q; int *p = (q = &x);' "1:24: error: global initializer is not a constant expression"
+check_error global-initializer-pointer-increment 'int *q; int *p = q++;' "1:19: error: global initializer is not a constant expression"
+check_error global-initializer-pointer-comma 'int x; int *p = (0, &x);' "1:19: error: global initializer is not a constant expression"
+check_error global-initializer-dynamic-condition 'int n, x; int *p = n ? &x : 0;' "1:22: error: global initializer is not a constant expression"
+check_error global-initializer-evaluated-pointer-call 'int *f(void); int x; int *p = 1 ? f() : &x;' "1:33: error: global initializer is not a constant expression"
+check_error global-initializer-pointer-zero-redefinition 'int *p = 0; int *p = 0;' "1:18: error: redefinition of variable 'p'"
+check_error global-initializer-pointer-address-redefinition 'int x; int *p = &x; int *p = &x;' "1:26: error: redefinition of variable 'p'"
+check_error global-initializer-pointer-scaled-offset-overflow 'long a[2]; long *p = a + 9223372036854775807L;' "1:24: error: address offset exceeds supported range"
+check_error global-initializer-pointer-unsigned-offset-overflow 'char a[2]; char *p = a + 18446744073709551615ULL;' "1:24: error: address offset exceeds supported range"
+check_error global-initializer-pointer-total-offset-overflow 'char a[2]; char *p = a + 9223372036854775807L + 1;' "1:47: error: address offset exceeds supported range"
+check_error global-initializer-pointer-sub-offset-overflow 'char a[2]; char *p = a - (-9223372036854775807L - 1);' "1:24: error: address offset exceeds supported range"
+check_error global-initializer-pointer-negative-offset-overflow 'long a[2]; long *p = a + (-9223372036854775807L - 1);' "1:24: error: address offset exceeds supported range"
+check_error global-initializer-pointer-offset-division-zero 'int a[2]; int *p = a + (1 / 0);' "1:31: error: division by zero in constant expression"
+
 # Scalar global initializers use the converted value at the object's width.
 check 42 'int x = 42; int main(void) { return x; }' global-int-initializer
 check 1 'char x = -1; int main(void) { return x == -1; }' global-char-negative-initializer
@@ -206,7 +299,6 @@ check_error global-initializer-increment 'int y; int x = y++;' "1:17: error: glo
 check_error global-initializer-evaluated-call 'int f(void); int x = 1 && f();' "1:24: error: global initializer is not a constant expression"
 check_error global-initializer-incompatible-string 'int x = "A";' "1:5: error: incompatible initializer type"
 check_error global-initializer-void-call 'void f(void); int x = f();' "1:23: error: void expression used as a value"
-check_error global-initializer-pointer-unsupported 'int *p = 0;' "1:8: error: global pointer initializers are not supported yet"
 check_error global-initializer-array-unsupported 'int a[2] = {1,2};' "1:10: error: array initializers are not supported yet"
 check_error global-initializer-struct-unsupported 'struct S { int x; }; struct S s = {1};' "1:33: error: struct initializers are not supported yet"
 check_error global-initializer-division-by-zero 'int x = 1 / 0;' "1:14: error: division by zero in constant expression"

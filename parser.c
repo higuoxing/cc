@@ -1443,7 +1443,7 @@ static AstNode *parse_block(Parser *p) {
 }
 
 /*
- * File-scope object declarations support integer constant initializers.
+ * File-scope objects support integer and pointer constant initializers.
  * Each declarator uses the same base type; compatible redeclarations produce
  * no additional AST node.
  */
@@ -1464,8 +1464,6 @@ static AstNode *parse_global_declaration(Parser *p, Type *base, Type *type,
         parse_error(p, "array initializers are not supported yet");
       if (type->kind == TYPE_STRUCT)
         parse_error(p, "struct initializers are not supported yet");
-      if (type->kind == TYPE_PTR)
-        parse_error(p, "global pointer initializers are not supported yet");
       parser_advance(p);
       sema_initialize_global_variable(p, name, parse_assignment(p));
     }

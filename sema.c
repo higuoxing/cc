@@ -111,6 +111,8 @@ void sema_check_variable_name(Parser *p, Token name, bool is_parameter) {
 
 static AstNode *new_expr(Parser *p, AstKind kind, Type *type, Token loc);
 static bool constant_integer_tree(Parser *p, AstNode *expr);
+static bool eval_address_constant(Parser *p, AstNode *expr,
+                                  AddressConstant *address);
 
 /*
  * Create a variable and register its name in the current scope. Callers check
@@ -157,7 +159,8 @@ AstNode *declare_global_variable(Parser *p, Token name, Type *type) {
 
 /*
  * Evaluate after conversion so narrowing and signedness match the object's
- * type. Keep only its stored bits; codegen will select the data directive.
+ * type. Integers keep their stored bits; pointers keep a base and byte offset
+ * so codegen can emit an address relocation without reading the object.
  */
 void sema_initialize_global_variable(Parser *p, Token name, AstNode *expr) {
   Variable *var = find_symbol_in_scope(p, name, 0)->d.variable;
@@ -165,16 +168,22 @@ void sema_initialize_global_variable(Parser *p, Token name, AstNode *expr) {
   int width;
   if (var->has_initializer)
     error_at(p, name, "redefinition of variable '%.*s'", name.len, name.start);
-  if (!is_integer(var->type))
-    error_at(p, name, "global initializer requires an integer or enum type");
-  width = type_size(var->type) * 8;
+  if (!is_integer(var->type) && var->type->kind != TYPE_PTR)
+    error_at(p, name, "global initializer requires a scalar type");
   expr = sema_convert_expr(p, var->type, expr, name, "initializer");
+  if (var->type->kind == TYPE_PTR) {
+    if (!eval_address_constant(p, expr, &var->initializer.address))
+      error_at(p, expr->loc, "global initializer is not a constant expression");
+    var->has_initializer = true;
+    return;
+  }
   if (!constant_integer_tree(p, expr))
     error_at(p, expr->loc, "global initializer is not a constant expression");
   value = (uint64_t)eval_const_expr(p, expr);
+  width = type_size(var->type) * 8;
   if (width < 64)
     value &= (UINT64_C(1) << width) - 1;
-  var->init_value = value;
+  var->initializer.value = value;
   var->has_initializer = true;
 }
 
@@ -427,6 +436,99 @@ static bool constant_integer_tree(Parser *p, AstNode *expr) {
 
 static bool null_pointer_constant(Parser *p, AstNode *expr) {
   return constant_integer_tree(p, expr) && eval_const_expr(p, expr) == 0;
+}
+
+static void add_address_offset(Parser *p, AddressConstant *address,
+                               int64_t offset, Token loc) {
+  if ((offset > 0 && address->offset > INT64_MAX - offset) ||
+      (offset < 0 && address->offset < INT64_MIN - offset))
+    error_at(p, loc, "address offset exceeds supported range");
+  address->offset += offset;
+}
+
+/*
+ * Form an object's address without reading its value. Subscripts and '->'
+ * already use pointer arithmetic and dereference nodes in the typed AST.
+ */
+static bool eval_lvalue_address(Parser *p, AstNode *expr,
+                                AddressConstant *address) {
+  switch (expr->kind) {
+  case AST_VAR:
+    if (!expr->d.variable.var->is_global)
+      return false;
+    address->base = expr;
+    address->offset = 0;
+    return true;
+  case AST_STRING_LITERAL:
+    address->base = expr;
+    address->offset = 0;
+    return true;
+  case AST_MEMBER:
+    if (!eval_lvalue_address(p, expr->d.member.base, address) || !address->base)
+      return false;
+    add_address_offset(p, address, expr->d.member.member->offset, expr->loc);
+    return true;
+  case AST_DEREF:
+    return eval_address_constant(p, expr->d.unary.operand, address);
+  default:
+    return false;
+  }
+}
+
+/*
+ * C11 6.6 permits null pointers and addresses of static objects, including
+ * an integer constant offset. Reading a pointer variable is not constant,
+ * even when that variable has a constant initializer of its own.
+ */
+static bool eval_address_constant(Parser *p, AstNode *expr,
+                                  AddressConstant *address) {
+  switch (expr->kind) {
+  case AST_CONVERT: {
+    AstNode *operand = expr->d.unary.operand;
+    if (operand->type->kind == TYPE_ARRAY)
+      return eval_lvalue_address(p, operand, address) && address->base;
+    if (operand->type->kind == TYPE_PTR)
+      return eval_address_constant(p, operand, address);
+    if (!null_pointer_constant(p, operand))
+      return false;
+    address->base = NULL;
+    address->offset = 0;
+    return true;
+  }
+  case AST_ADDR:
+    return eval_lvalue_address(p, expr->d.unary.operand, address);
+  case AST_CONDITIONAL:
+    if (!constant_integer_tree(p, expr->d.conditional.cond))
+      return false;
+    return eval_address_constant(p,
+                                 eval_const_expr(p, expr->d.conditional.cond)
+                                     ? expr->d.conditional.then_expr
+                                     : expr->d.conditional.else_expr,
+                                 address);
+  case AST_PTR_ADD:
+  case AST_PTR_SUB: {
+    AstNode *index = expr->d.binary.rhs;
+    int size = type_size(expr->d.binary.lhs->type->base);
+    int64_t offset;
+    if (!eval_address_constant(p, expr->d.binary.lhs, address) ||
+        !address->base || !constant_integer_tree(p, index))
+      return false;
+    offset = eval_const_expr(p, index);
+    if (index->type->is_unsigned && (uint64_t)offset > INT64_MAX)
+      error_at(p, expr->loc, "address offset exceeds supported range");
+    if (expr->kind == AST_PTR_SUB) {
+      if (offset == INT64_MIN)
+        error_at(p, expr->loc, "address offset exceeds supported range");
+      offset = -offset;
+    }
+    if (offset > INT64_MAX / size || offset < INT64_MIN / size)
+      error_at(p, expr->loc, "address offset exceeds supported range");
+    add_address_offset(p, address, offset * size, expr->loc);
+    return true;
+  }
+  default:
+    return false;
+  }
 }
 
 AstNode *sema_convert_expr(Parser *p, Type *target, AstNode *expr, Token loc,

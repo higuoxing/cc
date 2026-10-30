@@ -24,6 +24,15 @@
 
 typedef struct AstNode AstNode;
 
+/*
+ * An address constant names a global object or string literal plus a byte
+ * offset. A null pointer has no base and an offset of zero.
+ */
+typedef struct {
+  AstNode *base;
+  int64_t offset;
+} AddressConstant;
+
 /* Struct and enum tags share a namespace and follow block scope. */
 typedef struct Tag {
   Token name;
@@ -40,7 +49,14 @@ typedef struct Variable {
   bool is_global;
   bool is_parameter;
   bool has_initializer;
-  uint64_t init_value; /* Global integer initializer bits, at the object's width. */
+  /*
+   * The variable's type selects integer bits or an address. Integer values
+   * contain only the bits stored at the object's width.
+   */
+  union {
+    uint64_t value;
+    AddressConstant address;
+  } initializer;
   struct Variable *next; /* Parameter list, in reverse declaration order. */
 } Variable;
 

@@ -53,6 +53,29 @@ static const char *argregs8[] = {"%dil", "%sil", "%dl", "%cl", "%r8b", "%r9b"};
 
 static void codegen_expr(AstNode *expr);
 
+/*
+ * Emit the decoded bytes, including embedded zeros and the final terminator.
+ * Preserve the caller's section and return the string's label number.
+ */
+static int codegen_string_literal(AstNode *expr) {
+  int seq = label_seq++;
+  int i;
+
+  fprintf(out, "\t.pushsection .rodata\n");
+  fprintf(out, ".L.string.%d:\n", seq);
+  for (i = 0; i < expr->type->array_len; ++i) {
+    if (i % 16 == 0)
+      fprintf(out, "\t.byte ");
+    else
+      fprintf(out, ", ");
+    fprintf(out, "%u", (unsigned)expr->d.string_literal.val[i]);
+    if (i % 16 == 15 || i == expr->type->array_len - 1)
+      fprintf(out, "\n");
+  }
+  fprintf(out, "\t.popsection\n");
+  return seq;
+}
+
 static void codegen_addr(AstNode *expr) {
   switch (expr->kind) {
   case AST_VAR: {
@@ -72,25 +95,7 @@ static void codegen_addr(AstNode *expr) {
     fprintf(out, "\taddq $%d, %%rax\n", expr->d.member.member->offset);
     break;
   case AST_STRING_LITERAL: {
-    int seq = label_seq++;
-    int i;
-
-    /*
-     * Emit decoded bytes, including embedded zeros and the final terminator.
-     * Restore the text section before generating the address instruction.
-     */
-    fprintf(out, "\t.pushsection .rodata\n");
-    fprintf(out, ".L.string.%d:\n", seq);
-    for (i = 0; i < expr->type->array_len; ++i) {
-      if (i % 16 == 0)
-        fprintf(out, "\t.byte ");
-      else
-        fprintf(out, ", ");
-      fprintf(out, "%u", (unsigned)expr->d.string_literal.val[i]);
-      if (i % 16 == 15 || i == expr->type->array_len - 1)
-        fprintf(out, "\n");
-    }
-    fprintf(out, "\t.popsection\n");
+    int seq = codegen_string_literal(expr);
     fprintf(out, "\tleaq .L.string.%d(%%rip), %%rax\n", seq);
     break;
   }
@@ -739,21 +744,44 @@ static void codegen_stmt(AstNode *stmt, int break_label, int continue_label,
   }
 }
 
+static void codegen_address_constant(AddressConstant *address) {
+  AstNode *base = address->base;
+  if (base->kind == AST_STRING_LITERAL) {
+    int seq = codegen_string_literal(base);
+    fprintf(out, "\t.quad .L.string.%d", seq);
+  } else if (base->kind == AST_VAR) {
+    Token name = base->d.variable.var->name;
+    fprintf(out, "\t.quad %.*s", name.len, name.start);
+  } else {
+    fprintf(stderr, "invalid address constant in codegen\n");
+    exit(1);
+  }
+  if (address->offset)
+    fprintf(out, "%+" PRId64, address->offset);
+  fprintf(out, "\n");
+}
+
 /*
- * Zero-initialized globals use .bss; nonzero integer initializers use .data.
+ * Zero-initialized globals use .bss; nonzero initializers use .data.
  * Preserve the current section because objects can appear between functions.
  */
 static void codegen_global_variable(Variable *var) {
   Token name = var->name;
   int size = type_size(var->type);
-  bool nonzero = var->has_initializer && var->init_value != 0;
+  bool nonzero = false;
+  if (var->has_initializer)
+    nonzero = var->type->kind == TYPE_PTR
+                  ? var->initializer.address.base != NULL
+                  : var->initializer.value != 0;
   fprintf(out, "\t.pushsection %s\n", nonzero ? ".data" : ".bss");
   fprintf(out, "\t.globl %.*s\n", name.len, name.start);
   fprintf(out, "\t.type %.*s, @object\n", name.len, name.start);
   fprintf(out, "\t.size %.*s, %d\n", name.len, name.start, size);
   fprintf(out, "\t.balign %d\n", type_alignment(var->type));
   fprintf(out, "%.*s:\n", name.len, name.start);
-  if (nonzero) {
+  if (nonzero && var->type->kind == TYPE_PTR) {
+    codegen_address_constant(&var->initializer.address);
+  } else if (nonzero) {
     const char *directive;
     switch (size) {
     case 1:
@@ -772,7 +800,7 @@ static void codegen_global_variable(Variable *var) {
       fprintf(stderr, "unsupported global initializer size\n");
       exit(1);
     }
-    fprintf(out, "\t%s %" PRIu64 "\n", directive, var->init_value);
+    fprintf(out, "\t%s %" PRIu64 "\n", directive, var->initializer.value);
   } else {
     fprintf(out, "\t.zero %d\n", size);
   }
